@@ -7,6 +7,7 @@
 {
   name = "omarchy-update-rollback";
   node.pkgsReadOnly = false;
+  defaults = ./slow-host.nix;
 
   nodes.robot =
     { extendModules, lib, ... }:

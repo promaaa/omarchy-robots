@@ -1,4 +1,4 @@
-# Omarchy Robots
+<h1 align="center"><img src="branding/omarchy-robots-wordmark.svg" alt="Omarchy Robots" width="420"></h1>
 
 A small, opinionated operating system for robot computers, built on NixOS and
 [jetpack-nixos](https://github.com/anduril/jetpack-nixos). One file,
@@ -10,7 +10,9 @@ identity so an experiment can name the exact system it ran on.
 It is headless and deliberately plain: SSH keys only, a firewall that admits
 SSH and nothing else, a bounded history of system generations to roll back to,
 and one command, `omarchy-robot`, to inspect, validate, update and roll back.
-There is no robot runtime here yet; this is the base it will run on.
+There is no robot runtime here yet; this is the base it will run on. It boots
+as Omarchy Robots: its logo on the Jetson's UEFI boot screen, the installer's
+menus and the login banners.
 
 **Status:** OS-1 (v0.1.0 when released) runs and is tested in virtual
 machines. The Jetson targets evaluate and are partly built; none has run on
