@@ -26,7 +26,7 @@
       version = "0.1.0";
       boards = import ./modules/boards.nix;
       jetsonBoards = removeAttrs boards [ "vm" ];
-      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      pkgs = nixpkgs.legacyPackages.x86_64-linux.extend self.overlays.default;
 
       # Everything a robot system is made of; `target` names it in build.json.
       robotModules = target: [
@@ -35,6 +35,7 @@
         jetpack.nixosModules.default
         disko.nixosModules.disko
         {
+          nixpkgs.overlays = [ self.overlays.default ];
           omarchy.robot.build = {
             inherit target version;
             revision = self.rev or self.dirtyRev or "dirty";
@@ -57,7 +58,12 @@
       }
       // lib.mapAttrs (board: _: robot board [ (onBoard board) ]) boards;
 
+      overlays.default = final: _: {
+        omarchy-robot = final.callPackage ./pkgs/omarchy-robot { };
+      };
+
       packages.x86_64-linux = {
+        inherit (pkgs) omarchy-robot;
         vm = self.nixosConfigurations.vm.config.system.build.vm;
         default = self.packages.x86_64-linux.vm;
       };
@@ -79,7 +85,10 @@
       devShells.x86_64-linux.default = pkgs.mkShell {
         packages = with pkgs; [
           deadnix
+          mypy
           nixfmt
+          python3
+          ruff
           statix
         ];
       };

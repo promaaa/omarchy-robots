@@ -145,6 +145,7 @@ in
       jq
       lsof
       nvme-cli
+      omarchy-robot
       pciutils
       rsync
       tmux

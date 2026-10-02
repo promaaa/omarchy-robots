@@ -1,0 +1,18 @@
+/nix/store/0000000000000000000000000000000-cuda-samples-12.6/bin/deviceQuery Starting...
+
+ CUDA Device Query (Runtime API) version (CUDART static linking)
+
+Detected 1 CUDA Capable device(s)
+
+Device 0: "Orin"
+  CUDA Driver Version / Runtime Version          12.6 / 12.6
+  CUDA Capability Major/Minor version number:    8.7
+  Total amount of global memory:                 62841 MBytes (65893093376 bytes)
+  (016) Multiprocessors, (128) CUDA Cores/MP:    2048 CUDA Cores
+  GPU Max Clock rate:                            1300 MHz (1.30 GHz)
+  Integrated GPU sharing Host Memory:            Yes
+  Compute Mode:
+     < Default (multiple host threads can use ::cudaSetDevice() with device simultaneously) >
+
+deviceQuery, CUDA Driver = CUDART, CUDA Driver Version = 12.6, CUDA Runtime Version = 12.6, NumDevs = 1
+Result = PASS

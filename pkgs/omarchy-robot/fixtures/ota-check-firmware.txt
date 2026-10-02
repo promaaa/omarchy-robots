@@ -1,0 +1,2 @@
+Current firmware version is : 36.5.2-gcid-00000000
+Expected firmware version is: 36.5.2-gcid-00000000
