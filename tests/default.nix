@@ -19,20 +19,12 @@ let
     '';
 
   # Per board: jetpack-nixos receives the mapped settings, the kernel is
-  # jetpack-nixos's, CUDA stays off nixpkgs-wide, and the system evaluates,
-  # also with the GPU stack and a power mode (where the unfree predicate is
-  # exercised), as do its flash script and installer image.
+  # jetpack-nixos's, CUDA stays off nixpkgs-wide, and the system and its flash
+  # script evaluate. They are the flake's own outputs, evaluated once.
   evaluates =
     board: spec:
     let
-      system = robot board [ (onBoard board) ];
-      gpu = robot board [
-        (onBoard board)
-        {
-          omarchy.robot.gpu.enable = lib.mkForce true;
-          omarchy.robot.power.mode = lib.mkForce 0;
-        }
-      ];
+      system = self.nixosConfigurations.${board};
       inherit (system) config;
       jp = config.hardware.nvidia-jetpack;
       expect = cond: what: lib.assertMsg cond "${board}: ${what}";
@@ -48,16 +40,36 @@ let
     assert expect (
       !jp.configureCuda && !(system.pkgs.config.cudaSupport or false)
     ) "CUDA is enabled across nixpkgs";
-    assert expect (
-      gpu.config.services.nvpmodel.profileNumber == 0
-    ) "power.mode does not reach nvpmodel";
     pkgs.writeText "eval-${board}" (
       lib.concatMapStrings (drv: builtins.unsafeDiscardStringContext drv.drvPath + "\n") [
         config.system.build.toplevel
-        gpu.config.system.build.toplevel
         self.packages.x86_64-linux."flash-${board}"
-        self.packages.aarch64-linux."installer-${board}"
       ]
+    );
+
+  # With the GPU stack and a power mode, once per JetPack major (the stack is
+  # the same across its boards): the unfree predicate covers CUDA and
+  # TensorRT, and power.mode reaches nvpmodel.
+  evaluatesWithGpu =
+    board:
+    let
+      inherit
+        (self.nixosConfigurations.${board}.extendModules {
+          modules = [
+            {
+              omarchy.robot.gpu.enable = lib.mkForce true;
+              omarchy.robot.power.mode = lib.mkForce 0;
+            }
+          ];
+        })
+        config
+        ;
+    in
+    assert lib.assertMsg (
+      config.services.nvpmodel.profileNumber == 0
+    ) "${board}: power.mode does not reach nvpmodel";
+    pkgs.writeText "eval-gpu-${board}" (
+      builtins.unsafeDiscardStringContext config.system.build.toplevel.drvPath
     );
 
   # Invalid robot.nix combinations fail the assertion that explains why.
@@ -148,6 +160,8 @@ in
   vm-update-rollback = pkgs.testers.runNixOSTest (
     import ./update-rollback.nix { inherit robotModules onBoard; }
   );
+  eval-gpu-orin-agx-devkit = evaluatesWithGpu "orin-agx-devkit";
+  eval-gpu-thor-agx-devkit = evaluatesWithGpu "thor-agx-devkit";
 }
 // lib.mapAttrs' (
   board: spec: lib.nameValuePair "eval-${board}" (evaluates board spec)
