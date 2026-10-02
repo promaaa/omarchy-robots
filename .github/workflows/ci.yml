@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      jetson:
+        description: Also build the orin-agx-devkit system on an arm64 runner (hours)
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    name: nix flake check (x86_64, VM tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v5
+      - name: Let the runner user open /dev/kvm
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+            sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          else
+            echo "No /dev/kvm: VM tests run under TCG emulation."
+          fi
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-check-${{ hashFiles('flake.lock', '**/*.nix', 'pkgs/**') }}
+          restore-prefixes-first-match: nix-check-
+          gc-max-store-size-linux: 6G
+      - run: nix flake check -L
+
+  jetson:
+    name: build orin-agx-devkit (aarch64)
+    if: github.event_name == 'workflow_dispatch' && inputs.jetson
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk space for the BSP and kernel build
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache && df -h /
+      - uses: cachix/install-nix-action@v31
+      - run: nix build -L .#nixosConfigurations.orin-agx-devkit.config.system.build.toplevel
+      - run: nix path-info -Sh ./result
