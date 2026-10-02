@@ -132,6 +132,9 @@ in
         ;
     }
   );
+  vm-update-rollback = pkgs.testers.runNixOSTest (
+    import ./update-rollback.nix { inherit robotModules onBoard; }
+  );
 }
 // lib.mapAttrs' (
   board: spec: lib.nameValuePair "eval-${board}" (evaluates board spec)
