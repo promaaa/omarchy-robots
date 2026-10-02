@@ -106,12 +106,12 @@ flash script and installer image evaluate, with the per-board assertions of
 
 | Target (`board`) | Status | System closure | Built | Last verified |
 |---|---|---|---|---|
-| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots) | 1.3 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
-| `orin-agx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
+| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots) | 1.1 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
+| `orin-agx-devkit` | builds: system, flash script | 1.4 GiB | system (natively, GitHub arm64 runner), flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nx-super-devkit` | evaluates | | | 2026-10-02 |
-| `orin-nano-devkit` | evaluates | | | 2026-10-02 |
-| `orin-nano-super-devkit` | evaluates | | | 2026-10-02 |
+| `orin-nx-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
+| `orin-nano-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
+| `orin-nano-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
 | `thor-agx-devkit` | evaluates | | | 2026-10-02 |
 
 Pinned: nixpkgs nixos-26.05 (`4feb8eb`), jetpack-nixos `825dfea` (JetPack
@@ -129,6 +129,10 @@ In CI (GitHub `ubuntu-24.04`, 2 CPUs, 7.8 GiB RAM, KVM) the VM boots in
 store. Rehearsing the runbook on the vm board under TCG: the installer answers
 SSH 154 s after power-on, `omarchy-install` takes 22 min, and
 `nixos-rebuild switch --target-host` deploys a time zone change in 56 s.
+The `orin-agx-devkit` system built natively on a GitHub `ubuntu-24.04-arm`
+runner in about an hour from an empty store, Tegra kernel included (the
+1.4 GiB closure predates the rc.2 closure reductions); once the Orin kernel
+and firmware were built, each further Orin flash script took 70 to 82 s.
 
 ## Bring-up runbook
 
@@ -199,7 +203,9 @@ sudo dd if=$(echo installer/iso/*.iso) of=/dev/sdX bs=4M conv=fsync status=progr
 ```
 
 4. **Boot the installer.** NVMe fitted, Ethernet plugged in, USB stick in, power
-   on. The firmware tries USB first on the AGX kits; otherwise press Esc at the
+   on. On a display, the Omarchy Robots logo at power-on means the firmware
+   from step 2 is running; NVIDIA's logo means the board still has its old
+   firmware. The firmware tries USB first on the AGX kits; otherwise press Esc at the
    NVIDIA logo (DisplayPort monitor, or the serial console), open the Boot
    Manager and choose the USB stick.
 
@@ -251,7 +257,7 @@ closure over SSH; nothing is compiled on the robot.
 
 | Symptom | First command |
 |---|---|
-| Firmware and L4T disagree: `jetson.l4t` fails, or the board stops in UEFI or early in the kernel | `ota-check-firmware -b` (or `cat /sys/class/dmi/id/bios_version`); flash again with step 2 |
+| Firmware and L4T disagree: `jetson.l4t` fails, NVIDIA's logo instead of ours at power-on, or the board stops in UEFI or early in the kernel | `ota-check-firmware -b` (or `cat /sys/class/dmi/id/bios_version`); flash again with step 2 |
 | GPU device node missing: `gpu.device` fails | `lsmod \| grep nvgpu; ls -l /dev/nvgpu/igpu0; dmesg \| grep -i nvgpu` |
 | NVMe not seen by UEFI or by the installer | in the installer: `lsblk; dmesg \| grep -i nvme; lspci`; reseat the SSD in the Key M slot |
 | The installer does not appear on the network | serial console: `ip -br addr; networkctl` |

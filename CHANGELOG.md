@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-rc.2] - 2026-10-02
+
+### Added
+
+- Omarchy Robots identity: os-release (`NAME="Omarchy Robots"`, version in
+  `PRETTY_NAME`, `ID_LIKE=nixos`), boot menu entries, installer menus, console
+  banner and SSH MOTD.
+- The Omarchy Robots logo and wordmark (`branding/`) replace NixOS's: on the
+  Jetson UEFI boot screen (jetpack-nixos's `firmware.uefi.logo`), the
+  installer's GRUB and syslinux menus, and as a half-block logo on the login
+  banners. Static files only.
+
+### Changed
+
+- The boot menu waits 1 s instead of 5; users are managed by userborn instead
+  of a Perl script at each activation; `nixos-generate-config` and the nixpkgs
+  source are no longer in the system. The vm closure goes from 1.3 to 1.1 GiB.
+- Test VMs wait up to 15 minutes for their disk (slow hosts without KVM).
+
 ## [0.1.0-rc.1] - 2026-10-02
 
 First release candidate of milestone OS-1: a declarative, Nix-based robot OS,
@@ -36,5 +55,6 @@ VM-validated and ready for Jetson bring-up. Not hardware-tested.
 - GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
   one Jetson system.
 
-[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.1...HEAD
+[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.2...HEAD
+[0.1.0-rc.2]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.1...v0.1.0-rc.2
 [0.1.0-rc.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.1.0-rc.1
