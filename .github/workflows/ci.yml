@@ -17,23 +17,25 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v5
-      - name: Let the runner user open /dev/kvm
+      # Evaluating every target holds about 12 GiB at its peak, mostly cold.
+      - name: Swap on the runner's scratch disk
         run: |
-          if [ -e /dev/kvm ]; then
-            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
-            sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
-          else
-            echo "No /dev/kvm: VM tests run under TCG emulation."
-          fi
+          nproc && free -h && { ls -l /dev/kvm || true; }
+          sudo fallocate -l 16G /mnt/swapfile && sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile && sudo swapon /mnt/swapfile && free -h
+      # Also enables KVM for the VM tests (enable_kvm defaults to true).
       - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-check-${{ hashFiles('flake.lock', '**/*.nix', 'pkgs/**') }}
           restore-prefixes-first-match: nix-check-
           gc-max-store-size-linux: 6G
       - run: nix flake check -L
+      - name: Evaluate every board's installer image (aarch64, one process each)
+        run: |
+          for image in $(nix eval --json .#packages.aarch64-linux --apply builtins.attrNames | jq -r '.[]'); do
+            echo "$image: $(nix eval --raw ".#packages.aarch64-linux.$image.drvPath")"
+          done
 
   jetson:
     name: build orin-agx-devkit (aarch64)
