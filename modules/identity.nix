@@ -2,7 +2,6 @@
 # `omarchy-robot validate` should find on it.
 {
   config,
-  lib,
   pkgs,
   ...
 }:
@@ -12,13 +11,6 @@ let
   jetpack = config.hardware.nvidia-jetpack;
 in
 {
-  options.omarchy.robot.build = lib.mkOption {
-    type = lib.types.attrsOf lib.types.anything;
-    internal = true;
-    default = { };
-    description = "Set by flake.nix: target name, Omarchy Robots version, flake revision, robot.nix hash and input revisions.";
-  };
-
   config.environment.etc."omarchy-robot/build.json".text = builtins.toJSON (
     cfg.build
     // {

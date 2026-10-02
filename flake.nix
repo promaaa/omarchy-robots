@@ -78,6 +78,7 @@
 
       overlays.default = final: _: {
         omarchy-robot = final.callPackage ./pkgs/omarchy-robot { };
+        omarchy-branding = final.callPackage ./pkgs/omarchy-branding { };
       };
 
       packages =

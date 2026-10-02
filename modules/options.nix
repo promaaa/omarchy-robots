@@ -102,6 +102,13 @@ in
       '';
     };
 
+    build = mkOption {
+      type = types.attrsOf types.anything;
+      internal = true;
+      default = { };
+      description = "Set by flake.nix: target name, Omarchy Robots version, flake revision, robot.nix hash and input revisions.";
+    };
+
     generations = mkOption {
       type = types.ints.between 2 100;
       default = 10;

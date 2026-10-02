@@ -109,10 +109,12 @@ in
     };
 
     # Boot entries and garbage collection both keep `generations` systems for rollback.
+    # The menu shows for one second (any key holds it) instead of five.
     boot.loader.systemd-boot = {
       enable = true;
       configurationLimit = cfg.generations;
     };
+    boot.loader.timeout = 1;
     boot.loader.efi.canTouchEfiVariables = true;
     nix.gc = {
       automatic = true;
@@ -134,6 +136,16 @@ in
       ];
     };
     nix.channel.enable = false;
+
+    # Lighter and faster: users from userborn instead of the Perl script at every
+    # activation, no nixos-generate-config (Perl), and no copy of the nixpkgs
+    # source in the system (`nix run nixpkgs#...` then uses the global registry).
+    services.userborn.enable = true;
+    system.tools.nixos-generate-config.enable = false;
+    nixpkgs.flake = {
+      setNixPath = false;
+      setFlakeRegistry = false;
+    };
 
     # Bounded logs; time comes from systemd-timesyncd, on by default.
     services.journald.extraConfig = "SystemMaxUse=512M";
