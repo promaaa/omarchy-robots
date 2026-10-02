@@ -14,7 +14,7 @@ There is no robot runtime here yet; this is the base it will run on. It boots
 as Omarchy Robots: its logo on the Jetson's UEFI boot screen, the installer's
 menus and the login banners.
 
-**Status:** OS-1 (v0.1.0 when released) runs and is tested in virtual
+**Status:** v0.1.0 (milestone OS-1) runs and is tested in virtual
 machines. The Jetson targets evaluate and are partly built; none has run on
 hardware yet (see the [support matrix](#support-matrix)).
 
@@ -112,7 +112,7 @@ flash script and installer image evaluate, with the per-board assertions of
 | `orin-nx-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nano-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nano-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `thor-agx-devkit` | evaluates | | | 2026-10-02 |
+| `thor-agx-devkit` | builds: flash script | | flash script (1.2 GiB closure; JetPack 7, built in 71 min) | 2026-10-02 |
 
 Pinned: nixpkgs nixos-26.05 (`4feb8eb`), jetpack-nixos `825dfea` (JetPack
 6.2.3 / L4T 36.5.2 on Orin, JetPack 7.2.1 / L4T 39.2.1 on Thor), disko
@@ -123,7 +123,9 @@ RAM, no KVM, aarch64 through QEMU user emulation), with other builds running:
 evaluating one target takes 8 s (vm) to 10 s (Jetson); the `orin-agx-devkit`
 flash script built in 50 min from an empty store (cross-compiled kernel,
 EDK2, OP-TEE); the vm installer image in under a minute once the system was
-built; the VM boots in 3 min 27 s under QEMU TCG (`systemd-analyze`, VM).
+built; the VM boots in 3 min 27 s under QEMU TCG (`systemd-analyze`, VM);
+the whole `nix flake check` passed here in 67 min (v0.1.0-rc.2 tree), most
+of it the three VM tests under TCG.
 In CI (GitHub `ubuntu-24.04`, 2 CPUs, 7.8 GiB RAM, KVM) the VM boots in
 17.2 s (`systemd-analyze`, VM) and `nix flake check` takes 25 min from an empty
 store. Rehearsing the runbook on the vm board under TCG: the installer answers
@@ -133,6 +135,12 @@ The `orin-agx-devkit` system built natively on a GitHub `ubuntu-24.04-arm`
 runner in about an hour from an empty store, Tegra kernel included (the
 1.4 GiB closure predates the rc.2 closure reductions); once the Orin kernel
 and firmware were built, each further Orin flash script took 70 to 82 s.
+With the Omarchy Robots boot logo, the `orin-agx-devkit` flash script rebuilt
+in under 8 min (EDK2 again); its firmware's boot screen is the robot logo.
+Boot time, rc.1 against rc.2 (vm board, QEMU TCG, other builds paused, five
+boots each from a fresh disk): `systemd-analyze` totals average 66.6 s and
+65.9 s, the same within the ±3 s spread; userborn's 1.3 s replaces the Perl
+user script of the initrd, and the 1 s boot menu saves 4 s before the kernel.
 
 ## Bring-up runbook
 

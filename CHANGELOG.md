@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-03
+
+Milestone OS-1 complete: the system of 0.1.0-rc.2, VM-tested, with every
+Jetson target evaluating, the orin-agx-devkit system and every board's flash
+script building. Not hardware-tested.
+
+### Changed
+
+- README: support matrix and measurements for the final builds (Thor flash
+  script, the branded orin-agx-devkit firmware, a local `nix flake check`),
+  and a boot time comparison of rc.1 and rc.2 (no difference within noise).
+
 ## [0.1.0-rc.2] - 2026-10-02
 
 ### Added
@@ -55,6 +67,7 @@ VM-validated and ready for Jetson bring-up. Not hardware-tested.
 - GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
   one Jetson system.
 
-[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.2...HEAD
+[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.2...v0.1.0
 [0.1.0-rc.2]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.1...v0.1.0-rc.2
 [0.1.0-rc.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.1.0-rc.1
