@@ -69,6 +69,14 @@ in
         robot.succeed("grep -x SystemMaxUse=512M /etc/systemd/journald.conf")
         robot.succeed("getent shadow admin | cut -d: -f2 | grep -x '!'")
 
+    with subtest("branding: Omarchy Robots, not NixOS"):
+        robot.succeed("grep -x 'NAME=\"Omarchy Robots\"' /etc/os-release")
+        robot.succeed("grep -x 'title Omarchy Robots' /boot/loader/entries/*.conf")
+        robot.succeed("grep -q 'Omarchy Robots' /etc/issue")
+        motd = robot.succeed("cat $(grep -o '/nix/store/[^ ]*-motd' /etc/pam.d/sshd)")
+        assert "Omarchy Robots" in motd and "▀" in motd, motd
+        robot.fail("grep -i -r -l nixos /etc/issue")
+
     with subtest("ssh: key login over the network, no password methods offered"):
         operator.succeed("install -m 600 ${keys.snakeOilEd25519PrivateKey} /root/key")
         operator.succeed(f"{ssh} true")
