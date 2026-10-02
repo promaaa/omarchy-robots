@@ -1,5 +1,5 @@
-# M2: the vm board boots through UEFI, takes an SSH key login from another
-# machine, firewalls everything else, and carries its identity.
+# M2/M4: the vm board boots through UEFI, takes an SSH key login from another
+# machine, firewalls everything else, carries its identity, and validates.
 {
   self,
   pkgs,
@@ -36,9 +36,15 @@ in
     };
 
   testScript = ''
+    import importlib
     import json
+    import sys
+
+    sys.path.insert(0, "${../pkgs/omarchy-robot}")
+    tool = importlib.import_module("omarchy_robot")
 
     expected = json.loads('${expected}')
+    jetson_checks = {c[0] for c in tool.CHECKS if c[2]}
     ssh = "ssh -i /root/key -o StrictHostKeyChecking=no admin@robot"
 
     start_all()
@@ -76,6 +82,15 @@ in
         robot.wait_for_open_port(8080)
         operator.succeed("nc -z -w 5 robot 22")
         operator.fail("nc -z -w 5 robot 8080")
+
+    with subtest("validate: generic checks pass, Jetson checks are not applicable"):
+        report = json.loads(operator.succeed(f"{ssh} omarchy-robot validate --json"))
+        assert tool.report_errors(report) == [], tool.report_errors(report)
+        for c in report["checks"]:
+            want = "NOT_APPLICABLE" if c["id"] in jetson_checks else "PASS"
+            assert c["status"] == want, f"{c['id']}: {c['status']} ({c['detail']}), expected {want}"
+        print(operator.succeed(f"{ssh} omarchy-robot validate"))
+        print(robot.succeed("omarchy-robot info"))
 
     with subtest("boot time (VM)"):
         print(robot.succeed("systemd-analyze"))

@@ -1,0 +1,5 @@
+&&&& RUNNING TensorRT.sample_onnx_mnist [TensorRT v100300] # sample_onnx_mnist
+[10/02/2026-10:00:00] [I] Building and running a GPU inference engine for Onnx MNIST
+[10/02/2026-10:00:09] [I] Output:
+[10/02/2026-10:00:09] [I]  Prob 9  1.0000 Class 9: **********
+&&&& PASSED TensorRT.sample_onnx_mnist [TensorRT v100300] # sample_onnx_mnist

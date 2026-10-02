@@ -75,6 +75,20 @@ in
   statix = check "statix" [ pkgs.statix ] "statix check .";
   deadnix = check "deadnix" [ pkgs.deadnix ] "deadnix --fail .";
 
+  omarchy-robot =
+    check "omarchy-robot"
+      [
+        pkgs.ruff
+        pkgs.mypy
+        pkgs.python3Minimal
+      ]
+      ''
+        cd pkgs/omarchy-robot
+        ruff check --no-cache .
+        mypy --strict --cache-dir=/dev/null omarchy_robot.py test_omarchy_robot.py
+        python3 -m unittest -v test_omarchy_robot
+      '';
+
   # Defaults of the installed system that the QEMU test VMs override.
   defaults =
     let

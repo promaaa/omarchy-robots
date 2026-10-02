@@ -1,0 +1,4 @@
+# R36 (release), REVISION: 5.2, GCID: 00000000, BOARD: generic, EABI: aarch64, DATE: Thu Jan  1 00:00:00 UTC 2026
+# KERNEL_VARIANT: oot
+TARGET_USERSPACE_LIB_DIR=nvidia
+TARGET_USERSPACE_LIB_DIR_PATH=usr/lib/aarch64-linux-gnu/nvidia
