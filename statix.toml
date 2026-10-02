@@ -1,0 +1,2 @@
+# Modules group settings by concern (login, disk, rollback), not by option namespace.
+disabled = ["repeated_keys"]

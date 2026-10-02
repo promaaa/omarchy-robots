@@ -1,0 +1,11 @@
+# Nix build outputs
+result
+result-*
+# VM disk images (nix run .#vm) and test artefacts
+*.qcow2
+*.img
+*.iso
+# Python
+__pycache__/
+.mypy_cache/
+.ruff_cache/
