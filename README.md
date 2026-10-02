@@ -12,9 +12,9 @@ SSH and nothing else, a bounded history of system generations to roll back to,
 and one command, `omarchy-robot`, to inspect, validate, update and roll back.
 There is no robot runtime here yet; this is the base it will run on.
 
-**Status:** OS-1 (v0.0.1 part 3 when released) runs and is tested in virtual machines. The Jetson targets
-evaluate and are partly built; none has run on hardware yet (see the
-[support matrix](#support-matrix)).
+**Status:** OS-1 (v0.0.1 part 3 when released) runs and is tested in virtual
+machines. The Jetson targets evaluate and are partly built; none has run on
+hardware yet (see the [support matrix](#support-matrix)).
 
 ## One file
 
@@ -50,10 +50,11 @@ nix run .#vm
 ```
 
 The VM boots through UEFI and systemd-boot, as the hardware does, and its
-serial console logs you in as the administrator. Then:
+serial console (this terminal) logs you in as the administrator. Then:
 
 ```sh
-omarchy-robot validate
+sudo omarchy-robot validate
+sudo poweroff        # leaves QEMU
 ```
 
 To log in over SSH instead, put your public key in `robot.nix`
