@@ -113,6 +113,7 @@
           installerModules
           onBoard
           jetsonBoards
+          version
           ;
       };
 

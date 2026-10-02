@@ -104,9 +104,9 @@ flash script and installer image evaluate, with the per-board assertions of
 
 | Target (`board`) | Status | System closure | Built | Last verified |
 |---|---|---|---|---|
-| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk | 1.3 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
+| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots) | 1.3 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
 | `orin-agx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nx-devkit` | evaluates | | | 2026-10-02 |
+| `orin-nx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nx-super-devkit` | evaluates | | | 2026-10-02 |
 | `orin-nano-devkit` | evaluates | | | 2026-10-02 |
 | `orin-nano-super-devkit` | evaluates | | | 2026-10-02 |
@@ -122,6 +122,11 @@ evaluating one target takes 8 s (vm) to 10 s (Jetson); the `orin-agx-devkit`
 flash script built in 50 min from an empty store (cross-compiled kernel,
 EDK2, OP-TEE); the vm installer image in under a minute once the system was
 built; the VM boots in 3 min 27 s under QEMU TCG (`systemd-analyze`, VM).
+In CI (GitHub `ubuntu-24.04`, 2 CPUs, 7.8 GiB RAM, KVM) the VM boots in
+17.2 s (`systemd-analyze`, VM) and `nix flake check` takes 25 min from an empty
+store. Rehearsing the runbook on the vm board under TCG: the installer answers
+SSH 154 s after power-on, `omarchy-install` takes 22 min, and
+`nixos-rebuild switch --target-host` deploys a time zone change in 56 s.
 
 ## Bring-up runbook
 

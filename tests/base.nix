@@ -5,12 +5,13 @@
   pkgs,
   robotModules,
   onBoard,
+  version,
 }:
 let
   keys = import "${pkgs.path}/nixos/tests/ssh-keys.nix" pkgs;
   expected = builtins.toJSON {
     target = "vm";
-    version = "0.0.1";
+    inherit version;
     revision = self.rev or self.dirtyRev or "dirty";
     robotNix = builtins.hashFile "sha256" ../robot.nix;
   };
