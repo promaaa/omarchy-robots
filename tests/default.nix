@@ -5,6 +5,7 @@
   lib,
   robot,
   robotModules,
+  installerModules,
   onBoard,
   jetsonBoards,
 }:
@@ -20,7 +21,7 @@ let
   # Per board: jetpack-nixos receives the mapped settings, the kernel is
   # jetpack-nixos's, CUDA stays off nixpkgs-wide, and the system evaluates,
   # also with the GPU stack and a power mode (where the unfree predicate is
-  # exercised).
+  # exercised), as do its flash script and installer image.
   evaluates =
     board: spec:
     let
@@ -54,6 +55,8 @@ let
       lib.concatMapStrings (drv: builtins.unsafeDiscardStringContext drv.drvPath + "\n") [
         config.system.build.toplevel
         gpu.config.system.build.toplevel
+        self.packages.x86_64-linux."flash-${board}"
+        self.packages.aarch64-linux."installer-${board}"
       ]
     );
 
@@ -129,6 +132,16 @@ in
         pkgs
         robotModules
         onBoard
+        ;
+    }
+  );
+  vm-installer = pkgs.testers.runNixOSTest (
+    import ./installer.nix {
+      inherit
+        pkgs
+        lib
+        robot
+        installerModules
         ;
     }
   );
