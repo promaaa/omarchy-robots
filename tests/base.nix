@@ -68,7 +68,8 @@ in
         robot.succeed("nix config show experimental-features | grep -w flakes")
         robot.succeed("systemctl is-enabled nix-gc.timer")
         robot.succeed("grep -x SystemMaxUse=512M /etc/systemd/journald.conf")
-        robot.succeed("getent shadow admin | cut -d: -f2 | grep -x '!'")
+        # No usable password: locked ("!...") or none ("*"), never empty.
+        robot.succeed("getent shadow admin | cut -d: -f2 | grep -E '^[!*]'")
 
     with subtest("branding: Omarchy Robots, not NixOS"):
         robot.succeed("grep -x 'NAME=\"Omarchy Robots\"' /etc/os-release")
