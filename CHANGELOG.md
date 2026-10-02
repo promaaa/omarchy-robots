@@ -6,8 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Milestone OS-1: a declarative, Nix-based robot OS, VM-validated and ready for
-Jetson bring-up. Not hardware-tested.
+## [0.1.0-rc.1] - 2026-10-02
+
+First release candidate of milestone OS-1: a declarative, Nix-based robot OS,
+VM-validated and ready for Jetson bring-up. Not hardware-tested.
 
 ### Added
 
@@ -34,4 +36,5 @@ Jetson bring-up. Not hardware-tested.
 - GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
   one Jetson system.
 
-[Unreleased]: https://github.com/promaaa/omarchy-robots/commits/main
+[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.1.0-rc.1...HEAD
+[0.1.0-rc.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.1.0-rc.1

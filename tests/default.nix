@@ -8,6 +8,7 @@
   installerModules,
   onBoard,
   jetsonBoards,
+  version,
 }:
 let
   check =
@@ -144,6 +145,7 @@ in
         pkgs
         robotModules
         onBoard
+        version
         ;
     }
   );

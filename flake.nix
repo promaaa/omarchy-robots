@@ -23,7 +23,7 @@
     }:
     let
       inherit (nixpkgs) lib;
-      version = "0.1.0";
+      version = "0.1.0-rc.1";
       boards = import ./modules/boards.nix;
       jetsonBoards = removeAttrs boards [ "vm" ];
       pkgs = nixpkgs.legacyPackages.x86_64-linux.extend self.overlays.default;
@@ -113,6 +113,7 @@
           installerModules
           onBoard
           jetsonBoards
+          version
           ;
       };
 
