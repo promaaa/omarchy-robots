@@ -1,4 +1,4 @@
-<h1 align="center"><img src="branding/omarchy-robots-wordmark.svg" alt="Omarchy Robots" width="420"></h1>
+<h1 align="center"><img src="branding/omarchy-robots-wordmark-dotted.svg" alt="Omarchy Robots" width="640"></h1>
 
 A small, opinionated operating system for robot computers, built on NixOS and
 [jetpack-nixos](https://github.com/anduril/jetpack-nixos). One file,
