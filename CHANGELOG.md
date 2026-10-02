@@ -7,7 +7,20 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-## [0.0.1] - 2026-10-02
+## [0.0.1] - 2026-10-03
+
+### Part 3 (2026-10-03)
+
+Milestone OS-1 complete: the system of 0.0.1, VM-tested, with every
+Jetson target evaluating, the orin-agx-devkit system and every board's flash
+script building. Not hardware-tested.
+
+#### Changed
+
+- README: support matrix and measurements for the final builds (Thor flash
+  script, the branded orin-agx-devkit firmware, a local `nix flake check`),
+  and a boot time comparison of rc.1 and rc.2 (no difference within noise).
+
 
 ### Part 2 (2026-10-02)
 
