@@ -104,6 +104,6 @@ in
         print(robot.succeed("omarchy-robot info"))
 
     with subtest("boot time (VM)"):
-        print(robot.succeed("systemd-analyze; systemd-analyze blame | head -n 12"))
+        print(robot.succeed("systemd-analyze; systemd-analyze blame | sed -n 1,12p"))
   '';
 }
