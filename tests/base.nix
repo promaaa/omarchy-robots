@@ -19,6 +19,7 @@ in
 {
   name = "omarchy-base";
   node.pkgsReadOnly = false;
+  defaults = ./slow-host.nix;
 
   nodes.robot = {
     imports = robotModules "vm" ++ [ (onBoard "vm") ];

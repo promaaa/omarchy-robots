@@ -1,5 +1,5 @@
-# Omarchy Robots, not NixOS: the system's name, the Omarchy logo on the login
-# banners and, on Jetson boards, in the UEFI firmware. Static files only.
+# Omarchy Robots, not NixOS: the system's name, and the Omarchy Robots logo on
+# the login banners and, on Jetson boards, in the UEFI firmware. Static files only.
 {
   config,
   lib,
