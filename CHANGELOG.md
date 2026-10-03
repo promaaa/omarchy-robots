@@ -9,6 +9,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.0.1] - 2026-10-03
 
+### Part 5 (2026-10-03)
+
+#### Changed
+
+- The boot screen (Jetson UEFI firmware, installer menus) shows only the
+  dotted wordmark, centred; the logo stays on the login banners.
+
+
 ### Part 4 (2026-10-03)
 
 #### Added
