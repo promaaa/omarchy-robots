@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+  <meta name="description" content="{{ site.description }}">
+  <link rel="icon" href="{{ '/assets/omarchy-robots-logo.svg' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
+</head>
+<body>
+{% assign chapters = site.data.chapters %}
+{% if page.url == "/" %}
+<main class="cover">
+  <img class="wordmark" src="{{ '/assets/omarchy-robots-wordmark-dotted.svg' | relative_url }}" alt="Omarchy Robots">
+  <p class="tagline">The Omarchy Robots Manual</p>
+  {{ content }}
+  <ol class="toc">
+    {% for c in chapters %}<li><a href="{{ c.url | relative_url }}"><span class="num">{{ forloop.index }}</span>{{ c.title }}</a></li>
+    {% endfor %}
+  </ol>
+</main>
+{% else %}
+{% for c in chapters %}{% if c.url == page.url %}{% assign i = forloop.index0 %}{% endif %}{% endfor %}
+<header class="bar">
+  <a href="{{ '/' | relative_url }}"><img src="{{ '/assets/omarchy-robots-logo.svg' | relative_url }}" alt="">The Omarchy Robots Manual</a>
+</header>
+<main class="chapter">
+  <p class="kicker">Chapter {{ i | plus: 1 }}</p>
+  <h1>{{ page.title }}</h1>
+  {{ content }}
+  <nav class="pager">
+    {% assign pi = i | minus: 1 %}{% assign ni = i | plus: 1 %}{% if i > 0 %}{% assign p = chapters[pi] %}<a class="prev" href="{{ p.url | relative_url }}">← {{ p.title }}</a>{% else %}<a class="prev" href="{{ '/' | relative_url }}">← Contents</a>{% endif %}
+    {% assign n = chapters[ni] %}{% if n %}<a class="next" href="{{ n.url | relative_url }}">{{ n.title }} →</a>{% endif %}
+  </nav>
+</main>
+{% endif %}
+<footer>Omarchy Robots is MIT licensed · <a href="https://github.com/{{ site.repository }}">GitHub</a> · inspired by the <a href="https://omarchy.org/manual/">Omarchy Manual</a></footer>
+</body>
+</html>

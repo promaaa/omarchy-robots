@@ -1,0 +1,20 @@
+- title: Welcome
+  url: /welcome/
+- title: Getting started
+  url: /getting-started/
+- title: robot.nix
+  url: /robot-nix/
+- title: Boards
+  url: /boards/
+- title: Bring-up on a Jetson
+  url: /bring-up/
+- title: omarchy-robot
+  url: /omarchy-robot/
+- title: Updates and rollback
+  url: /updates/
+- title: Security
+  url: /security/
+- title: Troubleshooting
+  url: /troubleshooting/
+- title: Development
+  url: /development/

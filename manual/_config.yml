@@ -1,0 +1,9 @@
+title: Omarchy Robots Manual
+description: A small, opinionated operating system for robot computers, built on NixOS.
+baseurl: /omarchy-robots
+repository: promaaa/omarchy-robots
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+exclude: [README.md]
