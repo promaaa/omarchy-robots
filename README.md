@@ -11,8 +11,8 @@ It is headless and deliberately plain: SSH keys only, a firewall that admits
 SSH and nothing else, a bounded history of system generations to roll back to,
 and one command, `omarchy-robot`, to inspect, validate, update and roll back.
 There is no robot runtime here yet; this is the base it will run on. It boots
-as Omarchy Robots: its logo on the Jetson's UEFI boot screen, the installer's
-menus and the login banners.
+as Omarchy Robots: its dotted wordmark on the Jetson's UEFI boot screen and the
+installer's menus, its logo on the login banners.
 
 **Status:** v0.0.1 part 4 (milestone OS-1, final logo) runs and is tested in virtual
 machines. The Jetson targets evaluate and are partly built; none has run on
@@ -135,8 +135,8 @@ The `orin-agx-devkit` system built natively on a GitHub `ubuntu-24.04-arm`
 runner in about an hour from an empty store, Tegra kernel included (the
 1.4 GiB closure predates the rc.2 closure reductions); once the Orin kernel
 and firmware were built, each further Orin flash script took 70 to 82 s.
-With the Omarchy Robots boot logo, the `orin-agx-devkit` flash script rebuilt
-in under 8 min (EDK2 again); its firmware's boot screen is the robot logo.
+With the Omarchy Robots boot screen, the `orin-agx-devkit` flash script rebuilt
+in under 8 min (EDK2 again); its firmware shows the Omarchy Robots wordmark.
 Boot time, rc.1 against rc.2 (vm board, QEMU TCG, other builds paused, five
 boots each from a fresh disk): `systemd-analyze` totals average 66.6 s and
 65.9 s, the same within the ±3 s spread; userborn's 1.3 s replaces the Perl
@@ -211,7 +211,7 @@ sudo dd if=$(echo installer/iso/*.iso) of=/dev/sdX bs=4M conv=fsync status=progr
 ```
 
 4. **Boot the installer.** NVMe fitted, Ethernet plugged in, USB stick in, power
-   on. On a display, the Omarchy Robots logo at power-on means the firmware
+   on. On a display, the Omarchy Robots wordmark at power-on means the firmware
    from step 2 is running; NVIDIA's logo means the board still has its old
    firmware. The firmware tries USB first on the AGX kits; otherwise press Esc at the
    NVIDIA logo (DisplayPort monitor, or the serial console), open the Boot

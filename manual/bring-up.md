@@ -57,7 +57,7 @@ lsblk
 sudo dd if=$(echo installer/iso/*.iso) of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
-**4. Boot the installer.** NVMe fitted, Ethernet in, USB stick in, power on. The Omarchy Robots logo at power-on means the new firmware is running; NVIDIA's logo means the board still has its old firmware. The AGX kits try USB first. Otherwise press Esc at the logo, open the Boot Manager and pick the USB stick.
+**4. Boot the installer.** NVMe fitted, Ethernet in, USB stick in, power on. The Omarchy Robots wordmark at power-on means the new firmware is running; NVIDIA's logo means the board still has its old firmware. The AGX kits try USB first. Otherwise press Esc at the boot screen, open the Boot Manager and pick the USB stick.
 
 **5. Install, from the host.** The installer announces itself over mDNS as `<name>-installer`.
 
