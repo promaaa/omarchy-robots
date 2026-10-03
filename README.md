@@ -14,7 +14,7 @@ There is no robot runtime here yet; this is the base it will run on. It boots
 as Omarchy Robots: its logo on the Jetson's UEFI boot screen, the installer's
 menus and the login banners.
 
-**Status:** v0.0.1 part 3 (milestone OS-1) runs and is tested in virtual
+**Status:** v0.0.1 part 4 (milestone OS-1, final logo) runs and is tested in virtual
 machines. The Jetson targets evaluate and are partly built; none has run on
 hardware yet (see the [support matrix](#support-matrix)).
 

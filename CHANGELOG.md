@@ -9,6 +9,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.0.1] - 2026-10-03
 
+### Part 4 (2026-10-03)
+
+#### Added
+
+- The Omarchy Robots manual, ten chapters published to GitHub Pages
+  (`manual/`).
+
+#### Changed
+
+- New Omarchy Robots logo, Socket (tall slot eyes), and one wordmark, the
+  dotted one: `branding/omarchy-robots-wordmark.svg` (the plain wordmark is
+  removed). The Jetson UEFI boot screen, the installer menus, the login
+  banners, the README and the manual use them.
+
+
 ### Part 3 (2026-10-03)
 
 Milestone OS-1 complete: the system of 0.0.1, VM-tested, with every
