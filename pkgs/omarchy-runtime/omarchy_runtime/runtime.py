@@ -51,7 +51,7 @@ from omarchy_runtime.contracts import (
     seconds,
 )
 from omarchy_runtime.sched import Mailbox
-from omarchy_runtime.trace import TraceWriter
+from omarchy_runtime.trace import TraceWriter, dumps
 from omarchy_runtime.wallclock import perf_ns
 
 
@@ -298,7 +298,12 @@ class Runtime:
     # Public API.
 
     def submit(self, message: Message) -> str | None:
-        """Queue a message for the next step. A GoalRequest gets its execution id now."""
+        """Queue a message for the next step. A GoalRequest gets its execution id now.
+        Raises ContractError for a message that is not JSON: it could not be traced."""
+        try:
+            dumps(message.to_json())
+        except (TypeError, ValueError) as e:
+            raise ContractError(f"{type(message).__name__} is not JSON-serializable: {e}") from e
         execution_id = None
         if isinstance(message, GoalRequest):
             self._count += 1

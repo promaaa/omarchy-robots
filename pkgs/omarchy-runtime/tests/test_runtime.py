@@ -17,6 +17,7 @@ from omarchy_runtime.contracts import (
     ChunkMeta,
     ChunkRejected,
     Claim,
+    ContractError,
     Decision,
     FallbackSpec,
     Goal,
@@ -310,6 +311,12 @@ class TestFallbacksAndApi(unittest.TestCase):
         rig.runtime.submit(InstallFallback(x, self.spec(config.body(config.effective("nominal_a")))))
         rig.run(0.1, chunks=True)
         self.assertEqual(rig.s0.installed, [])
+
+    def test_messages_must_be_json(self) -> None:
+        with self.assertRaises(ContractError):
+            Rig().runtime.submit(GoalRequest(IN_RACK, "task", conditioning={"speed": object()}))
+        with self.assertRaises(ContractError):
+            Rig().runtime.submit(GoalRequest(IN_RACK, "task", conditioning={"speed": float("nan")}))
 
     def test_updates_decisions_and_trace(self) -> None:
         rig = Rig()
