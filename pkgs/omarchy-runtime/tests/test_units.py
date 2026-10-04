@@ -174,6 +174,23 @@ class TestS0(unittest.TestCase):
         c = self.s0.status().counters
         self.assertEqual((c.starvation_events, c.fallback_ns), (1, ns(0.501)))  # ticks 0.201 to 0.701 included
 
+    def test_hold_drops_the_chunk_and_the_fallback(self) -> None:
+        x, z, g = self.home
+        self.s0.install_fallback(FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(0.5), [[x, z + 0.05, g]], 0, ns(10), "s2"), 0)
+        self.s0.submit_chunk(chunk(1, 0.0, [[x, z, g], [x + 0.1, z, g]], 5.0, dt=1.0), 0)
+        self.run_until(0.1)
+        self.assertIs(self.s0.mode, S0Mode.TRACKING)
+        moved = float(self.s0.pos[0])
+        self.s0.hold()
+        self.run_until(0.3, 0.101)
+        self.assertIs(self.s0.mode, S0Mode.HOLD)  # not the fallback, and not the rest of the chunk
+        self.assertEqual(float(self.s0.pos[0]), moved)
+        self.assertEqual(self.s0.status().counters.starvation_events, 0)
+        self.assertFalse(self.s0.status().fallback_installed)
+        self.s0.submit_chunk(chunk(1, 0.3, [[x, z, g]], 1.0), ns(0.3))  # a new run may start at 1 at once
+        self.s0.tick(ns(0.301))
+        self.assertIs(self.s0.mode, S0Mode.TRACKING)
+
     def test_fallback_outside_its_window_is_not_used(self) -> None:
         x, z, g = self.home
         self.s0.install_fallback(FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(0.5), [[x, z + 0.05, g]], ns(5), ns(6), "s2"), 0)

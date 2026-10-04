@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections import Counter, deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import assert_never
 
 from omarchy_runtime.belief import Evaluation, WorldState
 from omarchy_runtime.contracts import (
@@ -23,6 +24,7 @@ from omarchy_runtime.contracts import (
     BodySpec,
     Cancel,
     Category,
+    ChunkMeta,
     Claim,
     ConfigError,
     ContractError,
@@ -291,7 +293,7 @@ class Runtime:
         self._recent: dict[str, tuple[Observation, tuple[str, ...]]] = {}
         self._status: S0Status | None = None
         self._mode: S0Mode | None = None
-        self._chunk_seq: int | None = None
+        self._chunk: ChunkMeta | None = None
         self.executions: dict[str, Execution] = {}
         self.finished: list[Json] = []  # summaries, in the order executions ended
 
@@ -299,7 +301,10 @@ class Runtime:
 
     def submit(self, message: Message) -> str | None:
         """Queue a message for the next step. A GoalRequest gets its execution id now.
-        Raises ContractError for a message that is not JSON: it could not be traced."""
+        Raises ContractError for anything but the four messages, or a message that
+        is not JSON (it could not be traced)."""
+        if not isinstance(message, GoalRequest | InstallFallback | Cancel | Decision):
+            raise ContractError(f"not a runtime message: {type(message).__name__}")
         try:
             dumps(message.to_json())
         except (TypeError, ValueError) as e:
@@ -323,7 +328,7 @@ class Runtime:
 
     def step(self, now: Ns) -> None:
         for observation in self._observations.drain():
-            self._observe(observation)
+            self._observe(observation, now)
         self._sample(now)
         for execution_id, message in self._inbox.drain():
             self._handle(execution_id, message, now)
@@ -341,8 +346,18 @@ class Runtime:
     def _event(self, now: Ns, kind: str, ex: Execution | None, payload: Json) -> None:
         self._trace.event(now, kind, ex.id if ex else None, payload)
 
-    def _observe(self, observation: Observation) -> None:
-        filtered, changes = self._filter.apply(observation)
+    def _observe(self, observation: Observation, now: Ns) -> None:
+        """Through the filter, then into the belief. An observation the filter
+        cannot handle is dropped: unfiltered data never reaches the belief."""
+        try:
+            filtered, changes = self._filter.apply(observation)
+            if not isinstance(filtered, Observation) or not isinstance(changes, tuple):
+                raise ContractError(f"returned {type(filtered).__name__}, {type(changes).__name__}")
+        except Exception as e:  # noqa: BLE001 - a failing filter loses an observation, not the run
+            self._event(
+                now, "error", self._active, {"category": "extension", "reason": f"filter {self._filter.id}: {type(e).__name__}: {e}"}
+            )
+            return
         self.belief.update(filtered)
         self._recent[filtered.id] = (filtered, changes)
         if len(self._recent) > 400:
@@ -355,8 +370,8 @@ class Runtime:
             self._event(now, "s0.mode", ex, {"from": self._mode, "to": status.mode, "s0_t": status.t})
             self._mode = status.mode
         chunk = status.last_chunk
-        if chunk is not None and chunk.seq != self._chunk_seq:
-            self._chunk_seq = chunk.seq
+        if chunk is not None and chunk != self._chunk:
+            self._chunk = chunk
             self._event(now, "chunk", ex, chunk.to_json())
         if ex is not None:
             self._event(now, "s0.status", ex, status.to_json())
@@ -375,6 +390,8 @@ class Runtime:
             self._cancel(message, now)
         elif isinstance(message, InstallFallback):
             self._install(message, now)
+        else:
+            assert_never(message)
 
     def _set(self, ex: Execution, to: State, now: Ns, category: Category | None = None, reason: str = "") -> None:
         before = ex.state
@@ -422,21 +439,22 @@ class Runtime:
             return
         assert self._status is not None
         ex.started, ex.counters_start = now, self._status.counters
-        ex.policy = self._implementations[res.binding.implementation]()
         self._set(ex, State.RUNNING, now, reason=res.reason)
         try:
-            ex.policy.start(ex.request.goal, self.belief.snapshot(), self.body, ex.request.conditioning)
+            policy = self._implementations[res.binding.implementation]()
+            policy.start(ex.request.goal, self.belief.snapshot(), self.body, ex.request.conditioning)
         except Exception as e:  # noqa: BLE001 - a policy that cannot start is a failed execution, not a crashed runtime
             self._fail(ex, now, Category.IMPLEMENTATION_ERROR, f"{res.binding.implementation} failed to start: {type(e).__name__}: {e}")
             return
-        self._s1.attach(ex.policy)
+        ex.policy = policy
+        self._s1.attach(policy)
 
     def _stop_running(self, ex: Execution, now: Ns) -> None:
-        """S1 stops producing; a fallback installed for this execution is cleared."""
+        """S1 stops producing, and S0 holds: what is left of the execution's
+        chunk is not executed, and its fallback is dropped."""
         self._s1.detach()
-        if ex.fallbacks:
-            self._s0.clear_fallback()
-            self._event(now, "fallback.clear", ex, {"reason": "the execution stopped running"})
+        self._s0.hold()
+        self._event(now, "s0.hold", ex, {"reason": f"execution {ex.id} stopped running"})
         assert self._status is not None and ex.counters_start is not None
         ex.counters = self._status.counters.since(ex.counters_start)
 
@@ -450,7 +468,8 @@ class Runtime:
         status, policy = self._status, ex.policy
         assert status is not None and policy is not None and ex.started is not None
         chunk = status.last_chunk
-        last = chunk.received if chunk is not None and chunk.received >= ex.started else None
+        # S1 is attached after S0's tick at `started`: a chunk received then belongs to the execution before.
+        last = chunk.received if chunk is not None and chunk.received > ex.started else None
         if last is not None and ex.first_chunk is None:
             ex.first_chunk = last
         try:
@@ -485,7 +504,14 @@ class Runtime:
             verdict = Verdict(VerdictKind.INCONCLUSIVE, (), f"no verifier for {ex.request.goal.predicate}")
         else:
             start = perf_ns()
-            verdict = verifier.verify(ex.request.goal, self.belief, ex.not_before)
+            try:
+                verdict = verifier.verify(ex.request.goal, self.belief, ex.not_before)
+                if not isinstance(verdict, Verdict):
+                    raise ContractError(f"returned {type(verdict).__name__}, not a Verdict")
+            except Exception as err:  # noqa: BLE001 - a failing verifier gives no verdict, never a success
+                reason = f"verifier {verifier.id}: {type(err).__name__}: {err}"
+                self._event(now, "error", ex, {"category": "extension", "reason": reason})
+                verdict = Verdict(VerdictKind.INCONCLUSIVE, (), reason)
             ex.wall["verification_ns"] += perf_ns() - start
         ex.attempts += 1
         ex.verified_version = self.belief.version

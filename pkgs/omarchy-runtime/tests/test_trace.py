@@ -90,6 +90,27 @@ class TestValidate(unittest.TestCase):
         self.assertTrue(any("has events but no summary" in e for e in errors), errors)
         self.assertTrue(any("unknown event type s0.tick" in e for e in errors), errors)
 
+    def test_reports_garbage_instead_of_crashing(self) -> None:
+        run_dir = self.copy("slip_retry")
+        events = (run_dir / "events.jsonl").read_text().splitlines()
+        (run_dir / "events.jsonl").write_text("\n".join(["{garbage", *events[1:]]) + "\n")
+        summaries = (run_dir / "executions.jsonl").read_text().splitlines()
+        (run_dir / "executions.jsonl").write_text(summaries[0][:30] + "\n" + summaries[1] + "\n")
+        check = validate_run(run_dir)
+        self.assertFalse(check.complete)
+        self.assertIn("events.jsonl: does not begin with run.start", check.errors)
+        self.assertIn("executions.jsonl line 1: not JSON", check.errors)
+        self.assertEqual(len(check.executions), 1)  # the other summary is still read
+
+    def test_decisive_verdicts_need_fresh_evidence_after_the_claim(self) -> None:
+        run_dir = self.copy("nominal_a")
+        s = json.loads((run_dir / "executions.jsonl").read_text())
+        s["verdict"]["not_before"], s["verdict"]["evidence_t"] = 0, []
+        (run_dir / "executions.jsonl").write_text(json.dumps(s) + "\n")
+        errors = validate_run(run_dir).errors
+        self.assertTrue(any("verification starts before the executor's claim" in e for e in errors), errors)
+        self.assertTrue(any("evidence ids, 0 times" in e for e in errors), errors)
+
     def test_refuses_a_broken_s0_record(self) -> None:
         run_dir = self.copy("nominal_a")
         path = next(run_dir.glob("s0_*.npz"))

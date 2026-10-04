@@ -55,7 +55,7 @@ EVENT_TYPES = frozenset(
         "chunk",
         "fallback.install",
         "fallback.rejected",
-        "fallback.clear",
+        "s0.hold",
         "verify.attempt",
         "verify.evidence",
         "verdict",
@@ -242,8 +242,13 @@ def _check_summary(s: Json, where: str, errors: list[str]) -> None:
             verdict, {"kind": str, "evidence": list, "evidence_t": list, "reason": str, "not_before": int}, f"{where} verdict", errors
         ):
             return
-        if any(not isinstance(t, int) or t < verdict["not_before"] for t in verdict["evidence_t"]):
-            errors.append(f"{where}: verdict evidence older than not_before {verdict['not_before']}")
+        if verdict["kind"] != VerdictKind.INCONCLUSIVE:  # a decisive verdict rests on fresh, known observations
+            if len(verdict["evidence_t"]) != len(verdict["evidence"]):
+                errors.append(f"{where}: {len(verdict['evidence'])} evidence ids, {len(verdict['evidence_t'])} times")
+            if any(not isinstance(t, int) or t < verdict["not_before"] for t in verdict["evidence_t"]):
+                errors.append(f"{where}: verdict evidence older than not_before {verdict['not_before']}")
+        if isinstance(claim, dict) and isinstance(claim.get("t"), int) and verdict["not_before"] < claim["t"]:
+            errors.append(f"{where}: verification starts before the executor's claim")
     expected_verdict = {
         (State.SUCCEEDED, None): VerdictKind.SATISFIED,
         (State.FAILED, Category.VERIFICATION_FAILED): VerdictKind.VIOLATED,
@@ -318,17 +323,27 @@ def validate_run(run_dir: Path) -> TraceCheck:
         per_second[event["t"] // SECOND] += 1
         ended = event["type"] == "run.end"
     check.events = len(lines)
-    if lines and json.loads(lines[0]).get("type") != "run.start":
+    try:
+        first = json.loads(lines[0]) if lines else {}
+    except ValueError:
+        first = {}
+    if not isinstance(first, dict) or first.get("type") != "run.start":
         errors.append("events.jsonl: does not begin with run.start")
     busiest = max(per_second.values(), default=0)
     if busiest > MAX_EVENTS_PER_SECOND:
         errors.append(f"events.jsonl: {busiest} events in one simulated second, more than {MAX_EVENTS_PER_SECOND}")
 
+    summaries = []
     try:
-        summaries = [json.loads(line) for line in (run_dir / "executions.jsonl").read_text().splitlines()]
-    except (OSError, ValueError) as e:
+        summary_lines = (run_dir / "executions.jsonl").read_text().splitlines()
+    except OSError as e:
         errors.append(f"executions.jsonl: {e}")
-        summaries = []
+        summary_lines = []
+    for n, line in enumerate(summary_lines):
+        try:
+            summaries.append(json.loads(line))
+        except ValueError:
+            errors.append(f"executions.jsonl line {n + 1}: not JSON")
     ids = set()
     for n, s in enumerate(summaries):
         _check_summary(s, f"executions.jsonl line {n + 1}", errors)

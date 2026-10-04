@@ -14,9 +14,9 @@ import numpy as np
 from omarchy_runtime import config
 from omarchy_runtime.contracts import SECOND
 from omarchy_runtime.evaluate import scenario_result
-from omarchy_runtime.scenario import RunResult
+from omarchy_runtime.scenario import RunResult, run
 from omarchy_runtime.trace import S0_MODES, validate_run
-from tests.helpers import scenario
+from tests.helpers import scenario, tmpdir
 
 TRACKING, FALLBACK, HOLD = (S0_MODES.index(m) for m in ("TRACKING", "FALLBACK", "HOLD"))
 
@@ -58,14 +58,14 @@ class TestEveryScenario(unittest.TestCase):
                 tracking = rec["mode"] == TRACKING
                 self.assertTrue(np.all(rec["t"][tracking] <= rec["valid_until"][tracking]))
 
-    def test_s0_leaves_tracking_at_the_first_tick_after_validity(self) -> None:
+    def test_s0_leaves_tracking_no_later_than_the_first_tick_after_validity(self) -> None:
+        # Earlier is allowed: when an execution stops running, the runtime tells S0 to hold.
         for name in config.scenario_names():
             with self.subTest(name):
                 rec = scenario(name).record()
                 for mode, first, _ in blocks(rec["mode"]):
                     if mode != TRACKING and first > 0 and rec["mode"][first - 1] == TRACKING:
-                        self.assertGreater(rec["t"][first], rec["valid_until"][first - 1])
-                        self.assertLessEqual(rec["t"][first - 1], rec["valid_until"][first - 1])
+                        self.assertLessEqual(rec["t"][first], rec["valid_until"][first - 1] + SECOND // 1000)
 
     def test_no_s0_rate_event_in_the_event_stream(self) -> None:
         for name in config.scenario_names():
@@ -129,6 +129,8 @@ class TestProperties(unittest.TestCase):
         held = [(m, a, b) for m, a, b in blocks(rec["mode"]) if m == HOLD]
         self.assertEqual(len(held), 1)
         self.assertLessEqual(rec["t"][held[0][1]] - start, SECOND // 2)  # the last chunk ran out within its horizon
+        # S0 held at exactly the first tick after the last chunk's validity.
+        self.assertEqual(rec["t"][held[0][1]], rec["valid_until"][held[0][1] - 1] + SECOND // 1000)
         self.assertTrue(np.all(rec["position"][held[0][1] : held[0][2] + 1, -1] == 0.0), "gripper opened while holding")
         kinds = [kind for _, kind, _ in r.world.events]
         self.assertEqual(kinds, ["grasp", "release"])  # nothing slipped while S0 held
@@ -178,6 +180,20 @@ class TestProperties(unittest.TestCase):
         self.assertEqual(times, sorted(times))
         self.assertEqual(idle, sorted(idle))
         self.assertGreater(times[2] - times[0], 2 * 4.9)  # two decisions, each 4.9 s slower
+
+    def test_a_retry_right_after_a_failure_starts_clean(self) -> None:
+        # No settling and no S2 latency: x02 starts while x01's last chunk would still be valid.
+        path = tmpdir() / "fast_retry.toml"
+        text = (config.SCENARIOS / "slip_retry.toml").read_text().replace("latency_s = 0.1", "latency_s = 0.0")
+        path.write_text(text + "\n[verification]\nsettle_s = 0.0\n")
+        r = run(str(path), tmpdir() / "fast_retry")
+        self.assertEqual([s["outcome"] for s in r.summaries], ["FAILED", "SUCCEEDED"])
+        retry = r.summaries[1]
+        self.assertEqual(retry["s0"]["rejected_chunks"], 0)
+        self.assertGreater(retry["timing"]["time_to_first_chunk_ns"], 0)
+        self.assertLessEqual(retry["timing"]["time_to_first_chunk_ns"], SECOND // 10)  # S1 latency plus one step
+        holds = [e for e in events(r) if e["type"] == "s0.hold"]
+        self.assertEqual([e["execution"] for e in holds], [s["execution_id"] for s in r.summaries])
 
     def test_p7_explicit_rejection_with_reasons(self) -> None:
         r = scenario("unsupported_clean")

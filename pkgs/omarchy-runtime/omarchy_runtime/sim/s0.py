@@ -84,8 +84,8 @@ class SimS0:
             raise ChunkRejected(Rejection.EXPIRED, f"fallback valid until {spec.valid_until} ns, now {now} ns")
         self.fallback, self.engaged = spec, None
 
-    def clear_fallback(self) -> None:
-        self.fallback, self.engaged = None, None
+    def hold(self) -> None:
+        self.chunk, self.fallback, self.engaged = None, None, None
 
     def status(self) -> S0Status:
         counters = S0Counters(max_tracking_error=self.max_error, **self.c)

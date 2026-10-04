@@ -8,6 +8,8 @@ import unittest
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+
 from omarchy_runtime import config
 from omarchy_runtime.belief import WorldState
 from omarchy_runtime.contracts import (
@@ -33,12 +35,14 @@ from omarchy_runtime.contracts import (
     S0Status,
     S1Policy,
     State,
+    Update,
     Verdict,
     VerdictKind,
     ns,
 )
-from omarchy_runtime.extensions import GeometricVerifier, IdentityFilter
+from omarchy_runtime.extensions import FixedLatency, GeometricVerifier, IdentityFilter
 from omarchy_runtime.runtime import Params, Runtime
+from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Mailbox
 from omarchy_runtime.trace import TraceWriter, validate_run
 from tests.helpers import GANTRY, GANTRY_CFG, IN_RACK, RACK_SPOT, TABLE_SPOT, belief, observation, tmpdir
@@ -62,7 +66,7 @@ class FakeS0:
             raise ChunkRejected(Rejection.EXPIRED, "expired")
         self.installed.append(spec)
 
-    def clear_fallback(self) -> None:
+    def hold(self) -> None:
         self.cleared += 1
 
     def status(self) -> S0Status:
@@ -117,7 +121,9 @@ class StaleVerifier:
 class Rig:
     """A runtime on the gantry with fake S0 and S1, stepped at 20 Hz."""
 
-    def __init__(self, policy: FakePolicy | None = None, verifier: Any = None, **params: float) -> None:
+    def __init__(
+        self, policy: FakePolicy | None = None, verifier: Any = None, observation_filter: Any = None, factory: Any = None, **params: float
+    ) -> None:
         self.policy = policy or FakePolicy()
         self.s0, self.host, self.inbox = FakeS0(), FakeHost(), Mailbox[Observation]()
         self.dir = tmpdir() / "run"
@@ -126,13 +132,13 @@ class Rig:
             body=GANTRY,
             capabilities=config.capabilities(GANTRY_CFG),
             bindings=config.bindings(GANTRY_CFG),
-            implementations={"pick_place.arm3": FakePolicy, "pick_place.gantry": lambda: self.policy},
+            implementations={"pick_place.arm3": FakePolicy, "pick_place.gantry": factory or (lambda: self.policy)},
             params=Params(**{k: ns(v) for k, v in p.items()}),
             belief=belief(),
             s0=self.s0,
             s1_host=self.host,
             observations=self.inbox,
-            observation_filter=IdentityFilter(),
+            observation_filter=observation_filter or IdentityFilter(),
             verifiers={"in": verifier or GeometricVerifier()},
             trace=TraceWriter(self.dir, {"scenario": "rig"}),
             run_id="rig",
@@ -302,7 +308,7 @@ class TestFallbacksAndApi(unittest.TestCase):
         kinds = [e["type"] for e in rig.events()]
         self.assertEqual(kinds.count("fallback.rejected"), 2)
         self.assertEqual(kinds.count("fallback.install"), 1)
-        self.assertEqual(kinds.count("fallback.clear"), 1)
+        self.assertEqual(kinds.count("s0.hold"), 1)
 
     def test_a_fallback_for_another_body_is_refused(self) -> None:
         rig = Rig()
@@ -311,6 +317,10 @@ class TestFallbacksAndApi(unittest.TestCase):
         rig.runtime.submit(InstallFallback(x, self.spec(config.body(config.effective("nominal_a")))))
         rig.run(0.1, chunks=True)
         self.assertEqual(rig.s0.installed, [])
+
+    def test_only_runtime_messages_are_accepted(self) -> None:
+        with self.assertRaises(ContractError):
+            Rig().runtime.submit(IN_RACK)  # type: ignore[arg-type]
 
     def test_messages_must_be_json(self) -> None:
         with self.assertRaises(ContractError):
@@ -335,6 +345,81 @@ class TestFallbacksAndApi(unittest.TestCase):
         self.assertIn("decision", kinds)
         check = validate_run(rig.dir)
         self.assertEqual([e for e in check.errors if not e.startswith("run.json")], [])  # the rig's header is minimal
+
+
+class Raises:
+    """An extension that fails: a filter, a verifier, or a policy factory."""
+
+    id = "raises"
+    version = "0"
+
+    def apply(self, observation: Observation) -> tuple[Observation, tuple[str, ...]]:
+        raise RuntimeError("filter broke")
+
+    def verify(self, goal: Goal, belief: WorldState, not_before: Ns) -> Verdict:
+        raise ZeroDivisionError("verifier broke")
+
+    def __call__(self) -> S1Policy:
+        raise RuntimeError("no policy")
+
+
+class TestFailingExtensions(unittest.TestCase):
+    """A failing extension fails an execution or loses an observation, never the run."""
+
+    def test_a_failing_verifier_never_gives_success(self) -> None:
+        s = TestVerification().done(Rig(verifier=Raises()), {"cup_1": RACK_SPOT})
+        self.assertEqual((s["outcome"], s["category"]), ("UNVERIFIED", "VERIFICATION_INCONCLUSIVE"))
+        self.assertIn("ZeroDivisionError", s["verdict"]["reason"])
+
+    def test_a_failing_filter_drops_observations_from_the_belief(self) -> None:
+        rig = Rig(observation_filter=Raises())
+        x = rig.request()
+        rig.run(0.3)
+        self.assertEqual(rig.runtime.belief.version, 0)  # nothing unfiltered got in
+        self.assertEqual(rig.summary(x)["category"], "PRECONDITION_UNMET")
+        errors = [e for e in rig.events() if e["type"] == "error"]
+        self.assertTrue(errors and all("filter broke" in e["payload"]["reason"] for e in errors))
+
+    def test_a_failing_policy_factory_fails_the_execution(self) -> None:
+        rig = Rig(factory=Raises())
+        rig.run(0.1)
+        x = rig.request()
+        rig.run(0.2)
+        self.assertEqual((rig.summary(x)["outcome"], rig.summary(x)["category"]), ("FAILED", "IMPLEMENTATION_ERROR"))
+        self.assertTrue(rig.runtime.idle())
+
+
+class TestScriptedS2(unittest.TestCase):
+    def test_a_failing_recovery_policy_means_giving_up(self) -> None:
+        class Api:
+            sent: list[Any] = []
+
+            def submit(self, message: Any) -> str | None:
+                self.sent.append(message)
+                return "x1" if isinstance(message, GoalRequest) else None
+
+            def poll(self) -> list[Update]:
+                return []
+
+        class Broken:
+            id, version = "broken", "0"
+
+            def decide(self, goal: Goal, summary: Json, belief: Json) -> Any:
+                raise KeyError("verdict")
+
+        api = Api()
+        s2 = ScriptedS2(api, [IN_RACK], GANTRY, Broken(), FixedLatency(0.0), np.random.default_rng(0), fallback=False, task_prefix="t")
+        s2.step(0)
+        s2.step(STEP)
+        failed = {"outcome": "FAILED", "category": "S1_STALL", "belief_final": {}}
+        s2._see(Update("x1", "t-t01", State.FAILED, failed), 2 * STEP)
+        s2.step(3 * STEP)
+        s2.step(4 * STEP)
+        decision = api.sent[-1]
+        self.assertIsInstance(decision, Decision)
+        self.assertEqual(decision.action, "give_up")
+        self.assertIn("broken@0 failed: KeyError", decision.reason)
+        self.assertTrue(s2.done)
 
 
 if __name__ == "__main__":

@@ -647,7 +647,10 @@ class S0(Protocol):
     def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
         """Replace the installed fallback. Raises ChunkRejected if it does not fit the body."""
 
-    def clear_fallback(self) -> None: ...
+    def hold(self) -> None:
+        """Stop executing the active chunk and drop the installed fallback: HOLD
+        from the next tick until a new chunk arrives. The runtime calls it when
+        an execution stops running."""
 
     def status(self) -> S0Status: ...
 

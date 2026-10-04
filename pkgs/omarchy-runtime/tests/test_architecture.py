@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,15 +17,21 @@ COMPOSITION = ("omarchy_runtime.sim", "omarchy_runtime.scenario", "omarchy_runti
 
 
 def imports(path: Path) -> set[str]:
+    """Every module a file imports, `from a import b` counted as a and a.b.
+    Relative imports are refused, so that every import is visible here."""
     names = set()
     for node in ast.walk(ast.parse(path.read_text())):
         if isinstance(node, ast.Import):
             names |= {a.name for a in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level or not node.module:
+                raise AssertionError(f"{path.name}: relative import (line {node.lineno})")
+            names |= {node.module} | {f"{node.module}.{a.name}" for a in node.names}
     return names
 
 
+TMP = tempfile.TemporaryDirectory()
+unittest.addModuleCleanup(TMP.cleanup)
 MODULES = {p.relative_to(PACKAGE).with_suffix("").as_posix().replace("/", "."): imports(p) for p in PACKAGE.rglob("*.py")}
 
 
@@ -34,6 +41,14 @@ class TestArchitecture(unittest.TestCase):
             with self.subTest(module):
                 bad = {name for name in MODULES[module] if name.startswith(COMPOSITION)}
                 self.assertEqual(bad, set())
+
+    def test_the_import_reader_sees_every_form(self) -> None:
+        path = Path(TMP.name) / "sample.py"
+        path.write_text("import a.b\nfrom omarchy_runtime import scenario\n")
+        self.assertEqual(imports(path), {"a.b", "omarchy_runtime", "omarchy_runtime.scenario"})
+        path.write_text("from .sim import world\n")
+        with self.assertRaises(AssertionError):
+            imports(path)
 
     def test_nothing_imports_ros(self) -> None:
         for module, names in MODULES.items():

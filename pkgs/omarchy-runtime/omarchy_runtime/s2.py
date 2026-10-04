@@ -26,6 +26,7 @@ from omarchy_runtime.contracts import (
     Message,
     Ns,
     RecoveryPolicy,
+    Retry,
     RuntimeApi,
     State,
     Update,
@@ -105,8 +106,13 @@ class ScriptedS2:
             return
         assert self.goal is not None and self.task is not None
         summary = update.summary
-        choice = self.recovery.decide(self.goal, summary, summary["belief_final"])
         policy = f"{self.recovery.id}@{self.recovery.version}"
+        try:
+            choice = self.recovery.decide(self.goal, summary, summary["belief_final"])
+            if not isinstance(choice, Retry | GiveUp):
+                raise TypeError(f"returned {type(choice).__name__}")
+        except Exception as e:  # noqa: BLE001 - a failing recovery policy means giving up, recorded as such
+            choice = GiveUp(f"recovery policy {policy} failed: {type(e).__name__}: {e}")
         if isinstance(choice, GiveUp):
             self._decide(now, Decision(self.task, update.execution_id, "give_up", choice.reason, policy))
         else:
