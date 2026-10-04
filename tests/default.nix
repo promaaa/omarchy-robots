@@ -105,6 +105,28 @@ in
         python3 -m unittest -v test_omarchy_robot
       '';
 
+  # The runtime: lint, strict types, and every test, the whole scenario matrix
+  # included (simulated, no VM).
+  omarchy-runtime =
+    check "omarchy-runtime"
+      [
+        pkgs.ruff
+        (pkgs.python3.withPackages (ps: [
+          ps.mypy
+          ps.numpy
+        ]))
+        pkgs.omarchy-runtime
+      ]
+      ''
+        cd pkgs/omarchy-runtime
+        export PYTHONDONTWRITEBYTECODE=1
+        ruff check --no-cache .
+        ruff format --check --no-cache .
+        mypy --cache-dir=/dev/null omarchy_runtime tests
+        python3 -m unittest discover -s tests -t . -v
+        omarchy-runtime --version
+      '';
+
   # Defaults of the installed system that the QEMU test VMs override.
   defaults =
     let

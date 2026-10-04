@@ -78,6 +78,9 @@
 
       overlays.default = final: _: {
         omarchy-robot = final.callPackage ./pkgs/omarchy-robot { };
+        omarchy-runtime = final.callPackage ./pkgs/omarchy-runtime {
+          revision = self.rev or self.dirtyRev or null;
+        };
         omarchy-branding = final.callPackage ./pkgs/omarchy-branding { };
       };
 
@@ -85,14 +88,17 @@
         lib.recursiveUpdate
           {
             x86_64-linux = {
-              inherit (pkgs) omarchy-robot;
+              inherit (pkgs) omarchy-robot omarchy-runtime;
               vm = self.nixosConfigurations.vm.config.system.build.vm;
               default = self.packages.x86_64-linux.vm;
               installer-vm = installer self.nixosConfigurations.vm;
               installer-pc = installer self.nixosConfigurations.pc;
             }
             // perBoard "flash" (board: flash board [ (onBoard board) ]);
-            aarch64-linux = perBoard "installer" (board: installer self.nixosConfigurations.${board});
+            aarch64-linux = perBoard "installer" (board: installer self.nixosConfigurations.${board}) // {
+              # Pure Python and numpy: the same package for a Jetson.
+              inherit ((nixpkgs.legacyPackages.aarch64-linux.extend self.overlays.default)) omarchy-runtime;
+            };
           }
           # .#flash and .#installer: the bring-up artifacts for robot.nix as written.
           (
@@ -124,9 +130,11 @@
       devShells.x86_64-linux.default = pkgs.mkShell {
         packages = with pkgs; [
           deadnix
-          mypy
           nixfmt
-          python3
+          (python3.withPackages (ps: [
+            ps.mypy
+            ps.numpy
+          ]))
           ruff
           statix
         ];
