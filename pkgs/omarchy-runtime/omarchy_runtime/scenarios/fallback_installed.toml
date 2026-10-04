@@ -1,0 +1,25 @@
+description = """S2 installs a fallback for the execution: move to the body's safe pose with the
+gripper closed. S1 then stalls for 2.5 s while carrying the cup: S0 runs the
+fallback, returns to HOLD when it ends, and S1 resumes from the safe pose."""
+seed = 7
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+fallback = true
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "s1_stall"
+after = "grasp"
+delay_s = 1.6
+duration_s = 2.5
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

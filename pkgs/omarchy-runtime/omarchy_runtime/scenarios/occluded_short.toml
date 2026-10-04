@@ -1,0 +1,25 @@
+description = """The drying rack is hidden for 2.5 s from the moment the cup is released. The
+first verification attempts are INCONCLUSIVE; the rack reappears within the
+verifier's budget and a fresh observation shows the cup in it."""
+seed = 4
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "occlusion"
+region = "drying_rack"
+after = "release"
+delay_s = 0.0
+duration_s = 2.5
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

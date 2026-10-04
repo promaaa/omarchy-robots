@@ -1,0 +1,24 @@
+description = """S1 stops producing chunks for 1 s while it carries the cup. S0 runs out its
+last chunk, then HOLDs with the gripper closed; S1 resumes, plans again from
+where the arm is, and the execution succeeds."""
+seed = 5
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "s1_stall"
+after = "grasp"
+delay_s = 1.6
+duration_s = 1.0
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

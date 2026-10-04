@@ -1,0 +1,26 @@
+description = """The drying rack is hidden from the camera for the whole run. The cup does go
+into the rack, but no observation can show it: the verifier stays INCONCLUSIVE
+past its budget and the outcome is UNVERIFIED, never SUCCEEDED."""
+seed = 3
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "occlusion"
+region = "drying_rack"
+after = "start"
+delay_s = 0.0
+duration_s = 120.0
+
+[[expect]]
+outcome = "UNVERIFIED"
+category = "VERIFICATION_INCONCLUSIVE"
+claim = "DONE"
+verdict = "INCONCLUSIVE"
+truth = true

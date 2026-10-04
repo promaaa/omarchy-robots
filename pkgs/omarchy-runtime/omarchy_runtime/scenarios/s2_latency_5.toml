@@ -1,0 +1,29 @@
+description = """Both cups into the drying rack, one task each, with S2 taking 5 s (simulated)
+for every decision, including the fallback it installs for each execution.
+Compared with the other s2_latency scenarios: same outcomes and safety, more
+task time and idle time."""
+seed = 9
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 5
+fallback = true
+goals = [
+  { predicate = "in", args = ["cup_1", "drying_rack"] },
+  { predicate = "in", args = ["cup_2", "drying_rack"] },
+]
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

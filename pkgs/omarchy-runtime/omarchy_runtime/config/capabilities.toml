@@ -1,0 +1,26 @@
+# Capabilities say which goal predicate they achieve, what the body must have
+# and what must hold before they start. Bindings say which implementation runs
+# a capability on which bodies; the resolver picks the highest priority.
+#
+# Preconditions: "observed <param>" (a fresh, confident estimate) and
+# "reachable <param>" (inside the body's workspace).
+
+[capabilities.place_in]
+achieves = "in"
+params = ["object", "container"]
+requires = ["gripper"]
+preconditions = ["observed object", "reachable object", "reachable container"]
+
+[[bindings]]
+capability = "place_in"
+implementation = "pick_place.arm3"
+version = "1"
+bodies = ["arm3"]
+priority = 10
+
+[[bindings]]
+capability = "place_in"
+implementation = "pick_place.gantry"
+version = "1"
+bodies = ["gantry"]
+priority = 10

@@ -1,0 +1,15 @@
+description = """S2 asks for clean(cup_1). No capability achieves "clean": the resolver rejects
+the goal with its reasons, and nothing moves."""
+seed = 8
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "clean", args = ["cup_1"] }]
+
+[[expect]]
+outcome = "REJECTED"
+category = "NO_CAPABILITY"

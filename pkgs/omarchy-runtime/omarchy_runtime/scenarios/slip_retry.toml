@@ -1,0 +1,31 @@
+description = """The cup slips from the gripper over the table while S1 carries it; S1 does not
+notice and claims DONE. The verifier sees the cup on the table (VIOLATED), the
+recovery policy retries once, and the retry succeeds."""
+seed = 2
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "slip"
+after = "grasp"
+delay_s = 1.6  # during transit, still over the table
+duration_s = 0.1
+
+[[expect]]
+outcome = "FAILED"
+category = "VERIFICATION_FAILED"
+claim = "DONE"
+verdict = "VIOLATED"
+truth = false
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

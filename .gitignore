@@ -9,3 +9,5 @@ result-*
 __pycache__/
 .mypy_cache/
 .ruff_cache/
+# Runtime run directories (omarchy-runtime demo, eval, run)
+runs/

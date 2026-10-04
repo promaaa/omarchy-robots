@@ -1,0 +1,41 @@
+# The simulated kitchen, in a vertical plane: metres, x to the right, z up.
+# The runtime's belief gets the geometry of surfaces and regions and the size
+# of objects; the objects' positions here are the simulator's ground truth.
+
+[surfaces.counter]  # the drying rack stands on it
+x0 = 0.15
+x1 = 0.50
+z = 0.75
+
+[surfaces.table]
+x0 = 0.50
+x1 = 1.05
+z = 0.75
+
+[regions.drying_rack]
+x0 = 0.22
+x1 = 0.48
+z0 = 0.75
+z1 = 0.95
+
+[objects.cup_1]
+width = 0.08
+height = 0.10
+x = 0.78  # resting on the table
+
+[objects.cup_2]
+width = 0.08
+height = 0.10
+x = 0.92
+
+[sensor]  # structured detections, no images
+source = "sim.camera"
+noise_m = 0.003  # standard deviation of each coordinate
+confidence = 0.95
+
+[rates_hz]  # simulated rates
+s0 = 1000
+s1 = 20
+supervisor = 20
+observation = 20
+s2 = 10

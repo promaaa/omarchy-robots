@@ -1,0 +1,29 @@
+[project]
+name = "omarchy-runtime"
+version = "0.0.2"
+description = "Omarchy Robots runtime: goals in, verified executions and complete traces out (simulated)"
+license = "MIT"
+requires-python = ">=3.13"
+dependencies = ["numpy"]
+
+[project.scripts]
+omarchy-runtime = "omarchy_runtime.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["omarchy_runtime*"]
+
+[tool.setuptools.package-data]
+omarchy_runtime = ["config/*.toml", "scenarios/*.toml"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I", "PLW", "BLE", "EXE"]
+
+[tool.mypy]
+strict = true

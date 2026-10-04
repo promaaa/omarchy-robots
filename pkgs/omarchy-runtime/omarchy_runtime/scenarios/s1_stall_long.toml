@@ -1,0 +1,23 @@
+description = """S1 stops producing chunks for good while it carries the cup. S0 HOLDs with the
+gripper closed; after 3 s without a chunk the supervisor ends the execution as
+FAILED/S1_STALL, and S0 is left holding the cup. The recovery policy gives up."""
+seed = 6
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "s1_stall"
+after = "grasp"
+delay_s = 1.6
+duration_s = 100.0
+
+[[expect]]
+outcome = "FAILED"
+category = "S1_STALL"
+truth = false

@@ -1,0 +1,16 @@
+description = "Put cup_1 in the drying rack with body B (Cartesian gantry). Only the body differs from nominal_a."
+seed = 1
+body = "gantry"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

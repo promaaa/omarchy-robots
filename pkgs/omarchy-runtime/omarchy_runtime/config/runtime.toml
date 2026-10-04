@@ -1,0 +1,24 @@
+# The runtime's parameters, in simulated seconds. A scenario may override any
+# of them in its own [runtime] or [verification] table.
+
+[runtime]
+deadline_s = 60.0  # longest an execution may run
+s1_stall_timeout_s = 3.0  # S1 is stalled after this long without a chunk reaching S0
+freshness_s = 1.0  # how recent an estimate must be for preconditions and the already-satisfied check
+
+[verification]
+settle_s = 0.3  # wait after the executor's claim before trusting observations
+budget_s = 2.0  # then give the verifier this long to decide
+margin_m = 0.01  # positions this close to a boundary are UNKNOWN
+min_confidence = 0.5
+grasp_radius_m = 0.03  # an object this close to a closed gripper is held
+
+[extensions]  # ids from omarchy_runtime/extensions.py
+filter = "identity"
+recovery = "retry_once"
+s2_latency = "fixed"
+
+[extensions.verifiers]  # per predicate
+in = "geometric"
+on = "geometric"
+held = "geometric"
