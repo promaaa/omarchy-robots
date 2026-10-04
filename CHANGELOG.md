@@ -7,6 +7,58 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+Milestone R1: the first slice of the runtime, simulated, on Omarchy Robots;
+and a generic `pc` board. Not hardware-tested, and nothing is real-time.
+
+### Added
+
+- `omarchy-runtime` (`pkgs/omarchy-runtime`, Python with numpy): goals in,
+  verified executions and traces out. A deterministic resolver that records
+  every candidate and its reason; the execution lifecycle with outcomes
+  SUCCEEDED, FAILED, UNVERIFIED, REJECTED, ABORTED and eight failure
+  categories; a supervisor (deadline, S1 liveness, S0 fault); a belief built
+  only from observations; verification as a stepped phase whose verdict is
+  recorded apart from the executor's claim. Commands `demo`, `eval`, `run`,
+  `show`, `validate-trace`.
+- Contracts for action chunks, S0 status and fallbacks as plain data; a
+  simulated 1 kHz S0 that never waits (chunk, fallback or HOLD) and enforces
+  position, velocity and workspace limits; a scripted S1 per body; a planar
+  arm and a gantry with different action spaces; a scripted S2 with a
+  decision latency, using only the public API.
+- Twelve scenarios (nominal on both bodies, slip and retry, short and long
+  occlusion, short and long S1 stall, installed fallback, unsupported goal,
+  S2 latency 0.1, 1 and 5 s) and an evaluation harness that compares each
+  execution with the simulator's ground truth.
+- Trace schema 1: `run.json` (with the contents of
+  `/etc/omarchy-robot/build.json`, or null), `events.jsonl`,
+  `executions.jsonl`, optional `s0_<id>.npz`, `results.json`. Versioned
+  separately from releases and from the validation report.
+- Extension points for collaborators, each with a default and reusable
+  contract tests: ObservationFilter, Verifier (per predicate),
+  RecoveryPolicy, S2 latency model.
+- `omarchy.robot.runtime.enable`: the runtime on the robot, its runs in
+  `/var/lib/omarchy-runtime/runs`; `build.json` gains `runtime` (version or
+  null) and `omarchy-robot info` prints it. Validation report schema
+  unchanged (1).
+- Board `pc`: a generic x86_64 UEFI computer (NixOS generic hardware
+  support, redistributable firmware, Intel and AMD microcode, `/dev/nvme0n1`
+  by default) and its installer image `.#installer-pc`. `gpu.enable` and
+  `power.mode` are refused on it.
+- Checks: `omarchy-runtime` (ruff, mypy --strict, 86 tests with the
+  scenario matrix, no VM), `vm-runtime` (the runtime in a vm-board VM),
+  `vm-installer-pc`, `eval-pc`, `eval-runtime-orin-agx-devkit`,
+  `eval-runtime-pc`, refusals for `pc`.
+- `AGENTS.md` for collaborators and coding agents, `.github/CODEOWNERS`, the
+  manual's Runtime chapter and "Install on a spare PC".
+
+### Changed
+
+- Versioning: v0.0.2 part 1 is milestone R1. The first board booted and validated
+  on hardware takes v0.1.0.
+- Jetson boards are the `boards.nix` entries with a `som`, instead of every
+  board but `vm`.
+- `nix develop` has python3 with numpy and mypy instead of python3 and mypy.
+
 ## [0.0.1] - 2026-10-03
 
 ### Part 5 (2026-10-03)

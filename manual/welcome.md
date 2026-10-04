@@ -17,17 +17,19 @@ So the whole machine is declared in one file, [`robot.nix`](../robot-nix/). Whic
 - **An identity in every build.** Each system records its flake revision, the hash of `robot.nix`, its inputs, kernel and JetPack version, so a result can name the exact system that produced it.
 - **Rollback.** A bounded history of system generations stays on disk and in the boot menu.
 - **One command.** [`omarchy-robot`](../omarchy-robot/) shows what the system is, checks that it works, updates it and rolls it back.
+- **A runtime, simulated for now.** [`omarchy-runtime`](../runtime/) takes goals, runs and verifies them, and records traces that name the system they ran on. Its robots, controller and camera are simulations.
 
 ## Where it stands
 
-This is the beginning of the project. Version **0.0.1** (October 3, 2026) is the base system only:
+This is the beginning of the project. Version **0.0.2** (October 2026) adds the first slice of the runtime and a generic `pc` board to the base system of 0.0.1:
 
 | Works today | Not yet |
 |---|---|
-| The `vm` board boots, installs onto a blank disk, updates and rolls back, all tested in virtual machines | Running on a real Jetson. Every Jetson target evaluates and builds, none has been booted on hardware |
-| Flash scripts and installer images build for every supported Jetson | A robot runtime. This is the base it will run on |
+| The `vm` board boots, installs onto a blank disk, updates and rolls back, all tested in virtual machines | Running on real hardware. Every Jetson target evaluates and builds, and so does `pc`; none has been booted on a real board or PC |
+| The `pc` board's installer installs onto an emulated NVMe drive, in a virtual machine | |
+| The runtime runs its simulated dishwashing scenarios on a laptop and inside an Omarchy Robots VM | A real robot, a real camera, a learned policy, anything real-time |
 
-Version 0.1.0 is reserved for the first board booted and validated on real hardware. Until then, treat anything about Jetson as prepared, not proven.
+The first board booted and validated on real hardware will take version 0.1.0. Until then, treat anything about Jetson or a real PC as prepared, not proven.
 
 ## How to read this manual
 

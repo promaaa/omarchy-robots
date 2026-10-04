@@ -7,11 +7,14 @@ permalink: /development/
 Everything is a Nix flake. One command checks the whole project:
 
 ```sh
-nix flake check     # format, statix, deadnix, ruff, mypy, unit tests,
-                    # every board evaluated, VM tests (base, update/rollback, installer)
+nix flake check     # format, statix, deadnix, ruff, mypy, unit tests, the runtime's scenario
+                    # matrix, every board evaluated (with and without the runtime),
+                    # VM tests (base, update/rollback, installer on vm and pc, runtime)
 nix fmt             # nixfmt on every .nix file
-nix develop         # a shell with nixfmt, statix, deadnix, ruff, mypy, python3
+nix develop         # a shell with nixfmt, statix, deadnix, ruff, python3 with numpy and mypy
 ```
+
+The runtime has its own check, which runs without a VM in under a minute: `nix build .#checks.x86_64-linux.omarchy-runtime`. Inside `nix develop`, from `pkgs/omarchy-runtime`, `python3 -m unittest discover -s tests -t .` runs the same tests. [AGENTS.md](https://github.com/promaaa/omarchy-robots/blob/main/AGENTS.md) lists the runtime's binding principles and how to add an extension.
 
 The VM tests need the `nixos-test` and `kvm` system features in `nix.conf`. CI runs `nix flake check` on every push; building the `orin-agx-devkit` system on an arm64 runner is a manual workflow input, because it takes about an hour.
 
@@ -28,6 +31,7 @@ Every artifact comes from `robot.nix`. `<board>` is any Jetson board.
 | `nix build .#installer-vm` or `.#installer-pc` | the installation image for the `vm` or `pc` board |
 | `nix build .#vm` | the `vm` board as a QEMU VM (`nix run .#vm`) |
 | `nix build .#omarchy-robot` | the command alone |
+| `nix build .#omarchy-runtime` | the runtime alone; `nix run .#omarchy-runtime -- demo` runs it |
 
 `.#flash` and `.#installer` follow the board set in `robot.nix`. With `board = "vm"` or `"pc"`, only `.#installer` exists.
 
@@ -38,8 +42,9 @@ Building a Jetson system on an x86_64 host needs `extra-platforms = aarch64-linu
 ```
 flake.nix            inputs pinned in flake.lock; every output
 robot.nix            the one file a user edits
-modules/             options, base, identity, jetson, vm, installer, boards, branding
+modules/             options, base, identity, jetson, vm, pc, runtime, installer, boards, branding
 pkgs/omarchy-robot/  the command, its unit tests and fixtures
+pkgs/omarchy-runtime/  the runtime: contracts, control plane, simulator, scenarios, tests
 tests/               checks and VM tests
 branding/            logo and wordmark
 manual/              this manual
@@ -47,7 +52,7 @@ manual/              this manual
 
 ## Versions
 
-Before 1.0, releases count up: v0.0.1 part 3, v0.0.1 part 4, and so on. This milestone is VM-validated: Jetson targets evaluate and build, nothing hardware-tested. **v0.1.0 is reserved for the first board booted and validated on hardware.** The `validate` report schema is versioned separately. Every change is in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md).
+Before 1.0, releases count up: v0.0.1 part 3, v0.0.1 part 4, and so on. v0.0.1 part 3 to v0.0.1 were milestone OS-1, the base system. v0.0.2 part 1 is milestone R1: the runtime, simulated, and the `pc` board. The first board booted and validated on hardware takes v0.1.0. The `validate` report schema and the runtime's trace schema are versioned separately. Every change is in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md).
 
 ## This manual
 

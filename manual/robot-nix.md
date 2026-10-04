@@ -39,6 +39,7 @@ Every option lives under `omarchy.robot`. Types and defaults are in [`modules/op
 | `timezone` | `"UTC"` | Time zone of the clock and the logs, like `"Asia/Seoul"`. |
 | `gpu.enable` | `false` | Jetson only. Installs the NVIDIA GPU userspace and the CUDA and TensorRT samples that `validate` runs. Large. |
 | `power.mode` | `null` (board default) | Jetson only. The `nvpmodel` mode ID applied at boot. IDs differ per board: `nvpmodel -p --verbose` on the robot lists them. |
+| `runtime.enable` | `false` | Installs [`omarchy-runtime`](../runtime/), the execution runtime (simulated for now), with `/var/lib/omarchy-runtime/runs` for its run directories. A command, not a service. |
 | `generations` | `10` | Systems kept for rollback, between 2 and 100. Both the boot menu and the weekly garbage collection respect it. |
 
 ## Guard rails

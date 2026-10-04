@@ -10,12 +10,19 @@ identity so an experiment can name the exact system it ran on.
 It is headless and deliberately plain: SSH keys only, a firewall that admits
 SSH and nothing else, a bounded history of system generations to roll back to,
 and one command, `omarchy-robot`, to inspect, validate, update and roll back.
-There is no robot runtime here yet; this is the base it will run on. It boots
-as Omarchy Robots: its dotted wordmark on the Jetson's UEFI boot screen and the
-installer's menus, its logo on the login banners.
+It boots as Omarchy Robots: its dotted wordmark on the Jetson's UEFI boot
+screen and the installer's menus, its logo on the login banners.
 
-**Status:** v0.0.1 (milestone OS-1, final identity) runs and is tested in virtual
-machines. The Jetson targets evaluate and are partly built; none has run on
+On top of it runs the first slice of the [runtime](#runtime), the layer
+between intelligence and robot bodies: an application asks for a goal, the
+runtime executes it, verifies it from fresh observations and records a trace
+that names the exact system it ran on. **The runtime is simulated**: no robot,
+nothing real-time.
+
+**Status:** v0.0.2 part 1 (milestone R1) runs and is tested in virtual machines: the
+base system, the runtime's simulated scenarios (on a laptop and inside an
+Omarchy Robots VM), and the installation of a generic PC onto an emulated
+disk. The Jetson and pc targets evaluate and are partly built; none has run on
 hardware yet (see the [support matrix](#support-matrix)).
 
 ## One file
@@ -97,6 +104,59 @@ timestamp, the kernel and every check with its data.
 | `power.mode` | `nvpmodel -q` against `power.mode` | Jetson |
 | `thermal` | thermal zones readable; temperatures recorded | Jetson |
 
+## Runtime
+
+> **Simulated.** Bodies, controller, policy and camera are Python simulations
+> running in simulated time. Nothing is real-time and nothing has run on
+> hardware. Every number says whether it is simulated or wall-clock time.
+
+`omarchy-runtime` is the control plane between a slow planner (S2), a policy
+that produces short trajectories, action chunks (S1), and the controller that
+alone commands the actuators (S0). S2 asks for goals such as
+`in(cup_1, drying_rack)`, in JSON; the runtime resolves a capability for this
+body, starts S1, supervises the execution, judges the outcome from fresh
+observations independently of what S1 claims, and writes a trace whose header
+embeds `/etc/omarchy-robot/build.json`.
+
+```
+  S2 (planner)  -- goals, fallbacks, decisions -->  runtime (control plane)
+                <-- execution updates, verdicts --  resolve, supervise, verify,
+                                                     belief, traces
+                                                       |  start/stop     ^  S0 status,
+                                                       v                 |  sampled at 20 Hz
+                                                    S1 (policy) -- action chunks --> S0 --> body
+                                                                (direct, never
+                                                                 through the runtime)
+  a fallback S2 installs ahead of time: S2 -> runtime -> S0, used when chunks stop
+```
+
+S0 never waits: at every tick (1 kHz, simulated) it runs a valid chunk, else
+the fallback S2 installed, else HOLD, and it enforces the body's limits.
+
+```sh
+nix run .#omarchy-runtime -- demo    # nominal_a, then slip_retry, told step by step
+nix run .#omarchy-runtime -- eval    # every scenario, against ground truth
+```
+
+On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
+`nix run .#vm`, then `omarchy-runtime demo` in the VM. Run directories go to
+`/var/lib/omarchy-runtime/runs`, and `omarchy-robot info` names the runtime.
+
+| Scenario | What happens | Outcome |
+|---|---|---|
+| `nominal_a`, `nominal_b` | `in(cup_1, drying_rack)` on a planar arm, then on a gantry (only `body` differs) | SUCCEEDED |
+| `slip_retry` | the cup slips; S1 still claims DONE; the verifier sees it on the table; one retry | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
+| `occluded_long` | the rack is hidden for the whole run: the cup is there, nothing shows it | UNVERIFIED |
+| `occluded_short` | the rack is hidden for 2.5 s, within the verifier's budget | SUCCEEDED |
+| `s1_stall_short`, `s1_stall_long` | S1 stops for 1 s, or for good, while carrying the cup; S0 holds it | SUCCEEDED; FAILED/S1_STALL |
+| `fallback_installed` | S1 stalls; S0 runs S2's fallback, then HOLD, then S1 resumes | SUCCEEDED |
+| `unsupported_clean` | `clean(cup_1)`: no capability, and the resolver's reasons | REJECTED/NO_CAPABILITY |
+| `s2_latency_0p1`, `_1`, `_5` | both cups, S2 taking 0.1 s, 1 s or 5 s per decision | same outcomes; longer task, more idle time |
+
+The manual's [Runtime chapter](https://promaaa.github.io/omarchy-robots/runtime/)
+has the concepts, the trace format and the extension points for
+collaborators (observation filter, verifier, recovery policy, S2 latency).
+
 ## Support matrix
 
 Status levels, lowest to highest: **evaluates** (the system, its GPU variant,
@@ -106,7 +166,7 @@ flash script and installer image evaluate, with the per-board assertions of
 
 | Target (`board`) | Status | System closure | Built | Last verified |
 |---|---|---|---|---|
-| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots) | 1.1 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
+| `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots); the runtime's reduced scenario set inside the VM, traces carrying its identity | 1.1 GiB; 1.33 GiB with `runtime.enable` (+230 MiB: Python 3, numpy and its BLAS) | system, VM, installer image (1.5 GiB) | 2026-10-04 |
 | `pc` | builds: system, installer image; install path VM-tested: the installer image onto an emulated NVMe drive, boot, validate. Not hardware-tested | 1.9 GiB (all redistributable firmware) | system, installer image (1.5 GiB) | 2026-10-04 |
 | `orin-agx-devkit` | builds: system, flash script | 1.4 GiB | system (natively, GitHub arm64 runner), flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
@@ -143,6 +203,15 @@ Boot time, rc.1 against rc.2 (vm board, QEMU TCG, other builds paused, five
 boots each from a fresh disk): `systemd-analyze` totals average 66.6 s and
 65.9 s, the same within the ±3 s spread; userborn's 1.3 s replaces the Perl
 user script of the initrd, and the 1 s boot menu saves 4 s before the kernel.
+The runtime (2026-10-04, development host, wall-clock): `omarchy-runtime eval`
+runs the twelve scenarios (147 s of simulated time) in 5.4 s; its check
+(ruff, mypy, 86 tests) builds in 29 s; per execution it spends about 40 us
+resolving, 40 us verifying and 6 ms writing its trace. Inside the vm board
+under TCG the same two-scenario evaluation takes 29 s, and the `vm-runtime`
+test 3 min 43 s; the `pc` installation test takes 13 min 24 s. The runtime
+package builds for aarch64-linux in 44 s under emulation (413 MiB closure),
+and that build runs `nominal_a` correctly under QEMU user emulation: on this
+x86_64 host, not on a Jetson.
 
 ## Bring-up runbook
 
@@ -276,10 +345,12 @@ closure over SSH; nothing is compiled on the robot.
 ## Development
 
 ```sh
-nix flake check                 # format, statix, deadnix, ruff, mypy, unit tests,
-                                # every board evaluated, VM tests (base, update/rollback, installer)
+nix flake check                 # format, statix, deadnix, ruff, mypy, unit tests, the runtime's
+                                # scenario matrix, every board evaluated (with and without the
+                                # runtime), VM tests (base, update/rollback, installer on vm and pc,
+                                # runtime)
 nix fmt                         # nixfmt (RFC style) on every .nix file
-nix develop                     # nixfmt, statix, deadnix, ruff, mypy, python3
+nix develop                     # nixfmt, statix, deadnix, ruff, python3 with numpy and mypy
 ```
 
 Artifacts, all built from `robot.nix` (`<board>` is any Jetson board above):
@@ -293,6 +364,7 @@ Artifacts, all built from `robot.nix` (`<board>` is any Jetson board above):
 | `nix build .#installer-vm` / `.#installer-pc` | installation image for the vm or pc board (x86_64) |
 | `nix build .#vm` | the vm board as a QEMU VM (`nix run .#vm`) |
 | `nix build .#omarchy-robot` | the command alone |
+| `nix build .#omarchy-runtime` / `.#packages.aarch64-linux.omarchy-runtime` | the runtime alone (`nix run .#omarchy-runtime -- demo`) |
 
 `.#flash` and `.#installer` follow the board set in `robot.nix`; with
 `board = "vm"` or `"pc"` only `.#installer` exists (x86_64). Building a Jetson system on
@@ -303,17 +375,22 @@ emulation the first time. NixOS VM tests need the `nixos-test` and `kvm`
 system features in `nix.conf`.
 
 Layout: `flake.nix` (inputs pinned in `flake.lock`), `robot.nix`, `modules/`
-(options, base, identity, jetson, vm, installer, boards), `pkgs/omarchy-robot/`
-(the command, its unit tests and fixtures), `tests/` (checks and VM tests).
+(options, base, identity, jetson, vm, pc, runtime, installer, boards),
+`pkgs/omarchy-robot/` (the command, its unit tests and fixtures),
+`pkgs/omarchy-runtime/` (the runtime, its scenarios and tests), `tests/`
+(checks and VM tests). [`AGENTS.md`](AGENTS.md) says which directory belongs
+to which component and how to extend the runtime.
 
 ## Versioning
 
-Before 1.0, releases count up: v0.0.1 part 3, v0.0.1 part 4, and so on. This milestone is
-VM-validated (Jetson targets evaluate and build; not hardware-tested), and
-v0.1.0 is reserved for the first board booted and validated on
-hardware. The validation report schema is versioned separately (`schema` in
-the JSON); its changes are noted in [`CHANGELOG.md`](CHANGELOG.md). Releases
-are source only: no images, no NVIDIA binaries.
+Before 1.0, releases count up: v0.0.1 part 3 to v0.0.1 were milestone OS-1 (the base system,
+VM-validated), v0.0.2 part 1 is milestone R1 (the runtime, simulated, and the pc
+board). The first board booted and
+validated on hardware takes v0.1.0. The validation report schema
+(`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
+`run.json`) are versioned separately from releases; their changes are noted
+in [`CHANGELOG.md`](CHANGELOG.md). Releases are source only: no images, no
+NVIDIA binaries.
 
 ## License
 

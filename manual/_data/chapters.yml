@@ -10,6 +10,8 @@
   url: /bring-up/
 - title: omarchy-robot
   url: /omarchy-robot/
+- title: Runtime
+  url: /runtime/
 - title: Updates and rollback
   url: /updates/
 - title: Security

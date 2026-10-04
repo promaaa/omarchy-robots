@@ -8,7 +8,7 @@ Every robot carries one command for looking after itself. It has four verbs.
 
 | Command | What it does |
 |---|---|
-| `omarchy-robot info [--json]` | What this system is: board, target, Omarchy Robots version, flake revision, `robot.nix` hash, input revisions, NixOS and kernel, JetPack and L4T, current and booted generation. |
+| `omarchy-robot info [--json]` | What this system is: board, target, Omarchy Robots version, flake revision, `robot.nix` hash, input revisions, NixOS and kernel, JetPack and L4T, the runtime's version if it is installed, current and booted generation. |
 | `sudo omarchy-robot validate [--json]` | The bring-up checklist. Exits 1 if any check fails. |
 | `sudo omarchy-robot update <flake-or-system>` | Switch to a new system. |
 | `sudo omarchy-robot rollback` | Switch back to the previous generation. It also becomes the boot default. |
