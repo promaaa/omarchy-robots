@@ -12,7 +12,7 @@ target:
 }:
 let
   robot = target.config.omarchy.robot;
-  isJetson = robot.board != "vm";
+  isJetson = (import ./boards.nix).${robot.board} ? som;
   install = pkgs.writeShellApplication {
     name = "omarchy-install";
     text = ''

@@ -24,7 +24,7 @@ let
   nvidiaLicense = l: l.free or true || lib.hasInfix "nvidia.com" (l.url or "");
 in
 {
-  config = lib.mkIf (cfg.board != "vm") {
+  config = lib.mkIf (board ? som) {
     nixpkgs.hostPlatform = lib.mkDefault "aarch64-linux";
 
     hardware.nvidia-jetpack = {

@@ -24,7 +24,7 @@ in
         powerMode = cfg.power.mode;
       };
       jetson =
-        if cfg.board == "vm" then
+        if !(board ? som) then
           null
         else
           {

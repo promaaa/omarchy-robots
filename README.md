@@ -107,6 +107,7 @@ flash script and installer image evaluate, with the per-board assertions of
 | Target (`board`) | Status | System closure | Built | Last verified |
 |---|---|---|---|---|
 | `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots) | 1.1 GiB | system, VM, installer image (1.5 GiB) | 2026-10-02 |
+| `pc` | builds: system, installer image; install path VM-tested: the installer image onto an emulated NVMe drive, boot, validate. Not hardware-tested | 1.9 GiB (all redistributable firmware) | system, installer image (1.5 GiB) | 2026-10-04 |
 | `orin-agx-devkit` | builds: system, flash script | 1.4 GiB | system (natively, GitHub arm64 runner), flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
 | `orin-nx-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
@@ -125,7 +126,8 @@ flash script built in 50 min from an empty store (cross-compiled kernel,
 EDK2, OP-TEE); the vm installer image in under a minute once the system was
 built; the VM boots in 3 min 27 s under QEMU TCG (`systemd-analyze`, VM);
 the whole `nix flake check` passed here in 67 min (v0.0.1 part 2 tree), most
-of it the three VM tests under TCG.
+of it the three VM tests under TCG; the pc installation test alone takes
+13 min 24 s here under TCG (2026-10-04).
 In CI (GitHub `ubuntu-24.04`, 2 CPUs, 7.8 GiB RAM, KVM) the VM boots in
 17.2 s (`systemd-analyze`, VM) and `nix flake check` takes 25 min from an empty
 store. Rehearsing the runbook on the vm board under TCG: the installer answers
@@ -288,12 +290,12 @@ Artifacts, all built from `robot.nix` (`<board>` is any Jetson board above):
 | `nix build .#nixosConfigurations.<board>.config.system.build.toplevel` | the same system on `<board>` |
 | `nix build .#flash` / `.#flash-<board>` | jetpack-nixos's firmware flash script (x86_64 host, USB recovery mode) |
 | `nix build .#packages.aarch64-linux.installer` / `.#packages.aarch64-linux.installer-<board>` | installation image for a Jetson; it carries the system it installs |
-| `nix build .#installer-vm` | installation image for the vm board (x86_64) |
+| `nix build .#installer-vm` / `.#installer-pc` | installation image for the vm or pc board (x86_64) |
 | `nix build .#vm` | the vm board as a QEMU VM (`nix run .#vm`) |
 | `nix build .#omarchy-robot` | the command alone |
 
 `.#flash` and `.#installer` follow the board set in `robot.nix`; with
-`board = "vm"` only `.#installer` exists (x86_64). Building a Jetson system on
+`board = "vm"` or `"pc"` only `.#installer` exists (x86_64). Building a Jetson system on
 an x86_64 host needs `extra-platforms = aarch64-linux` and a QEMU binfmt
 handler (on NixOS: `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`); there
 is no public binary cache for jetpack-nixos, so the Tegra kernel compiles under

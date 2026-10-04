@@ -8,6 +8,7 @@
 }:
 let
   cfg = config.omarchy.robot;
+  isJetson = (import ./boards.nix).${cfg.board} ? som;
   version = cfg.build.version or "dev";
   esc = builtins.fromJSON ''"\u001b"'';
   green = s: "${esc}[38;2;158;206;106m${s}${esc}[0m";
@@ -46,9 +47,7 @@ in
       "Omarchy Robots ${version}"
       (
         "${cfg.name} · ${cfg.board}"
-        + lib.optionalString (
-          cfg.board != "vm"
-        ) " · JetPack ${pkgs.nvidia-jetpack.jetpackMajorMinorPatchVersion}"
+        + lib.optionalString isJetson " · JetPack ${pkgs.nvidia-jetpack.jetpackMajorMinorPatchVersion}"
       )
       ""
       "omarchy-robot info            this build"
@@ -62,8 +61,6 @@ in
       "\\n · \\l"
     ];
 
-    hardware.nvidia-jetpack.firmware.uefi.logo = lib.mkIf (
-      cfg.board != "vm"
-    ) "${pkgs.omarchy-branding}/boot.png";
+    hardware.nvidia-jetpack.firmware.uefi.logo = lib.mkIf isJetson "${pkgs.omarchy-branding}/boot.png";
   };
 }

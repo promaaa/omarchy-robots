@@ -8,7 +8,7 @@
 }:
 let
   cfg = config.omarchy.robot;
-  isJetson = cfg.board != "vm";
+  isJetson = (import ./boards.nix).${cfg.board} ? som;
 in
 {
   imports = [ (modulesPath + "/profiles/minimal.nix") ];
@@ -16,18 +16,18 @@ in
   config = {
     assertions = [
       {
-        assertion = isJetson -> cfg.admin.sshKeys != [ ];
+        assertion = cfg.board != "vm" -> cfg.admin.sshKeys != [ ];
         message = ''
           omarchy.robot.board = "${cfg.board}" needs at least one key in omarchy.robot.admin.sshKeys.
           A robot has no password login, so without a key nobody could log in to it.'';
       }
       {
         assertion = cfg.gpu.enable -> isJetson;
-        message = ''omarchy.robot.gpu.enable is for Jetson boards; board "vm" has no NVIDIA GPU.'';
+        message = ''omarchy.robot.gpu.enable is for Jetson boards; board "${cfg.board}" has no GPU stack here.'';
       }
       {
         assertion = cfg.power.mode != null -> isJetson;
-        message = ''omarchy.robot.power.mode selects a Jetson nvpmodel mode; board "vm" has none.'';
+        message = ''omarchy.robot.power.mode selects a Jetson nvpmodel mode; board "${cfg.board}" has none.'';
       }
       {
         assertion = (cfg.network.gateway != null || cfg.network.dns != [ ]) -> cfg.network.address != null;

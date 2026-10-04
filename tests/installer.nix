@@ -1,18 +1,27 @@
-# S1: boot the vm board's installation image (UEFI, CD-ROM) next to a blank
-# disk, install with `omarchy-install`, boot the installed disk, and validate.
+# S1: boot a board's installation image (UEFI, CD-ROM) next to a blank disk,
+# install with `omarchy-install`, boot the installed disk, and validate. The
+# vm board's disk is virtio (/dev/vda); the pc board's is an emulated NVMe
+# drive (/dev/nvme0n1), as on most PCs.
 {
   pkgs,
   lib,
   robot,
   installerModules,
+  board,
 }:
 let
   # Lets the test driver run commands in the installer and the installed system.
   instrumentation = "${pkgs.path}/nixos/modules/testing/test-instrumentation.nix";
-  target = robot "vm" [
-    { omarchy.robot.board = lib.mkForce "vm"; }
+  target = robot board [
+    { omarchy.robot.board = lib.mkForce board; }
     instrumentation
   ];
+  drive =
+    {
+      vm = "-drive file={disk},if=virtio";
+      pc = "-drive file={disk},if=none,id=disk0 -device nvme,serial=omarchy0,drive=disk0";
+    }
+    .${board};
   iso =
     (lib.nixosSystem { modules = installerModules target ++ [ instrumentation ]; })
     .config.system.build.isoImage;
@@ -24,7 +33,7 @@ let
       pkgs.qemu_test;
 in
 {
-  name = "omarchy-installer";
+  name = if board == "vm" then "omarchy-installer" else "omarchy-installer-${board}";
   nodes = { };
 
   testScript = ''
@@ -50,7 +59,7 @@ in
             f"${qemu} -m 3072 -smp 2 -netdev user,id=net0 -device virtio-net-pci,netdev=net0"
             f" -drive if=pflash,format=raw,unit=0,readonly=on,file=${pkgs.OVMF.firmware}"
             f" -drive if=pflash,format=raw,unit=1,file={efivars}"
-            f" -drive file={disk},if=virtio {extra}",
+            f" ${drive} {extra}",
             name=name,
         )
 

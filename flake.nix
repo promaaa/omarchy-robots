@@ -25,7 +25,7 @@
       inherit (nixpkgs) lib;
       version = "0.0.1";
       boards = import ./modules/boards.nix;
-      jetsonBoards = removeAttrs boards [ "vm" ];
+      jetsonBoards = lib.filterAttrs (_: board: board ? som) boards;
       pkgs = nixpkgs.legacyPackages.x86_64-linux.extend self.overlays.default;
 
       # Everything a robot system is made of; `target` names it in build.json.
@@ -89,13 +89,14 @@
               vm = self.nixosConfigurations.vm.config.system.build.vm;
               default = self.packages.x86_64-linux.vm;
               installer-vm = installer self.nixosConfigurations.vm;
+              installer-pc = installer self.nixosConfigurations.pc;
             }
             // perBoard "flash" (board: flash board [ (onBoard board) ]);
             aarch64-linux = perBoard "installer" (board: installer self.nixosConfigurations.${board});
           }
           # .#flash and .#installer: the bring-up artifacts for robot.nix as written.
           (
-            if robotBoard == "vm" then
+            if !(jetsonBoards ? ${robotBoard}) then
               { x86_64-linux.installer = installer self.nixosConfigurations.robot; }
             else
               {

@@ -134,6 +134,44 @@ in
     board = "vm";
     power.mode = 0;
   };
+  refuses-pc-without-keys = refuses "pc-without-keys" "needs at least one key" {
+    board = "pc";
+    admin.sshKeys = [ ];
+  };
+  refuses-gpu-on-pc = refuses "gpu-on-pc" "gpu.enable is for Jetson boards" {
+    board = "pc";
+    gpu.enable = true;
+  };
+  refuses-power-mode-on-pc = refuses "power-mode-on-pc" "power.mode selects a Jetson nvpmodel mode" {
+    board = "pc";
+    power.mode = 0;
+  };
+
+  # The pc board: an x86_64 system with NixOS's generic hardware support and
+  # microcode, no Jetson layer, its installer image, and the NVMe default disk.
+  eval-pc =
+    let
+      inherit (self.nixosConfigurations.pc) config;
+      expect = cond: what: lib.assertMsg cond "pc: ${what}";
+    in
+    assert expect (config.nixpkgs.hostPlatform.system == "x86_64-linux") "not x86_64";
+    assert expect (!config.hardware.nvidia-jetpack.enable) "jetpack-nixos is enabled";
+    assert expect (
+      config.hardware.enableAllHardware && config.hardware.enableRedistributableFirmware
+    ) "generic hardware support or firmware is off";
+    assert expect (
+      config.hardware.cpu.intel.updateMicrocode && config.hardware.cpu.amd.updateMicrocode
+    ) "CPU microcode is off";
+    assert expect (lib.elem "nvme" config.boot.initrd.availableKernelModules) "no nvme in the initrd";
+    assert expect (
+      config.omarchy.robot.storage.device == "/dev/nvme0n1"
+    ) "storage.device is not /dev/nvme0n1";
+    pkgs.writeText "eval-pc" (
+      lib.concatMapStrings (drv: builtins.unsafeDiscardStringContext drv.drvPath + "\n") [
+        config.system.build.toplevel
+        self.packages.x86_64-linux.installer-pc
+      ]
+    );
   refuses-gateway-without-address = refuses "gateway-without-address" "go with a static .address" {
     network.gateway = "192.168.1.1";
   };
@@ -157,6 +195,18 @@ in
         robot
         installerModules
         ;
+      board = "vm";
+    }
+  );
+  vm-installer-pc = pkgs.testers.runNixOSTest (
+    import ./installer.nix {
+      inherit
+        pkgs
+        lib
+        robot
+        installerModules
+        ;
+      board = "pc";
     }
   );
   vm-update-rollback = pkgs.testers.runNixOSTest (

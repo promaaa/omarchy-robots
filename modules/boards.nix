@@ -1,5 +1,6 @@
 # Every value omarchy.robot.board accepts, and what it means.
 #
+# An entry with a `som` is a Jetson board; "vm" and "pc" are x86_64.
 # Jetson entries map onto jetpack-nixos (hardware.nvidia-jetpack.{som,carrierBoard,super});
 # the combinations are the developer kits jetpack-nixos lists in its flake.nix.
 # `carrier` and `modules` are device-tree part numbers that
@@ -33,6 +34,10 @@ in
 {
   # A QEMU virtual machine on an x86_64 host: everything but the Jetson layer.
   vm = { };
+
+  # A generic x86_64 UEFI computer (modules/pc.nix): NixOS's generic hardware
+  # support, CPU microcode, no Jetson layer and no GPU stack.
+  pc = { };
 
   # Jetson AGX Orin developer kit (P3701 module on the P3737 carrier).
   orin-agx-devkit = orin // {

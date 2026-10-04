@@ -25,11 +25,11 @@ Every artifact comes from `robot.nix`. `<board>` is any Jetson board.
 | `nix build .#nixosConfigurations.<board>.config.system.build.toplevel` | the same system on `<board>` |
 | `nix build .#flash` or `.#flash-<board>` | the firmware flash script (x86_64 host, USB recovery mode) |
 | `nix build .#packages.aarch64-linux.installer` or `.installer-<board>` | the installation image for a Jetson, carrying its system |
-| `nix build .#installer-vm` | the installation image for the `vm` board |
+| `nix build .#installer-vm` or `.#installer-pc` | the installation image for the `vm` or `pc` board |
 | `nix build .#vm` | the `vm` board as a QEMU VM (`nix run .#vm`) |
 | `nix build .#omarchy-robot` | the command alone |
 
-`.#flash` and `.#installer` follow the board set in `robot.nix`. With `board = "vm"`, only `.#installer` exists.
+`.#flash` and `.#installer` follow the board set in `robot.nix`. With `board = "vm"` or `"pc"`, only `.#installer` exists.
 
 Building a Jetson system on an x86_64 host needs `extra-platforms = aarch64-linux` and a QEMU binfmt handler (on NixOS, `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]`). There is no public binary cache for jetpack-nixos, so the Tegra kernel compiles under emulation the first time.
 

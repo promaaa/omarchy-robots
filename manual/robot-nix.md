@@ -30,9 +30,9 @@ Every option lives under `omarchy.robot`. Types and defaults are in [`modules/op
 |---|---|---|
 | `name` | `"robot"` | Hostname. Lowercase letters, digits and dashes. |
 | `board` | `"vm"` | What the robot runs on. See [Boards](../boards/). Changing boards is this one line. |
-| `storage.device` | `/dev/vda` on `vm`, `/dev/nvme0n1` on a Jetson | The whole disk the installer **erases** and installs onto: an EFI partition and an ext4 root. |
+| `storage.device` | `/dev/vda` on `vm`, `/dev/nvme0n1` on a Jetson or `pc` | The whole disk the installer **erases** and installs onto: an EFI partition and an ext4 root. |
 | `admin.user` | `"admin"` | The administrator login. In `wheel`, with passwordless sudo. |
-| `admin.sshKeys` | `[ ]` | Public keys that may log in as the administrator. A Jetson board refuses to build without at least one, because nobody could ever log in. |
+| `admin.sshKeys` | `[ ]` | Public keys that may log in as the administrator. A Jetson or `pc` board refuses to build without at least one, because nobody could ever log in. |
 | `network.address` | `null` (DHCP) | Static IPv4 address with prefix, like `"192.168.1.20/24"`. |
 | `network.gateway` | `null` | Default gateway, only with a static address. |
 | `network.dns` | `[ ]` | DNS servers, only with a static address. |
@@ -45,8 +45,8 @@ Every option lives under `omarchy.robot`. Types and defaults are in [`modules/op
 
 The build stops with a plain message instead of producing a robot that can't work:
 
-- a Jetson board with no SSH key;
-- `gpu.enable` or `power.mode` on the `vm` board;
+- a Jetson or `pc` board with no SSH key;
+- `gpu.enable` or `power.mode` on the `vm` or `pc` board;
 - a gateway or DNS servers without a static address.
 
 ## Anything else

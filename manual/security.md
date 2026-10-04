@@ -8,7 +8,7 @@ A robot sits on a lab network, often next to other people's machines. The defaul
 
 - **Keys only.** SSH accepts public keys and nothing else. Password and keyboard-interactive login are off, and root cannot log in over SSH.
 - **One administrator.** The account from `admin.user`, in `wheel`, with passwordless sudo. Users are declared, not edited: `useradd` on the robot is undone by the next switch.
-- **No key, no build.** A Jetson board refuses to build when `admin.sshKeys` is empty, because nobody could ever log in.
+- **No key, no build.** A Jetson or `pc` board refuses to build when `admin.sshKeys` is empty, because nobody could ever log in.
 - **Firewall on.** It admits SSH and nothing else.
 - **The installer is keys only too.** It announces itself as `<name>-installer` and, over SSH, accepts only your administrator key for `root`.
 - **Bounded logs.** The journal keeps at most 512 MB.

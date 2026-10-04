@@ -18,9 +18,10 @@ in
       type = types.enum (builtins.attrNames boards);
       default = "vm";
       description = ''
-        What the robot runs on. "vm" is a QEMU virtual machine on an x86_64 host;
-        every other value is a Jetson developer kit, mapped onto jetpack-nixos in
-        modules/boards.nix. Changing boards is this one line.
+        What the robot runs on. "vm" is a QEMU virtual machine on an x86_64 host,
+        "pc" a generic x86_64 UEFI computer; every other value is a Jetson
+        developer kit, mapped onto jetpack-nixos in modules/boards.nix. Changing
+        boards is this one line.
       '';
     };
 
@@ -46,8 +47,8 @@ in
         default = [ ];
         description = ''
           SSH public keys allowed to log in as the administrator. Logging in with a
-          password is impossible, so a Jetson board refuses to build without at
-          least one key.
+          password is impossible, so every board but "vm" refuses to build without
+          at least one key.
         '';
       };
     };

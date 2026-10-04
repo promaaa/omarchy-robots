@@ -12,6 +12,7 @@
 
     # What the robot runs on: one line to change on bring-up day.
     #   "vm"                      QEMU virtual machine on an x86_64 host
+    #   "pc"                      generic x86_64 UEFI computer (not hardware-tested)
     #   "orin-agx-devkit"         Jetson AGX Orin developer kit
     #   "orin-nx-devkit"          Jetson Orin NX module on the Orin Nano developer kit carrier
     #   "orin-nx-super-devkit"    the same, with the "super" firmware and power modes
@@ -21,11 +22,11 @@
     board = "vm";
 
     # Whole disk the installer erases and installs onto. Defaults to /dev/vda on
-    # the vm board and /dev/nvme0n1 on a Jetson.
+    # the vm board and /dev/nvme0n1 on a Jetson or a pc.
     # storage.device = "/dev/nvme0n1";
 
-    # The administrator account. There are no passwords: a Jetson board refuses
-    # to build without at least one key.
+    # The administrator account. There are no passwords: a Jetson or pc board
+    # refuses to build without at least one key.
     admin.user = "admin";
     admin.sshKeys = [
       # The maintainer's workstation key. Replace it with your own public key(s).
