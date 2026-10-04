@@ -127,8 +127,11 @@ in
       '';
 
   # The runtime: lint, strict types, and every test, the whole scenario matrix
-  # included (simulated, no VM).
+  # included (simulated, no VM). Its version is the release's.
   omarchy-runtime =
+    assert lib.assertMsg (
+      pkgs.omarchy-runtime.version == version
+    ) "pkgs/omarchy-runtime/pyproject.toml has ${pkgs.omarchy-runtime.version}, flake.nix ${version}";
     check "omarchy-runtime"
       [
         pkgs.ruff

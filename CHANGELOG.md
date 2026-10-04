@@ -7,10 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+## [0.0.2] - 2026-10-04
+
+### Part 1 (2026-10-04)
+
 Milestone R1: the first slice of the runtime, simulated, on Omarchy Robots;
 and a generic `pc` board. Not hardware-tested, and nothing is real-time.
 
-### Added
+#### Added
 
 - `omarchy-runtime` (`pkgs/omarchy-runtime`, Python with numpy): goals in,
   verified executions and traces out. A deterministic resolver that records
@@ -44,14 +48,14 @@ and a generic `pc` board. Not hardware-tested, and nothing is real-time.
   support, redistributable firmware, Intel and AMD microcode, `/dev/nvme0n1`
   by default) and its installer image `.#installer-pc`. `gpu.enable` and
   `power.mode` are refused on it.
-- Checks: `omarchy-runtime` (ruff, mypy --strict, 86 tests with the
+- Checks: `omarchy-runtime` (ruff, mypy --strict, 97 tests with the
   scenario matrix, no VM), `vm-runtime` (the runtime in a vm-board VM),
   `vm-installer-pc`, `eval-pc`, `eval-runtime-orin-agx-devkit`,
   `eval-runtime-pc`, refusals for `pc`.
 - `AGENTS.md` for collaborators and coding agents, `.github/CODEOWNERS`, the
   manual's Runtime chapter and "Install on a spare PC".
 
-### Changed
+#### Changed
 
 - Versioning: v0.0.2 part 1 is milestone R1. The first board booted and validated
   on hardware takes v0.1.0.
@@ -147,5 +151,6 @@ VM-validated and ready for Jetson bring-up. Not hardware-tested.
 - GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
   one Jetson system.
 
-[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/promaaa/omarchy-robots/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.0.1

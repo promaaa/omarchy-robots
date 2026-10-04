@@ -30,7 +30,7 @@ The Omarchy Robots runtime sits between the intelligence that decides what a rob
 
 The runtime is the **control plane**: it owns the application API, capability resolution, the execution lifecycle, supervision, the belief about the world, verification and traces. It is not in the high-rate path. Chunks go from S1 to S0 directly, and the runtime samples S0's status at its own rate.
 
-**S0 never waits.** At every tick it executes a valid chunk, else a fallback S2 installed ahead of time, else its built-in HOLD, which keeps the joints where they are and leaves the gripper as it is. A chunk is executed only until its `valid_until`; S0 leaves it at the first tick after that.
+**S0 never waits.** At every tick it executes a valid chunk, else a fallback S2 installed ahead of time, else its built-in HOLD, which keeps the joints where they are and leaves the gripper as it is. A chunk is executed only until its `valid_until`; S0 leaves it at the first tick after that. When an execution stops running (claim, failure, cancellation), the runtime tells S0 to hold: the rest of the chunk and the fallback are dropped.
 
 ## Turning it on
 
@@ -109,7 +109,7 @@ Every run writes one directory:
 | File | Contents |
 |---|---|
 | `run.json` | Header: `trace_schema` (1), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated`), body, rates, and the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model. |
-| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `fallback.clear`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `run.end`. |
+| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `run.end`. |
 | `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, configuration hash and seed. |
 | `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity), kept in a preallocated buffer and written once at the end. |
 | `results.json` | Written by the evaluation harness only: ground truth and agreement for each execution. |
@@ -126,6 +126,8 @@ Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_run
 | `Verifier.verify(goal, belief, not_before)` returns a verdict with its evidence | `geometric`, per predicate | judging success independently of the executor |
 | `RecoveryPolicy.decide(goal, summary, belief)` returns `Retry` or `GiveUp` | `retry_once`: once after VIOLATED; give up otherwise | retrying with modifications (`Retry` carries the conditioning passed to S1) |
 | `LatencyModel.sample(rng)` returns a delay | `fixed` | where S2 should run (R2) |
+
+An extension that raises, or returns the wrong type, never stops the run: a failing filter loses that observation (unfiltered data never reaches the belief), a failing verifier gives INCONCLUSIVE, a failing recovery policy means giving up, and each leaves an `error` event in the trace.
 
 To add one: write the class, add it to the registry in `extensions.py`, select it by id in the configuration, and pass the contract tests in `tests/contracts.py` by mixing the matching class into a test case. The runtime core does not change. The tests run with:
 

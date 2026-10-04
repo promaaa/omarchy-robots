@@ -205,7 +205,7 @@ boots each from a fresh disk): `systemd-analyze` totals average 66.6 s and
 user script of the initrd, and the 1 s boot menu saves 4 s before the kernel.
 The runtime (2026-10-04, development host, wall-clock): `omarchy-runtime eval`
 runs the twelve scenarios (147 s of simulated time) in 5.4 s; its check
-(ruff, mypy, 86 tests) builds in 29 s; per execution it spends about 40 us
+(ruff, mypy, 97 tests) builds in 29 s; per execution it spends about 40 us
 resolving, 40 us verifying and 6 ms writing its trace. Inside the vm board
 under TCG the same two-scenario evaluation takes 29 s, and the `vm-runtime`
 test 3 min 43 s; the `pc` installation test takes 13 min 24 s. The runtime
