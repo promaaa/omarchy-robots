@@ -47,6 +47,9 @@
     # Jetson only: nvpmodel power mode ID (board specific; null keeps the default).
     power.mode = null;
 
+    # The Omarchy Robots runtime, simulated for now: `omarchy-runtime demo`.
+    runtime.enable = false;
+
     # System generations kept for rollback (boot entries, garbage collection).
     generations = 10;
   };

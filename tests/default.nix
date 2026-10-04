@@ -73,6 +73,27 @@ let
       builtins.unsafeDiscardStringContext config.system.build.toplevel.drvPath
     );
 
+  # With the runtime enabled: installed, named in build.json, and the system
+  # still evaluates (for a Jetson, the aarch64 build of the same package).
+  evaluatesWithRuntime =
+    board:
+    let
+      system = self.nixosConfigurations.${board}.extendModules {
+        modules = [ { omarchy.robot.runtime.enable = lib.mkForce true; } ];
+      };
+      inherit (system) config;
+      runtime = system.pkgs.omarchy-runtime;
+      build = builtins.fromJSON config.environment.etc."omarchy-robot/build.json".text;
+    in
+    assert lib.assertMsg (lib.elem runtime config.environment.systemPackages)
+      "${board}: omarchy-runtime is not installed";
+    assert lib.assertMsg (
+      build.runtime.version == runtime.version
+    ) "${board}: build.json does not name the runtime";
+    pkgs.writeText "eval-runtime-${board}" (
+      builtins.unsafeDiscardStringContext config.system.build.toplevel.drvPath
+    );
+
   # Invalid robot.nix combinations fail the assertion that explains why.
   refuses =
     name: message: settings:
@@ -234,6 +255,11 @@ in
   vm-update-rollback = pkgs.testers.runNixOSTest (
     import ./update-rollback.nix { inherit robotModules onBoard; }
   );
+  vm-runtime = pkgs.testers.runNixOSTest (
+    import ./runtime.nix { inherit pkgs robotModules onBoard; }
+  );
+  eval-runtime-orin-agx-devkit = evaluatesWithRuntime "orin-agx-devkit";
+  eval-runtime-pc = evaluatesWithRuntime "pc";
   eval-gpu-orin-agx-devkit = evaluatesWithGpu "orin-agx-devkit";
   eval-gpu-thor-agx-devkit = evaluatesWithGpu "thor-agx-devkit";
 }

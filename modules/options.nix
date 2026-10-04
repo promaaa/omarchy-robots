@@ -103,6 +103,17 @@ in
       '';
     };
 
+    runtime.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Install omarchy-runtime, the execution runtime (goals in, verified
+        executions and traces out), with /var/lib/omarchy-runtime/runs for its
+        run directories, writable by the administrator. A command, not a
+        service. Everything it runs today is simulated.
+      '';
+    };
+
     build = mkOption {
       type = types.attrsOf types.anything;
       internal = true;

@@ -434,6 +434,8 @@ def cmd_info(args: argparse.Namespace) -> int:
     print(f"revision    {build['revision']}  robot.nix sha256 {build['robotNix']}")
     print("inputs      " + "  ".join(f"{k} {v[:12]}" for k, v in build["inputs"].items()))
     print(f"nixos       {build['nixos']}  kernel {info['kernel']}")
+    runtime = build.get("runtime")
+    print("runtime     " + (f"omarchy-runtime {runtime['version']}" if runtime else "not installed (omarchy.robot.runtime.enable)"))
     if jetson:
         print(f"jetson      {jetson['som']}/{jetson['carrierBoard']}  JetPack {jetson['jetpack']}  L4T {jetson['l4t']}")
     print(f"generation  {info['generation']}  current {info['current']}")

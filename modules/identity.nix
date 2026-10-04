@@ -17,6 +17,7 @@ in
       schema = 1;
       nixos = config.system.nixos.version;
       kernel = config.boot.kernelPackages.kernel.modDirVersion;
+      runtime = if cfg.runtime.enable then { inherit (pkgs.omarchy-runtime) version; } else null;
       robot = {
         inherit (cfg) name board generations;
         storage = cfg.storage.device;

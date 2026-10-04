@@ -274,6 +274,18 @@ class SshdConfigTest(unittest.TestCase):
 
 
 class CommandTest(unittest.TestCase):
+    def test_info_names_the_runtime(self) -> None:
+        for runtime, expected in ((None, "not installed"), ({"version": "0.0.2"}, "omarchy-runtime 0.0.2")):
+            fake = Fake(build() | {"runtime": runtime})
+            original = o.System
+            o.System = lambda root="/", fake=fake: fake  # type: ignore[assignment,misc]
+            try:
+                with redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(o.main(["info"]), 0)
+            finally:
+                o.System = original  # type: ignore[misc]
+            self.assertIn(expected, out.getvalue())
+
     def test_validate_exit_code(self) -> None:
         good = Fake(build())
         bad = Fake(build(), commands={"systemctl is-active sshd.service": (3, "inactive\n")})
