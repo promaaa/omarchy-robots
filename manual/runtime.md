@@ -16,17 +16,9 @@ The Omarchy Robots runtime sits between the intelligence that decides what a rob
 | S1 | Action generation: turns a goal into short timestamped trajectories, **action chunks**. | 20 Hz | a scripted pick-and-place policy |
 | S0 | Real-time execution: the only layer that commands actuators, and it enforces the body's limits. | 1 kHz | a simulated controller |
 
-```
-  S2 (planner)  -- goals, fallbacks, decisions -->  runtime (control plane)
-                <-- execution updates, verdicts --  resolve, supervise, verify,
-                                                     belief, traces
-                                                       |  start/stop     ^  S0 status,
-                                                       v                 |  sampled at 20 Hz
-                                                    S1 (policy) -- action chunks --> S0 --> body
-                                                                (direct, never
-                                                                 through the runtime)
-  a fallback S2 installs ahead of time: S2 -> runtime -> S0, used when chunks stop
-```
+![S2 and the runtime above; S1, S0 and the body below]({{ '/assets/runtime-layers.svg' | relative_url }})
+
+**Figure 1.** The three layers and the runtime. Thick line: the high-rate path, where S1 sends action chunks to S0 directly, never through the runtime. S2 installs a fallback ahead of time through the runtime. S0 uses it when chunks stop.
 
 The runtime is the **control plane**: it owns the application API, capability resolution, the execution lifecycle, supervision, the belief about the world, verification and traces. It is not in the high-rate path. Chunks go from S1 to S0 directly, and the runtime samples S0's status at its own rate.
 

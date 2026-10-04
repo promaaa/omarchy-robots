@@ -118,17 +118,12 @@ body, starts S1, supervises the execution, judges the outcome from fresh
 observations independently of what S1 claims, and writes a trace whose header
 embeds `/etc/omarchy-robot/build.json`.
 
-```
-  S2 (planner)  -- goals, fallbacks, decisions -->  runtime (control plane)
-                <-- execution updates, verdicts --  resolve, supervise, verify,
-                                                     belief, traces
-                                                       |  start/stop     ^  S0 status,
-                                                       v                 |  sampled at 20 Hz
-                                                    S1 (policy) -- action chunks --> S0 --> body
-                                                                (direct, never
-                                                                 through the runtime)
-  a fallback S2 installs ahead of time: S2 -> runtime -> S0, used when chunks stop
-```
+![S2 and the runtime above; S1, S0 and the body below](manual/assets/runtime-layers.svg)
+
+**Figure 1.** The three layers and the runtime. Thick line: the high-rate
+path, where S1 sends action chunks to S0 directly, never through the runtime.
+S2 installs a fallback ahead of time through the runtime. S0 uses it when
+chunks stop.
 
 S0 never waits: at every tick (1 kHz, simulated) it runs a valid chunk, else
 the fallback S2 installed, else HOLD, and it enforces the body's limits.
