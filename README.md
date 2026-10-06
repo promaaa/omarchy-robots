@@ -20,13 +20,14 @@ that names the exact system it ran on. **The robot is simulated** and nothing
 is real-time: the runtime runs in simulated time, or on the wall clock as soft
 real-time Python, with S2 in its process or in its own, on another machine.
 
-**Status:** v0.0.2 part 3 (milestone R3, part A: hardening) runs and is tested in
-virtual machines: the base system, the runtime's simulated scenarios (on a
-laptop and inside an Omarchy Robots VM), the runtime on the wall clock with
-S2 in its own process on a second VM over an emulated network (the S2
-placement experiment), and the installation of a generic PC onto an emulated
-disk. The Jetson and pc targets evaluate and are partly built; none has run
-on hardware yet (see the [support matrix](#support-matrix)).
+**Status:** v0.0.2 part 4 (milestone R3: hardening, scenes that change, the seam
+for asynchronous inference) runs and is tested in virtual machines: the base
+system, the runtime's simulated scenarios (on a laptop and inside an Omarchy
+Robots VM), the runtime on the wall clock with S2 in its own process on a
+second VM over an emulated network (the S2 placement experiment), and the
+installation of a generic PC onto an emulated disk. The Jetson and pc
+targets evaluate and are partly built; none has run on hardware yet (see the
+[support matrix](#support-matrix)).
 
 ## One file
 
@@ -507,7 +508,9 @@ Before 1.0, releases count up: v0.0.1 part 3 to v0.0.1 were milestone OS-1 (the 
 VM-validated), v0.0.2 part 1 milestone R1 (the runtime, simulated, and the pc
 board), v0.0.2 part 2 is milestone R2 (S2 in its own process, the wall clock, the S2
 placement experiment), v0.0.2 part 3 is milestone R3's hardening (bounded S0
-steps, timing faults, reconnection, the S2 link over WireGuard). The first board booted and
+steps, timing faults, reconnection, the S2 link over WireGuard), v0.0.2 part 4
+milestone R3's experiment (scenes that change, recovery under the fallback,
+the S2 placement matrix on them, the asynchronous inference seam). The first board booted and
 validated on hardware takes v0.1.0. The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; their changes are noted

@@ -7,7 +7,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Changed
+## [0.0.2] - 2026-10-06
+
+### Part 4 (2026-10-06)
+
+Milestone R3, parts B and C: an experiment where S2's placement matters,
+and the seam for asynchronous inference. Scenes that change during a task,
+recovery under S2's fallback, the S2 placement matrix on them, and the
+chunk corrector and inference trigger extension points with a simulated
+baseline matrix. Tested in simulation and in VMs: not hardware-tested, and
+nothing is real-time.
+
+#### Changed
 
 - Contract change, chunk timing: `ActionChunk` carries `observed_at` (when
   the observation it was computed from was taken) and `inference_ns` (how
@@ -27,7 +38,7 @@ All notable changes to this project are documented here. The format follows
 - The simulated S1 plans its grasp again when its target moved by more than
   1.5 cm, and gives up ("blocked") when an object stands in its place spot.
 
-### Added
+#### Added
 
 - Scenes that change during a task: `[[faults]]` kinds `move` (an entity
   moved by `x`) and `appear` (an object declared with `present = false`
@@ -53,7 +64,6 @@ All notable changes to this project are documented here. The format follows
   inference-matrix` runs S1's inference delay (50, 150, 300 ms) x corrector
   x trigger on `nominal_a` and `cup_moved` in simulated time.
 
-## [0.0.2] - 2026-10-06
 
 ### Part 3 (2026-10-06)
 
