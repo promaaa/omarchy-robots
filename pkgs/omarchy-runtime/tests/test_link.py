@@ -356,6 +356,7 @@ class TestRemoteS2(unittest.TestCase):
         self.assertNotIn("old table", text)
         self.assertIn("| local | 0.1 | 1x SUCCEEDED |", text)
         self.assertTrue(text.endswith(f"{placement.END}\n\nAfter.\n"))
+        self.assertIn('<details markdown="1"><summary>Every cell (1)</summary>', text)
         doc.write_text("no markers\n")
         with self.assertRaises(ConfigError):
             placement.write_docs(gathered, [doc])

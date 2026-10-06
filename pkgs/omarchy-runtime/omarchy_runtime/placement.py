@@ -281,7 +281,8 @@ def markdown(results: Json, source: str | None = None) -> str:
     """The tables in Markdown, every cell in a collapsed section; `source` says
     where the results come from (a CI run, a host)."""
     text = caption(results) + (f" Source: {source}." if source else "")
-    every = f"<details><summary>Every cell ({len(results['cells'])})</summary>"
+    # markdown="1": the manual's kramdown reads Markdown inside the HTML element only then.
+    every = f'<details markdown="1"><summary>Every cell ({len(results["cells"])})</summary>'
     lines = [text, "", *md_table(*summary(results)), "", every, "", *md_table(*rows(results)), "", "</details>"]
     return "\n".join(lines + ["", f"Tolerance: {results['tolerance']}"])
 
