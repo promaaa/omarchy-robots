@@ -82,13 +82,17 @@ is real-time.
 
 #### Fixed
 
-- The scripted S1 could push a held cup into the table. Found by
-  `vm-s2-placement` in CI: the robot VM's loop stalled for 283 ms, S0 fell
-  more than 3 cm behind S1's plan, and S1 replanned straight into its
-  gripper-closing waypoint, moving down and closing together; the gripper
-  caught the cup above the grasp point (ground truth: held cup_2 5 mm into
-  the table). A replan now reaches a grasp or release spot before it
-  changes the gripper. Simulated scenarios give the same results.
+- The scripted S1 on the wall clock, found by `vm-s2-placement` in CI on a
+  starved runner. S1 compared the body it observed with its plan at its own
+  step time instead of the observation's time: an observation 15 ms old
+  made a gripper closing at 2/s look off the plan, and S1 replanned. A
+  replan into the gripper-closing waypoint moved the arm down and closed
+  together, so after a 283 ms stall the gripper caught a cup above the grasp
+  point (ground truth: held cup_2 5 mm into the table). S1 now compares an
+  observation with the plan at the time it was taken, and a replan into a
+  grasp or release reaches the spot first unless the body is there. With
+  every observation 20 ms old on the wall clock, the task now takes 18.67 s
+  (simulated: 18.45 s). Simulated scenarios give the same results.
 
 
 ### Part 1 (2026-10-04)

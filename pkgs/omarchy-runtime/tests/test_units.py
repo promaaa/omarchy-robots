@@ -420,6 +420,38 @@ class TestScriptedS1(unittest.TestCase):
             if g < 0.5:  # where the cup would attach
                 self.assertLessEqual(z, grasp_z + 0.002, f"the gripper closes at z = {z:.3f}, above the grasp point {grasp_z:.3f}")
 
+    def test_a_lagging_gripper_at_the_grasp_point_keeps_closing(self) -> None:
+        # Found by vm-s2-placement in CI on a starved runner, after the fix above:
+        # with the arm at the grasp point and only the gripper behind the plan,
+        # stepping back to the open waypoint reopened the gripper at every
+        # replan, and the grasp repeated for seconds. At the spot, keep closing.
+        policy = ScriptedPickPlace("pick_place.gantry")
+        policy.start(IN_RACK, belief(observation(1, 0.0, {"cup_1": TABLE_SPOT})).snapshot(), GANTRY, {})
+        self.assertIsNotNone(policy.step(0, observation(2, 0.0, {})))
+        closing = next(start for start, _, a, b, i in policy._plan if a[:2] == b[:2] and b[2] < a[2])
+        grasp_x, grasp_z = policy._waypoints[1][:2]
+        late = observation(3, (closing + ns(0.3)) / 1e9, {}, gripper=0.9, ee=(grasp_x, grasp_z))  # planned 0.4
+        chunk = policy.step(closing + ns(0.3), late)
+        assert chunk is not None
+        grip = [g for _, _, g in chunk.actions.tolist()]
+        self.assertEqual(grip, sorted(grip, reverse=True), f"the gripper reopens: {grip}")
+        self.assertLess(grip[-1], 0.5)
+
+    def test_compares_the_body_with_the_plan_when_it_was_observed(self) -> None:
+        # The root cause of the replans above: on a starved VM the sensor stepped
+        # up to 30 ms before S1. Compared with the plan at S1's time, a gripper
+        # closing at 2/s looked 0.04 behind (REPLAN is 0.03), and S1 replanned at
+        # every step. An observation is compared with the plan at its own time.
+        policy = ScriptedPickPlace("pick_place.gantry")
+        policy.start(IN_RACK, belief(observation(1, 0.0, {"cup_1": TABLE_SPOT})).snapshot(), GANTRY, {})
+        self.assertIsNotNone(policy.step(0, observation(2, 0.0, {})))
+        plan = list(policy._plan)
+        closing = next(start for start, _, a, b, i in policy._plan if a[:2] == b[:2] and b[2] < a[2])
+        seen = closing + ns(0.2)
+        (x, z, g), _ = policy._at(seen)
+        self.assertIsNotNone(policy.step(seen + ns(0.02), observation(3, seen / 1e9, {}, gripper=g, ee=(x, z))))
+        self.assertEqual(policy._plan, plan, "S1 replanned although the body was on its plan when observed")
+
 
 class TestKinematics(unittest.TestCase):
     def test_arm_inverse_matches_forward_over_the_workspace(self) -> None:

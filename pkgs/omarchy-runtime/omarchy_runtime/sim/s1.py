@@ -51,8 +51,9 @@ class ScriptedPickPlace:
     """Achieves in(object, container) on any body this module has kinematics for.
 
     It follows one time-indexed plan through its waypoints, so consecutive
-    chunks agree; when proprioception shows the body off the plan (after a
-    stall or a fallback), it plans the remaining waypoints again from there.
+    chunks agree; when proprioception shows the body off the plan at the time
+    it was observed (after a stall or a fallback), it plans the remaining
+    waypoints again from there.
     """
 
     def __init__(self, implementation: str) -> None:
@@ -97,9 +98,12 @@ class ScriptedPickPlace:
 
     def _replan(self, now: Ns, here: Point, first: int) -> None:
         # A gripper change happens in place: when the next waypoint grasps or
-        # releases, reach its spot first, then change the gripper there.
+        # releases and the body is not at its spot yet, reach the spot first,
+        # then change the gripper there. At the spot, the change goes on.
         if 0 < first < len(self._waypoints) and self._waypoints[first][:2] == self._waypoints[first - 1][:2]:
-            first -= 1
+            spot = self._waypoints[first]
+            if math.hypot(spot[0] - here[0], spot[1] - here[1]) > REACHED[0]:
+                first -= 1
         self._plan, t, p = [], now, here
         for i in range(first, len(self._waypoints)):
             w = self._waypoints[i]
@@ -120,12 +124,13 @@ class ScriptedPickPlace:
             return None
         q = observation.proprio.position
         here = (*observation.proprio.ee, q[self._gripper])
+        seen = observation.t  # the body was `here` then, not at `now`
         if not self._plan:
-            self._replan(now, here, 0)
-        planned, index = self._at(now)
+            self._replan(seen, here, 0)
+        planned, index = self._at(seen)
         if max(abs(planned[0] - here[0]), abs(planned[1] - here[1]), abs(planned[2] - here[2])) > REPLAN:
-            self._replan(now, here, min(index, len(self._waypoints) - 1))
-            planned, index = self._at(now)
+            self._replan(seen, here, min(index, len(self._waypoints) - 1))
+        planned, index = self._at(now)
         if index == len(self._waypoints):
             last = self._waypoints[-1]
             if math.hypot(last[0] - here[0], last[1] - here[1]) <= REACHED[0] and abs(last[2] - here[2]) <= REACHED[1]:
