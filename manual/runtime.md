@@ -201,31 +201,122 @@ nix run .#omarchy-runtime -- placement-docs result/placement/results.json README
 In `nix flake check`, the two-cup task runs on lan, degraded, outage and outage_long with a TTFT of 0.1 s and 1 s, and each scene that changes on lan and outage_long with 1 s: 14 cells. `result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
 
 <!-- s2-placement:begin -->
-S2 placement, two-cup task (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (f814e5c4f79f), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Task and HOLD times are wall-clock; simulated is the same task with S2 in one process on simulated time. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37448327750 (https://github.com/promaaa/omarchy-robots/actions/runs/37448327750), the full matrix on f814e5c alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
+S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (61dba14b4fc9), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S0 went from the fallback to HOLD before the retry's first chunk (the fallback lasts 3 s in slot_blocked, 1.5 s in fallback_expiry). S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37465247670 (https://github.com/promaaa/omarchy-robots/actions/runs/37465247670), the full matrix on 61dba14 alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
 
-| profile | TTFT s | outcomes | violations | S0 starvations | fallback s | HOLD s | task s | simulated s | S2 RTT p50/p99/max ms | outages | S0 interval p99/max ms | S0 overruns |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.18 | 18.45 | 18.45 | 1.0/2.8/3.0 | none | 5.48/8.61 | 1 of 3715 |
-| local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.10 | 20.55 | 20.35 | 2.0/2.2/2.2 | none | 5.30/7.01 | 0 of 4139 |
-| local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.24 | 28.65 | 28.30 | 1.0/2.1/3.0 | none | 5.30/6.27 | 0 of 5752 |
-| lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 18.70 | 18.45 | 3.0/4.7/5.6 | none | 5.36/7.39 | 0 of 3759 |
-| lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.09 | 20.55 | 20.35 | 3.0/4.9/5.1 | none | 5.24/7.15 | 0 of 4134 |
-| lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.04 | 28.40 | 28.30 | 3.0/4.4/5.0 | none | 5.26/6.40 | 0 of 5694 |
-| wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.39 | 18.70 | 18.45 | 22.0/141.2/153.0 | none | 5.29/6.30 | 0 of 3773 |
-| wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.19 | 20.60 | 20.35 | 23.0/147.0/151.1 | none | 5.36/7.29 | 0 of 4133 |
-| wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 22.0/146.6/152.0 | none | 5.33/8.12 | 0 of 5720 |
-| wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.39 | 18.70 | 18.45 | 101.0/118.9/120.0 | none | 5.30/6.73 | 0 of 3772 |
-| wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.19 | 20.60 | 20.35 | 103.9/119.9/120.9 | none | 5.30/8.19 | 0 of 4155 |
-| wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 102.2/120.0/120.0 | none | 5.24/6.74 | 0 of 5739 |
-| degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.69 | 19.00 | 18.45 | 508.0/1109.3/1206.0 | short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s | 5.26/6.01 | 0 of 3943 |
-| degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.44 | 20.85 | 20.35 | 444.5/1012.4/1048.0 | short 0.8 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.7 s | 5.33/7.85 | 0 of 4427 |
-| degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.89 | 29.30 | 28.30 | 551.0/1706.9/1826.9 | short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.8 s, short 1.4 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.8 s | 5.28/7.22 | 0 of 5997 |
-| outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 3.0/4.6/4.7 | long 5.7 s | 5.39/6.38 | 0 of 3731 |
-| outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.39 | 20.85 | 20.35 | 3.6/5.2/6.4 | long 5.8 s | 5.34/7.30 | 0 of 4197 |
-| outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.84 | 29.20 | 28.30 | 3.0/4.9/5.1 | long 5.7 s | 5.25/7.57 | 0 of 5852 |
-| outage_long | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 18.29 | 35.65 | 18.45 | 3.0/4.3/7.1 | long 22.8 s | 5.27/6.69 | 0 of 7151 |
-| outage_long | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 20.34 | 37.70 | 20.35 | 3.1/4.6/5.0 | long 22.8 s | 5.34/5.97 | 0 of 7561 |
-| outage_long | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 28.94 | 46.30 | 28.30 | 3.0/4.0/5.0 | long 22.7 s | 5.25/6.72 | 0 of 9273 |
+| profile | TTFT s | two-cup task s | cup_moved reaction s | slot_blocked recovery s | fallback_expiry recovery s | fallbacks expired | violations | S0 starvations | cells within tolerance |
+|---|---|---|---|---|---|---|---|---|---|
+| local | 0.1 | 18.60 (18.45) | 0.10 (0.10) | 0.15 (0.15) | 0.25 (0.15) | 0 of 2 | 0 | 0 | 4 of 4 |
+| local | 1.0 | 20.55 (20.35) | 0.10 (0.10) | 1.05 (1.05) | 1.05 (1.05) | 0 of 2 | 0 | 0 | 4 of 4 |
+| local | 5.0 | 28.50 (28.30) | 0.10 (0.10) | 5.15 (5.05) | 5.05 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| lan | 0.1 | 18.70 (18.45) | 0.10 (0.10) | 0.15 (0.15) | 0.15 (0.15) | 0 of 2 | 0 | 0 | 4 of 4 |
+| lan | 1.0 | 20.60 (20.35) | 0.10 (0.10) | 1.05 (1.05) | 1.25 (1.05) | 0 of 2 | 0 | 0 | 4 of 4 |
+| lan | 5.0 | 28.70 (28.30) | 0.10 (0.10) | 5.20 (5.05) | 5.20 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wifi | 0.1 | 18.45 (18.45) | 0.10 (0.10) | 0.20 (0.15) | 0.35 (0.15) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wifi | 1.0 | 20.60 (20.35) | 0.10 (0.10) | 1.20 (1.05) | 1.15 (1.05) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wifi | 5.0 | 28.50 (28.30) | 0.10 (0.10) | 5.15 (5.05) | 5.15 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wan | 0.1 | 18.60 (18.45) | 0.10 (0.10) | 0.25 (0.15) | 0.35 (0.15) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wan | 1.0 | 20.60 (20.35) | 0.10 (0.10) | 1.25 (1.05) | 1.15 (1.05) | 0 of 2 | 0 | 0 | 4 of 4 |
+| wan | 5.0 | 28.65 (28.30) | 0.10 (0.10) | 5.30 (5.05) | 5.30 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| degraded | 0.1 | 19.75 (18.45) | 0.10 (0.10) | 0.65 (0.15) | 0.75 (0.15) | 0 of 2 | 0 | 0 | 4 of 4 |
+| degraded | 1.0 | 21.35 (20.35) | 0.10 (0.10) | 1.75 (1.05) | 2.30 (1.05), expired | 1 of 2 | 0 | 0 | 4 of 4 |
+| degraded | 5.0 | 29.70 (28.30) | 0.10 (0.10) | 5.60 (5.05) | 6.10 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| outage | 0.1 | 18.60 (18.45) | 0.10 (0.10) | 3.65 (0.15), expired | 3.55 (0.15), expired | 2 of 2 | 0 | 0 | 4 of 4 |
+| outage | 1.0 | 20.55 (20.35) | 0.10 (0.10) | 4.65 (1.05), expired | 4.85 (1.05), expired | 2 of 2 | 0 | 0 | 4 of 4 |
+| outage | 5.0 | 29.45 (28.30) | 0.09 (0.10) | 9.30 (5.05) | 8.95 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+| outage_long | 0.1 | 36.45 (18.45) | 0.10 (0.10) | 21.35 (0.15), expired | 21.60 (0.15), expired | 2 of 2 | 0 | 0 | 4 of 4 |
+| outage_long | 1.0 | 37.70 (20.35) | 0.10 (0.10) | 21.45 (1.05), expired | 21.55 (1.05), expired | 2 of 2 | 0 | 0 | 4 of 4 |
+| outage_long | 5.0 | 46.45 (28.30) | 0.10 (0.10) | 26.25 (5.05) | 26.45 (5.10) | 0 of 2 | 0 | 0 | 4 of 4 |
+
+<details markdown="1"><summary>Every cell (84)</summary>
+
+| scenario | profile | TTFT s | outcomes | violations | S0 starvations | fallback s | HOLD s | task s | simulated s | S2 RTT p50/p99/max ms | outages | S0 interval p99/max ms | S0 overruns | reaction s | recovery s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| s2_placement | local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 2.0/3.4/4.0 | none | 6.08/12.72 | 3 of 3730 | - | - |
+| s2_placement | local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.09 | 20.55 | 20.35 | 2.0/3.0/4.7 | none | 5.73/9.94 | 1 of 4136 | - | - |
+| s2_placement | local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 1.0/3.8/11.3 | none | 5.69/20.79 | 4 of 5712 | - | - |
+| cup_moved | local | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 1.0/2.8/2.9 | none | 5.70/7.73 | 0 of 1852 | 0.10 (0.10) | - |
+| cup_moved | local | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 2.0/3.0/3.0 | none | 5.68/7.68 | 0 of 2074 | 0.10 (0.10) | - |
+| cup_moved | local | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 2.0/2.6/3.9 | none | 5.75/7.57 | 0 of 2855 | 0.10 (0.10) | - |
+| slot_blocked | local | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.70 | 8.25 | 8.10 | 1.0/3.6/6.3 | none | 5.80/8.46 | 0 of 1671 | - | 0.15 (0.15) |
+| slot_blocked | local | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.50 | 10.20 | 10.15 | 2.0/3.0/3.5 | none | 5.76/7.14 | 0 of 2055 | - | 1.05 (1.05) |
+| slot_blocked | local | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.74 | 18.00 | 17.85 | 2.0/2.7/4.2 | none | 5.68/7.13 | 0 of 3995 | - | 5.15 (5.05) |
+| fallback_expiry | local | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.35 | 0.60 | 8.25 | 8.05 | 1.0/2.1/2.4 | none | 5.51/6.79 | 0 of 1680 | - | 0.25 (0.15) |
+| fallback_expiry | local | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.50 | 10.20 | 10.15 | 1.0/2.6/3.0 | none | 5.69/7.09 | 0 of 2056 | - | 1.05 (1.05) |
+| fallback_expiry | local | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.74 | 18.00 | 17.85 | 2.0/2.5/4.7 | none | 5.61/7.42 | 0 of 3993 | - | 5.05 (5.10) |
+| s2_placement | lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 18.70 | 18.45 | 3.9/6.5/7.4 | none | 5.94/8.31 | 0 of 3765 | - | - |
+| s2_placement | lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.25 | 20.60 | 20.35 | 3.8/6.8/8.2 | none | 6.04/10.20 | 3 of 4134 | - | - |
+| s2_placement | lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.29 | 28.70 | 28.30 | 3.0/6.5/7.7 | none | 5.61/7.90 | 0 of 5766 | - | - |
+| cup_moved | lan | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.75 | 9.35 | 9.15 | 3.0/5.9/6.2 | none | 5.61/7.19 | 0 of 1882 | 0.10 (0.10) | - |
+| cup_moved | lan | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.45 | 10.00 | 10.00 | 3.9/6.1/7.0 | none | 5.94/7.51 | 0 of 2024 | 0.10 (0.10) | - |
+| cup_moved | lan | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 3.9/5.3/5.4 | none | 5.76/7.52 | 0 of 2853 | 0.10 (0.10) | - |
+| slot_blocked | lan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.70 | 8.25 | 8.10 | 3.2/5.7/6.1 | none | 5.85/8.99 | 0 of 1680 | - | 0.15 (0.15) |
+| slot_blocked | lan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.50 | 10.20 | 10.15 | 3.9/5.7/5.8 | none | 6.00/8.12 | 0 of 2057 | - | 1.05 (1.05) |
+| slot_blocked | lan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.89 | 18.10 | 17.85 | 3.0/6.2/6.6 | none | 5.65/9.38 | 1 of 4017 | - | 5.20 (5.05) |
+| fallback_expiry | lan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.60 | 8.10 | 8.05 | 4.0/6.9/9.0 | none | 5.89/13.91 | 2 of 1629 | - | 0.15 (0.15) |
+| fallback_expiry | lan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.35 | 1.55 | 10.50 | 10.15 | 3.2/5.5/7.0 | none | 5.95/10.68 | 1 of 2128 | - | 1.25 (1.05) |
+| fallback_expiry | lan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.79 | 18.00 | 17.85 | 4.0/6.1/7.1 | none | 5.89/8.36 | 0 of 3975 | - | 5.20 (5.10) |
+| s2_placement | wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.19 | 18.45 | 18.45 | 23.2/138.3/150.6 | none | 5.89/9.01 | 0 of 3719 | - | - |
+| s2_placement | wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.24 | 20.60 | 20.35 | 23.1/138.2/190.9 | none | 5.66/7.19 | 0 of 4136 | - | - |
+| s2_placement | wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 22.9/132.8/153.0 | none | 5.81/8.21 | 0 of 5732 | - | - |
+| cup_moved | wifi | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.59 | 9.20 | 9.15 | 23.0/53.0/144.0 | none | 6.00/10.39 | 2 of 1862 | 0.10 (0.10) | - |
+| cup_moved | wifi | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 22.4/146.1/150.3 | none | 5.79/9.36 | 1 of 2074 | 0.10 (0.10) | - |
+| cup_moved | wifi | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.65 | 14.25 | 14.05 | 24.0/148.1/152.9 | none | 5.87/7.28 | 0 of 2883 | 0.10 (0.10) | - |
+| slot_blocked | wifi | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.30 | 0.65 | 8.15 | 8.10 | 23.0/116.1/146.2 | none | 5.98/14.66 | 2 of 1667 | - | 0.20 (0.15) |
+| slot_blocked | wifi | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.30 | 1.60 | 10.50 | 10.15 | 22.4/135.3/144.1 | none | 5.77/6.86 | 0 of 2126 | - | 1.20 (1.05) |
+| slot_blocked | wifi | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.84 | 18.05 | 17.85 | 23.1/134.4/156.0 | none | 5.94/7.77 | 0 of 4020 | - | 5.15 (5.05) |
+| fallback_expiry | wifi | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.45 | 0.64 | 8.40 | 8.05 | 23.4/140.1/150.9 | none | 5.98/8.98 | 1 of 1699 | - | 0.35 (0.15) |
+| fallback_expiry | wifi | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.25 | 1.50 | 10.30 | 10.15 | 22.9/147.9/151.1 | none | 6.10/7.44 | 0 of 2077 | - | 1.15 (1.05) |
+| fallback_expiry | wifi | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.84 | 18.10 | 17.85 | 23.9/139.5/158.9 | none | 5.84/8.05 | 0 of 3995 | - | 5.15 (5.10) |
+| s2_placement | wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.30 | 18.60 | 18.45 | 103.1/120.2/123.3 | none | 6.06/7.68 | 0 of 3756 | - | - |
+| s2_placement | wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.19 | 20.60 | 20.35 | 102.3/119.9/122.3 | none | 5.82/10.13 | 1 of 4150 | - | - |
+| s2_placement | wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.24 | 28.65 | 28.30 | 102.2/119.9/121.0 | none | 5.77/9.46 | 0 of 5771 | - | - |
+| cup_moved | wan | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 103.2/117.4/119.7 | none | 5.86/8.60 | 0 of 1871 | 0.10 (0.10) | - |
+| cup_moved | wan | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 103.0/119.3/120.2 | none | 5.91/8.35 | 0 of 2097 | 0.10 (0.10) | - |
+| cup_moved | wan | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 102.5/117.0/118.0 | none | 5.84/7.93 | 0 of 2875 | 0.10 (0.10) | - |
+| slot_blocked | wan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.35 | 0.60 | 8.25 | 8.10 | 103.1/118.2/119.2 | none | 5.90/8.48 | 0 of 1692 | - | 0.25 (0.15) |
+| slot_blocked | wan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.35 | 1.50 | 10.45 | 10.15 | 104.0/120.1/122.0 | none | 5.98/7.55 | 0 of 2136 | - | 1.25 (1.05) |
+| slot_blocked | wan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.99 | 18.20 | 17.85 | 103.0/119.6/123.0 | none | 5.76/8.64 | 0 of 4037 | - | 5.30 (5.05) |
+| fallback_expiry | wan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.45 | 0.60 | 8.40 | 8.05 | 104.0/120.3/122.0 | none | 5.87/7.44 | 0 of 1719 | - | 0.35 (0.15) |
+| fallback_expiry | wan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.25 | 1.60 | 10.40 | 10.15 | 103.3/120.0/120.9 | none | 5.64/8.55 | 0 of 2116 | - | 1.15 (1.05) |
+| fallback_expiry | wan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 10.89 | 18.10 | 17.85 | 102.1/120.1/121.0 | none | 5.88/8.71 | 0 of 4019 | - | 5.30 (5.10) |
+| s2_placement | degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.29 | 19.75 | 18.45 | 717.1/1392.6/1562.9 | short 0.6 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.8 s, short 0.7 s, short 0.7 s | 6.13/8.98 | 0 of 4069 | - | - |
+| s2_placement | degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 4.04 | 21.35 | 20.35 | 714.2/1613.9/1766.0 | short 0.6 s, short 0.6 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.8 s, short 0.5 s, short 0.8 s | 5.67/9.09 | 0 of 4613 | - | - |
+| s2_placement | degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 12.39 | 29.70 | 28.30 | 592.2/1923.1/2217.7 | short 0.6 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.7 s, short 1.1 s, short 1.7 s | 5.61/6.92 | 0 of 6486 | - | - |
+| cup_moved | degraded | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 635.2/1473.4/1480.2 | short 0.6 s, short 1.2 s, short 0.6 s, short 0.6 s | 5.79/9.10 | 0 of 2055 | 0.10 (0.10) | - |
+| cup_moved | degraded | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.55 | 10.15 | 10.00 | 672.4/1260.1/1359.1 | short 0.6 s, short 0.6 s, short 0.7 s, short 0.6 s | 5.83/7.47 | 0 of 2197 | 0.10 (0.10) | - |
+| cup_moved | degraded | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.65 | 14.25 | 14.05 | 439.1/985.8/1030.9 | short 0.7 s, short 0.6 s, short 0.7 s, short 0.6 s | 5.71/6.97 | 0 of 2964 | 0.10 (0.10) | - |
+| slot_blocked | degraded | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.75 | 0.65 | 8.75 | 8.10 | 557.0/1374.2/1462.0 | short 0.6 s, short 0.7 s | 5.71/8.08 | 0 of 1884 | - | 0.65 (0.15) |
+| slot_blocked | degraded | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.85 | 1.55 | 11.05 | 10.15 | 509.0/1041.4/1146.0 | short 0.6 s, short 0.6 s | 5.85/7.18 | 0 of 2481 | - | 1.75 (1.05) |
+| slot_blocked | degraded | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 11.34 | 18.55 | 17.85 | 680.9/1488.5/1689.5 | short 0.6 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.8 s, short 0.8 s, short 0.7 s | 5.69/7.27 | 0 of 4171 | - | 5.60 (5.05) |
+| fallback_expiry | degraded | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.85 | 0.70 | 9.00 | 8.05 | 561.2/1080.4/1142.1 | short 0.7 s, short 0.5 s, short 0.7 s | 5.63/6.61 | 0 of 1943 | - | 0.75 (0.15) |
+| fallback_expiry | degraded | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 2.49 | 11.65 | 10.15 | 505.1/1200.7/1282.8 | short 0.6 s, short 0.7 s, short 0.8 s, short 0.6 s, short 0.7 s | 5.72/8.98 | 0 of 2479 | - | 2.30 (1.05), expired |
+| fallback_expiry | degraded | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 11.79 | 19.05 | 17.85 | 599.6/1411.2/1532.6 | short 1.2 s, short 0.6 s, short 0.7 s, short 0.8 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.7 s | 5.70/8.33 | 0 of 4267 | - | 6.10 (5.10) |
+| s2_placement | outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 3.9/5.8/7.3 | long 5.7 s | 5.93/9.09 | 0 of 3734 | - | - |
+| s2_placement | outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.19 | 20.55 | 20.35 | 3.2/6.0/7.2 | long 5.8 s | 5.82/8.41 | 0 of 4127 | - | - |
+| s2_placement | outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 12.04 | 29.45 | 28.30 | 4.0/7.5/11.7 | long 5.7 s | 5.80/8.44 | 0 of 5918 | - | - |
+| cup_moved | outage | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.70 | 9.30 | 9.15 | 3.1/5.6/5.9 | long 5.7 s | 5.75/7.18 | 0 of 1871 | 0.10 (0.10) | - |
+| cup_moved | outage | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 3.1/5.9/6.0 | long 5.7 s | 6.00/8.37 | 0 of 2075 | 0.10 (0.10) | - |
+| cup_moved | outage | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.50 | 14.10 | 14.05 | 4.0/6.5/6.5 | long 5.7 s | 5.76/13.16 | 1 of 2834 | 0.09 (0.10) | - |
+| slot_blocked | outage | 0.1 | FAILED SUCCEEDED | 0 | 0 | 3.00 | 1.34 | 12.00 | 8.10 | 3.1/5.0/5.0 | long 5.8 s | 5.57/7.96 | 0 of 2418 | - | 3.65 (0.15), expired |
+| slot_blocked | outage | 1.0 | FAILED SUCCEEDED | 0 | 0 | 3.00 | 3.34 | 14.00 | 10.15 | 3.3/5.1/5.5 | long 5.7 s | 5.67/10.56 | 1 of 2822 | - | 4.65 (1.05), expired |
+| slot_blocked | outage | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 14.99 | 22.20 | 17.85 | 3.0/6.1/7.8 | long 5.8 s | 5.56/7.50 | 0 of 4813 | - | 9.30 (5.05) |
+| fallback_expiry | outage | 0.1 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 2.84 | 12.00 | 8.05 | 4.0/7.5/9.7 | long 5.7 s | 5.79/7.46 | 0 of 2417 | - | 3.55 (0.15), expired |
+| fallback_expiry | outage | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 4.94 | 14.10 | 10.15 | 3.9/10.1/10.2 | long 5.7 s | 5.81/32.13 | 1 of 2834 | - | 4.85 (1.05), expired |
+| fallback_expiry | outage | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 14.64 | 21.90 | 17.85 | 3.9/5.8/7.3 | long 5.8 s | 5.72/9.07 | 1 of 4757 | - | 8.95 (5.10) |
+| s2_placement | outage_long | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 19.04 | 36.45 | 18.45 | 3.4/6.0/6.5 | long 22.7 s | 5.64/14.88 | 2 of 7301 | - | - |
+| s2_placement | outage_long | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 20.34 | 37.70 | 20.35 | 3.1/7.7/14.2 | long 22.7 s | 5.61/9.26 | 0 of 7565 | - | - |
+| s2_placement | outage_long | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 29.04 | 46.45 | 28.30 | 3.2/7.4/7.9 | long 22.8 s | 5.77/32.00 | 1 of 9311 | - | - |
+| cup_moved | outage_long | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 3.2/5.1/5.1 | long 22.7 s | 5.56/9.47 | 2 of 5098 | 0.10 (0.10) | - |
+| cup_moved | outage_long | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.55 | 10.15 | 10.00 | 3.1/6.6/7.2 | long 22.8 s | 5.69/17.34 | 1 of 5268 | 0.10 (0.10) | - |
+| cup_moved | outage_long | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 3.0/6.4/7.0 | long 22.8 s | 5.51/7.30 | 0 of 6212 | 0.10 (0.10) | - |
+| slot_blocked | outage_long | 0.1 | FAILED SUCCEEDED | 0 | 0 | 3.00 | 19.14 | 29.80 | 8.10 | 3.1/8.2/15.3 | long 22.7 s | 5.45/12.04 | 3 of 5985 | - | 21.35 (0.15), expired |
+| slot_blocked | outage_long | 1.0 | FAILED SUCCEEDED | 0 | 0 | 3.00 | 20.04 | 30.70 | 10.15 | 3.0/6.0/6.0 | long 22.7 s | 5.49/23.52 | 1 of 6153 | - | 21.45 (1.05), expired |
+| slot_blocked | outage_long | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 31.94 | 39.15 | 17.85 | 3.1/5.8/6.3 | long 22.8 s | 5.61/7.92 | 0 of 8212 | - | 26.25 (5.05) |
+| fallback_expiry | outage_long | 0.1 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 20.94 | 30.05 | 8.05 | 4.0/5.9/5.9 | long 22.8 s | 5.66/6.94 | 0 of 6021 | - | 21.60 (0.15), expired |
+| fallback_expiry | outage_long | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 21.74 | 30.90 | 10.15 | 3.9/7.4/9.1 | long 22.7 s | 5.58/10.03 | 1 of 6199 | - | 21.55 (1.05), expired |
+| fallback_expiry | outage_long | 5.0 | FAILED SUCCEEDED | 0 | 0 | 0.00 | 32.14 | 39.40 | 17.85 | 3.3/6.0/6.2 | long 22.8 s | 5.56/16.72 | 2 of 8279 | - | 26.45 (5.10) |
+
+</details>
 
 Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
 <!-- s2-placement:end -->
