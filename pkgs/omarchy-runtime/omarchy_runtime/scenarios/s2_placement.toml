@@ -1,0 +1,30 @@
+description = """The S2 placement experiment: both cups into the drying rack, one task each,
+S2 installing a fallback for each execution. The S2 process sets the time to
+first token (omarchy-runtime s2 --ttft); here, in-process and simulated, it
+is 1 s. The same task as the s2_latency scenarios, with more time allowed."""
+seed = 11
+body = "arm3"
+limit_s = 120
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 1
+fallback = true
+goals = [
+  { predicate = "in", args = ["cup_1", "drying_rack"] },
+  { predicate = "in", args = ["cup_2", "drying_rack"] },
+]
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

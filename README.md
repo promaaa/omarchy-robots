@@ -147,6 +147,50 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `fallback_installed` | S1 stalls; S0 runs S2's fallback, then HOLD, then S1 resumes | SUCCEEDED |
 | `unsupported_clean` | `clean(cup_1)`: no capability, and the resolver's reasons | REJECTED/NO_CAPABILITY |
 | `s2_latency_0p1`, `_1`, `_5` | both cups, S2 taking 0.1 s, 1 s or 5 s per decision | same outcomes; longer task, more idle time |
+| `s2_placement` | both cups, for the S2 placement experiment below (S2 takes 1 s in one process) | SUCCEEDED twice |
+
+S2 can also run in its own process, on the robot or on another machine,
+connected to the runtime over TCP; both processes then run on the wall clock,
+soft real-time (`omarchy-runtime s2`, `run ... --clock wall --s2 HOST:PORT`).
+
+### S2 placement experiment
+
+> **Emulated network, VMs, soft real-time.** Two QEMU VMs, the network
+> between them shaped with `tc netem`, Python on a general-purpose OS. Not a
+> real network, nothing real-time, no hardware.
+
+Where should S2 live: on the robot, on an edge server, or in the cloud? In
+each cell the robot VM runs the two-cup task (`s2_placement`) with S2 in its
+own process, on the robot VM (`local`) or on a second VM (`edge`), over one
+network profile, with one S2 time to first token (TTFT). A TTFT of 0.1 s,
+1 s and 5 s stands in for a model on the robot, on an edge server and in the
+cloud. Delays are round trips, applied half on each VM; loss applies to
+every packet in each direction.
+
+| Profile | Link |
+|---|---|
+| `local` | S2 on the robot VM, loopback |
+| `lan` | about 1 ms |
+| `wifi` | about 20 ms, jitter 10 ms, 1 % loss |
+| `wan` | about 100 ms, jitter 20 ms |
+| `degraded` | about 400 ms, jitter 100 ms, 5 % loss |
+| `outage` | `lan`, then every packet dropped for 5 s during the first execution |
+
+```sh
+nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage x TTFT 0.1, 1 s (in nix flake check)
+nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
+nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md
+```
+
+The last command writes the table below, here and in the manual, from the
+results of a full run; CI runs the full matrix on demand (workflow
+dispatch, `placement`) and keeps its results as an artifact. Each cell must
+keep the safety invariants and stay within the stated tolerance of the
+same task in one process on simulated time.
+
+<!-- s2-placement:begin -->
+Not measured yet.
+<!-- s2-placement:end -->
 
 The manual's [Runtime chapter](https://promaaa.github.io/omarchy-robots/runtime/)
 has the concepts, the trace format and the extension points for
@@ -343,7 +387,7 @@ closure over SSH; nothing is compiled on the robot.
 nix flake check                 # format, statix, deadnix, ruff, mypy, unit tests, the runtime's
                                 # scenario matrix, every board evaluated (with and without the
                                 # runtime), VM tests (base, update/rollback, installer on vm and pc,
-                                # runtime)
+                                # runtime, S2 placement reduced to 3 profiles x 2 TTFTs)
 nix fmt                         # nixfmt (RFC style) on every .nix file
 nix develop                     # nixfmt, statix, deadnix, ruff, python3 with numpy and mypy
 ```
@@ -360,6 +404,7 @@ Artifacts, all built from `robot.nix` (`<board>` is any Jetson board above):
 | `nix build .#vm` | the vm board as a QEMU VM (`nix run .#vm`) |
 | `nix build .#omarchy-robot` | the command alone |
 | `nix build .#omarchy-runtime` / `.#packages.aarch64-linux.omarchy-runtime` | the runtime alone (`nix run .#omarchy-runtime -- demo`) |
+| `nix build .#s2-placement` | the S2 placement experiment, full matrix: results, table and traces (two VMs; wants KVM) |
 
 `.#flash` and `.#installer` follow the board set in `robot.nix`; with
 `board = "vm"` or `"pc"` only `.#installer` exists (x86_64). Building a Jetson system on

@@ -47,6 +47,18 @@ All notable changes to this project are documented here. The format follows
   from its echo; the runtime's supervisor records the link lost after 0.5 s
   without one, and each outage with its class against the deadlines (short,
   long from 2 s, unrecovered). Executions continue and S0 never waits.
+- The S2 placement experiment (RQ5): scenario `s2_placement` (the two-cup
+  task), the VM test `vm-s2-placement` (a robot VM and an edge VM, the link
+  shaped with tc netem; profiles local, lan, wifi, wan, degraded, outage)
+  and `omarchy-runtime placement` (one results.json and one table,
+  labelled emulated network, VMs, soft real-time, each cell compared with
+  the same task in one process on simulated time) and `placement-docs`
+  (writes the table into the README and the manual). `nix flake check`
+  runs lan, degraded and outage with S2 times to first token 0.1 and 1 s;
+  `nix build .#s2-placement` and the manual CI job (`placement`) run every
+  profile with 0.1, 1 and 5 s.
+- `run --ttft S [--ttft-spread X]`: S2's time to first token in one
+  process, instead of the scenario's latency.
 - `lognormal`: a latency model whose time to first token is sampled for
   each decision (median and spread), registered in `extensions.py` and
   held to `LatencyContract`.

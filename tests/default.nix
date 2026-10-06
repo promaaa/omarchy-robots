@@ -261,6 +261,11 @@ in
   vm-runtime = pkgs.testers.runNixOSTest (
     import ./runtime.nix { inherit pkgs robotModules onBoard; }
   );
+  # The S2 placement experiment, reduced: 3 network profiles x 2 S2 times to
+  # first token. The full matrix is the flake output s2-placement.
+  vm-s2-placement = pkgs.testers.runNixOSTest (
+    import ./s2-placement.nix { inherit pkgs robotModules onBoard; }
+  );
   eval-runtime-orin-agx-devkit = evaluatesWithRuntime "orin-agx-devkit";
   eval-runtime-pc = evaluatesWithRuntime "pc";
   eval-gpu-orin-agx-devkit = evaluatesWithGpu "orin-agx-devkit";

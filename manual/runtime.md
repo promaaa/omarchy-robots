@@ -128,6 +128,35 @@ Every run writes one directory:
 
 Keys that start with `wall` are wall-clock values. Everything else follows from the scenario and its seed: the same scenario with the same seed gives the same trace.
 
+## S2 placement experiment
+
+> **Emulated network, VMs, soft real-time.** Two QEMU VMs, the network between them shaped with `tc netem`, Python on a general-purpose OS. Not a real network, nothing real-time, no hardware.
+
+Where should S2 live: on the robot, on an edge server, or in the cloud (research question RQ5)? The VM test `tests/s2-placement.nix` starts a robot VM (Omarchy Robots, vm board, runtime enabled) and an edge VM. In each cell the robot runs the two-cup task (`s2_placement`) with S2 in its own process, on the robot VM (`local`) or on the edge VM, over one network profile, with one S2 time to first token (TTFT): 0.1 s, 1 s and 5 s stand in for a model on the robot, on an edge server and in the cloud. Delays are round trips, applied half on each VM; loss applies to every packet in each direction; with jitter, netem also reorders packets.
+
+| Profile | Link |
+|---|---|
+| `local` | S2 on the robot VM, loopback |
+| `lan` | about 1 ms |
+| `wifi` | about 20 ms, jitter 10 ms, 1 % loss |
+| `wan` | about 100 ms, jitter 20 ms |
+| `degraded` | about 400 ms, jitter 100 ms, 5 % loss |
+| `outage` | `lan`, then every packet dropped for 5 s during the first execution |
+
+For every cell the table gives the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and the same task's time in one process on simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, and S0's loop intervals and overruns.
+
+```sh
+nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage x TTFT 0.1, 1 s (in nix flake check)
+nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
+nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md
+```
+
+`result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
+
+<!-- s2-placement:begin -->
+Not measured yet.
+<!-- s2-placement:end -->
+
 ## Extension points
 
 Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_runtime/contracts.py`, with a default implementation in `extensions.py`, chosen by id in `config/runtime.toml` (or a scenario's `[extensions]` table), and named with its version in every trace header.

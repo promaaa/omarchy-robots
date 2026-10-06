@@ -146,16 +146,21 @@ def run(
     s0_hz: int | None = None,
     s2: tuple[str, int] | None = None,
     s2_timeout: Ns = S2_TIMEOUT,
+    ttft: float | None = None,
+    ttft_spread: float = 0.0,
     tags: Mapping[str, str] | None = None,
 ) -> RunResult:
     """Run one scenario. `clock` is "simulated" or "wall"; `s0_hz` replaces
     S0's configured rate; `s2` is the address of an S2 process (omarchy-runtime
     s2) to connect to, waiting up to `s2_timeout`, instead of S2 in this
-    process. `tags` go into the trace header as they are."""
+    process; `ttft` and `ttft_spread` replace the latency of S2 in this
+    process (see s2_parts). `tags` go into the trace header as they are."""
     if clock not in ("simulated", "wall"):
         raise ConfigError(f"clock {clock!r} is not simulated or wall")
     if s2 is not None and clock != "wall":
         raise ConfigError("an S2 in another process runs on the wall clock: add --clock wall")
+    if s2 is not None and ttft is not None:
+        raise ConfigError("an S2 in another process has its own time to first token: give --ttft to omarchy-runtime s2")
     cfg = config.effective(name)
     if s0_hz is not None:
         if s0_hz <= 0 or SECOND % s0_hz:
@@ -191,7 +196,7 @@ def run(
         verifiers = {p: VERIFIERS[v]() for p, v in ext["verifiers"].items()}
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
-    recovery, latency, s2_named = s2_parts(cfg)
+    recovery, latency, s2_named = s2_parts(cfg, ttft, ttft_spread)
     goals = config.goals(s["s2"], "scenario s2")
     os_build, os_note = os_identity()
     placement: Json = {"placement": "in-process"}

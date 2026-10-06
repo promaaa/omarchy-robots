@@ -46,7 +46,7 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 | `.../extensions.py` | the collaborator extension points and their registries |
 | `.../s2.py` | the scripted S2, a client of the public API |
 | `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics |
-| `.../scenario.py`, `evaluate.py`, `cli.py` | composition, evaluation harness, command |
+| `.../scenario.py`, `evaluate.py`, `placement.py`, `cli.py` | composition (the robot process, the S2 process), evaluation harness, the S2 placement experiment's table, command |
 | `.../config/`, `.../scenarios/` | bodies, capabilities and bindings, runtime parameters, scenarios (TOML) |
 | `pkgs/omarchy-runtime/tests/` | unit, contract, scenario, trace and architecture tests |
 | `tests/` | flake checks and NixOS VM tests |
@@ -113,6 +113,11 @@ CHANGELOG.
   (`tests/test_trace.py`).
 - `tests/runtime.nix` runs nominal_a and slip_retry in a vm-board VM with the
   runtime enabled.
+- `tests/s2-placement.nix` runs the S2 placement cells: a robot VM, an edge
+  VM, the link shaped with tc netem, S2 in its own process. `nix flake check`
+  runs 3 profiles x 2 TTFTs; `nix build .#s2-placement` every cell (KVM).
+  Wall-clock runs are not bit-identical: they are held to the simulated
+  run's outcomes exactly and to its task time within a stated tolerance.
 - Never weaken or delete a check to make it pass unless the check is wrong,
   and say so in the commit.
 

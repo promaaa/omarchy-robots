@@ -12,7 +12,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from omarchy_runtime import __version__, config, evaluate, link, scenario
+from omarchy_runtime import __version__, config, evaluate, link, placement, scenario
 from omarchy_runtime.contracts import ConfigError, OmarchyError, ns, seconds
 from omarchy_runtime.trace import runtime_identity, validate_run
 from omarchy_runtime.wallclock import stamp
@@ -54,7 +54,17 @@ def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
         raise ConfigError(f"--tag takes KEY=VALUE, not {args.tag}")
     remote = {"s2": link.address(args.s2), "s2_timeout": ns(args.s2_timeout)} if args.s2 else {}
     out = fresh(runs_dir(args), f"{prefix}-{stamp()}")
-    results = evaluate.evaluate(names, out, record_s0=args.record_s0, clock=args.clock, s0_hz=args.s0_hz, tags=tags, **remote)
+    results = evaluate.evaluate(
+        names,
+        out,
+        record_s0=args.record_s0,
+        clock=args.clock,
+        s0_hz=args.s0_hz,
+        ttft=args.ttft,
+        ttft_spread=args.ttft_spread,
+        tags=tags,
+        **remote,
+    )
     if prefix == "demo":
         print(narrate(results))
         print()
@@ -114,6 +124,26 @@ def cmd_s2(args: argparse.Namespace) -> int:
     return 0 if report["done"] else 1
 
 
+def cmd_placement(args: argparse.Namespace) -> int:
+    results = placement.gather([Path(p) for p in args.results])
+    print(placement.report(results))
+    if args.out:
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+        (out / "table.txt").write_text(placement.report(results) + "\n")
+        (out / "table.md").write_text(placement.markdown(results) + "\n")
+        print(f"\nresults.json, table.txt and table.md: {out}")
+    return 0 if results["passed"] else 1
+
+
+def cmd_placement_docs(args: argparse.Namespace) -> int:
+    results = json.loads(Path(args.results).read_text())
+    placement.write_docs(results, [Path(f) for f in args.files])
+    print(f"The S2 placement table in {', '.join(args.files)} is now the one of {args.results}.")
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     status = 0
     for run in args.run_dir:
@@ -143,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     runs.add_argument("--s0-hz", type=int, help="S0's rate, instead of the configured one")
     runs.add_argument("--s2", metavar="HOST:PORT", help="connect to an S2 process there (omarchy-runtime s2) instead of running S2 here")
     runs.add_argument("--s2-timeout", type=float, default=120.0, help="seconds to wait for the S2 process (default 120)")
+    runs.add_argument("--ttft", type=float, help="S2's median time to first token in this process, s (default: the scenario's latency)")
+    runs.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of that time (default 0: fixed)")
     runs.add_argument("--tag", action="append", default=[], metavar="KEY=VALUE", help="recorded in the trace header (repeatable)")
     p = sub.add_parser("demo", parents=[runs], help=f"run {' and '.join(DEMO)}, and tell what happened")
     p.set_defaults(func=lambda a: cmd_eval(a, DEMO, "demo"))
@@ -158,6 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of the time to first token (default 0: fixed)")
     p.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for the robot (default 600)")
     p.set_defaults(func=cmd_s2)
+    p = sub.add_parser("placement", help="gather S2 placement cells (their results.json) into one table")
+    p.add_argument("results", nargs="+", help="results.json of each cell's evaluation")
+    p.add_argument("--out", help="write results.json, table.txt and table.md there")
+    p.set_defaults(func=cmd_placement)
+    p = sub.add_parser("placement-docs", help="write a placement results.json's table into documentation files, between its markers")
+    p.add_argument("results", help="the results.json written by `placement --out`")
+    p.add_argument("files", nargs="+", help="for example README.md manual/runtime.md")
+    p.set_defaults(func=cmd_placement_docs)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")
     p.set_defaults(func=cmd_show)

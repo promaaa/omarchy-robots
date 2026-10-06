@@ -93,6 +93,14 @@
               default = self.packages.x86_64-linux.vm;
               installer-vm = installer self.nixosConfigurations.vm;
               installer-pc = installer self.nixosConfigurations.pc;
+              # The S2 placement experiment, every profile and S2 time to first
+              # token: two VMs, an emulated network. Wants KVM (about 15 min).
+              s2-placement = pkgs.testers.runNixOSTest (
+                import ./tests/s2-placement.nix {
+                  inherit pkgs robotModules onBoard;
+                  full = true;
+                }
+              );
             }
             // perBoard "flash" (board: flash board [ (onBoard board) ]);
             aarch64-linux = perBoard "installer" (board: installer self.nixosConfigurations.${board}) // {

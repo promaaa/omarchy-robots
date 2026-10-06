@@ -12,7 +12,8 @@ import sys
 import unittest
 from pathlib import Path
 
-from omarchy_runtime.contracts import LinkError, State, Update, ns
+from omarchy_runtime import placement
+from omarchy_runtime.contracts import ConfigError, LinkError, State, Update, ns
 from omarchy_runtime.evaluate import scenario_result
 from omarchy_runtime.link import RemoteRuntime, TcpTransport, address
 from omarchy_runtime.scenario import run
@@ -118,7 +119,7 @@ class TestRemoteS2(unittest.TestCase):
     """nominal_a with S2 in another process over TCP (loopback), on the wall
     clock. Wall-clock runs are not bit-identical: the outcome, the claim, the
     verdict, the ground truth and the safety invariants must be those of the
-    simulated run exactly; the task time within 15 % of it."""
+    simulated run exactly; the task time within placement.TOLERANCE of it."""
 
     def test_s2_in_another_process(self) -> None:
         env = os.environ | {"PYTHONPATH": str(HERE)}
@@ -127,7 +128,7 @@ class TestRemoteS2(unittest.TestCase):
         self.addCleanup(s2.kill)
         assert s2.stdout is not None
         port = int(s2.stdout.readline().rsplit(":", 1)[1])
-        r = run("nominal_a", tmpdir() / "remote", clock="wall", s2=("127.0.0.1", port), s2_timeout=ns(30.0), tags={"profile": "test"})
+        r = run("nominal_a", tmpdir() / "remote", clock="wall", s2=("127.0.0.1", port), s2_timeout=ns(30.0), tags={"profile": "local"})
         out, err = s2.communicate(timeout=60)
         self.assertEqual(s2.returncode, 0, err)
         report = json.loads(out)
@@ -142,15 +143,13 @@ class TestRemoteS2(unittest.TestCase):
         )
         self.assertEqual(r.truths, simulated.truths)
         self.assertEqual(r.world.violations, [])
-        expected = scenario_result(simulated, validate_run(simulated.dir))["task_time_s"]
-        self.assertAlmostEqual(result["task_time_s"], expected, delta=0.15 * expected)
 
         header = json.loads((r.dir / "run.json").read_text())
         self.assertEqual(header["clock"], "wall")
         self.assertEqual(header["s2"]["placement"], "remote")
         self.assertEqual(header["s2"]["hello"]["role"], "s2")
         self.assertEqual(header["extensions"]["s2_latency"], {"id": "fixed", "version": "1", "seconds": 0.1, "spread": 0.0})
-        self.assertEqual(header["tags"], {"profile": "test"})
+        self.assertEqual(header["tags"], {"profile": "local"})
 
         link = r.s2_link
         assert link is not None
@@ -168,6 +167,27 @@ class TestRemoteS2(unittest.TestCase):
         self.assertEqual(report["refused"], [])
         self.assertGreater(report["rtt_ns"]["n"], 50)
         self.assertIn("soft real-time, Python", report["loop"]["label"])
+
+        # The experiment's table from this cell: it holds the task time to the simulated
+        # run's (placement.TOLERANCE), and rewrites the documentation.
+        cell = tmpdir() / "results.json"
+        cell.write_text(json.dumps({"scenarios": [result]}))
+        gathered = placement.gather([cell])
+        self.assertTrue(gathered["passed"], gathered["cells"][0]["problems"])
+        c = gathered["cells"][0]
+        self.assertEqual((c["profile"], c["ttft_s"], c["s2"], c["outages"]), ("local", 0.1, "remote", []))
+        self.assertEqual(c["simulated_task_time_s"], scenario_result(simulated, validate_run(simulated.dir))["task_time_s"])
+        self.assertIn("no emulated network, not in VMs, soft real-time", placement.report(gathered))
+        doc = tmpdir() / "README.md"
+        doc.write_text(f"# Title\n\n{placement.BEGIN}\nold table\n{placement.END}\n\nAfter.\n")
+        placement.write_docs(gathered, [doc])
+        text = doc.read_text()
+        self.assertNotIn("old table", text)
+        self.assertIn("| local | 0.1 | 1x SUCCEEDED |", text)
+        self.assertTrue(text.endswith(f"{placement.END}\n\nAfter.\n"))
+        doc.write_text("no markers\n")
+        with self.assertRaises(ConfigError):
+            placement.write_docs(gathered, [doc])
 
 
 if __name__ == "__main__":
