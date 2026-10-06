@@ -1,7 +1,10 @@
-# R2, research question RQ5: where should S2 live? The two-cup task
-# (scenario s2_placement) with S2 in its own process, on the robot ("local")
-# or on an edge node, over a link shaped with tc netem. One cell per network
-# profile and S2 time to first token (TTFT), each run on the wall clock.
+# Research question RQ5: where should S2 live? The two-cup task (scenario
+# s2_placement) and three scenes that change during the task (cup_moved: S1
+# reacts alone; slot_blocked, fallback_expiry: S2 must choose again while S0
+# waits under the fallback) with S2 in its own process, on the robot
+# ("local") or on an edge node, over a link shaped with tc netem. One cell per
+# scenario, network profile and S2 time to first token (TTFT), each run on the
+# wall clock. The S2 process's TTFT replaces the scenario's S2 latency.
 #
 # Every cell must keep the safety invariants (no ground-truth limit
 # violation, S0 never without a chunk, a fallback or HOLD), validate its
@@ -11,8 +14,10 @@
 # the robot's traces, $out/s2-* the S2 processes' own reports. Every number
 # is labelled: emulated network, VMs, soft real-time.
 #
-# `full = false` (nix flake check, CI): 3 profiles x 2 TTFTs. `full = true`
-# (`nix build .#s2-placement`, the manual CI job): every profile x 0.1, 1, 5 s.
+# `full = false` (nix flake check, CI): the two-cup task on 4 profiles x 2
+# TTFTs, and each dynamic scenario on lan and outage_long with a TTFT of 1 s.
+# `full = true` (`nix build .#s2-placement`, the manual CI job): every
+# scenario x every profile x 0.1, 1, 5 s.
 {
   pkgs,
   robotModules,
@@ -20,43 +25,65 @@
   full ? false,
 }:
 let
-  cells = pkgs.lib.cartesianProduct {
-    profile =
-      if full then
-        [
-          "local"
-          "lan"
-          "wifi"
-          "wan"
-          "degraded"
-          "outage"
-          "outage_long"
-        ]
-      else
-        [
-          "lan"
-          "degraded"
-          "outage"
-          "outage_long"
-        ];
-    ttft =
-      if full then
-        [
-          0.1
-          1
-          5
-        ]
-      else
-        [
-          0.1
-          1
-        ];
-  };
+  profiles = [
+    "local"
+    "lan"
+    "wifi"
+    "wan"
+    "degraded"
+    "outage"
+    "outage_long"
+  ];
+  dynamic = [
+    "cup_moved"
+    "slot_blocked"
+    "fallback_expiry"
+  ];
+  groups =
+    if full then
+      [
+        {
+          scenario = [ "s2_placement" ] ++ dynamic;
+          profile = profiles;
+          ttft = [
+            0.1
+            1
+            5
+          ];
+        }
+      ]
+    else
+      [
+        {
+          scenario = [ "s2_placement" ];
+          profile = [
+            "lan"
+            "degraded"
+            "outage"
+            "outage_long"
+          ];
+          ttft = [
+            0.1
+            1
+          ];
+        }
+        {
+          scenario = dynamic;
+          profile = [
+            "lan"
+            "outage_long"
+          ];
+          ttft = [ 1 ];
+        }
+      ];
+  cells = pkgs.lib.concatMap pkgs.lib.cartesianProduct groups;
 in
 {
   name = "omarchy-s2-placement${if full then "-full" else ""}";
   node.pkgsReadOnly = false;
   defaults = ./slow-host.nix;
+  # The full matrix has 84 cells: more than the driver's default hour.
+  globalTimeout = if full then 3 * 3600 else 3600;
 
   nodes.robot =
     { lib, ... }:
@@ -118,8 +145,8 @@ in
     def background(machine, command, log):
         machine.succeed(f"(set +e; {command}; echo $? > {log}.rc) > {log} 2> {log}.err &")
 
-    def cell(profile, ttft):
-        name = f"{profile}-ttft{ttft}"
+    def cell(scenario, profile, ttft):
+        name = f"{scenario}-{profile}-ttft{ttft}"
         spec = PROFILES[profile]
         shape(spec)
         local = profile == "local"
@@ -129,10 +156,10 @@ in
         s2_node.succeed("mkdir -p /tmp/s2")
         background(s2_node, f"omarchy-runtime s2 --listen {listen} --ttft {ttft} --timeout 300", f"/tmp/s2/{name}.json")
         tags = f"--tag profile={profile} --tag netem={shlex.quote(spec or 'none')}"
-        run = f"omarchy-runtime run s2_placement --clock wall --s2 {target} --runs {RUNS}/{name} {tags}"
+        run = f"omarchy-runtime run {scenario} --clock wall --s2 {target} --runs {RUNS}/{name} {tags}"
         background(robot, f"su - admin -c {shlex.quote(run)}", f"/tmp/robot-{name}.log")
         if profile in OUTAGES:
-            robot.wait_until_succeeds(f"grep -qs '\"to\":\"RUNNING\"' {RUNS}/{name}/run-*/s2_placement/events.jsonl", timeout=600)
+            robot.wait_until_succeeds(f"grep -qs '\"to\":\"RUNNING\"' {RUNS}/{name}/run-*/{scenario}/events.jsonl", timeout=600)
             time.sleep(2)  # into the first execution
             shape(f"{spec} loss 100%")
             time.sleep(OUTAGES[profile])
@@ -142,9 +169,9 @@ in
         shape(None)
         print(robot.succeed(f"cat /tmp/robot-{name}.log /tmp/robot-{name}.log.err"))
         if profile in OUTAGES:  # how the link went down and came back
-            print(robot.succeed(f"grep -h '\"type\":\"s2.link\"' {RUNS}/{name}/run-*/s2_placement/events.jsonl || true"))
+            print(robot.succeed(f"grep -h '\"type\":\"s2.link\"' {RUNS}/{name}/run-*/{scenario}/events.jsonl || true"))
         print(s2_node.succeed(f"cat /tmp/s2/{name}.json.err; tail -c 1500 /tmp/s2/{name}.json"))
-        run_dir = robot.succeed(f"ls -d {RUNS}/{name}/run-*/s2_placement").strip()
+        run_dir = robot.succeed(f"ls -d {RUNS}/{name}/run-*/{scenario}").strip()
         with subtest(f"{name}: the trace validates and carries this robot's identity"):
             robot.succeed(f"omarchy-runtime validate-trace {run_dir}")
             header = json.loads(robot.succeed(f"cat {run_dir}/run.json"))
@@ -153,7 +180,7 @@ in
             assert header["extensions"]["s2_latency"]["seconds"] == ttft, header["extensions"]
         return name
 
-    names = [cell(c["profile"], c["ttft"]) for c in CELLS]
+    names = {cell(c["scenario"], c["profile"], c["ttft"]): c["profile"] for c in CELLS}
     results = " ".join(f"{RUNS}/{n}/run-*/results.json" for n in names)
     status, table = robot.execute(f"omarchy-runtime placement {results} --out /tmp/placement")
     print(table)
@@ -166,14 +193,15 @@ in
 
     with subtest("every cell keeps the safety invariants and the tolerance"):
         placement = json.loads(robot.succeed("cat /tmp/placement/results.json"))
-        assert status == 0 and placement["passed"], [(c["profile"], c["ttft_s"], c["problems"]) for c in placement["cells"]]
+        assert status == 0 and placement["passed"], [(c["scenario"], c["profile"], c["ttft_s"], c["problems"]) for c in placement["cells"]]
+        assert len(placement["cells"]) == len(CELLS), len(placement["cells"])
         assert all(c["violations"] == 0 for c in placement["cells"])
         assert "VMs" in placement["label"] and "soft real-time" in placement["label"], placement["label"]
 
     with subtest("both processes report success"):
-        for n in names:
+        for n, profile in names.items():
             assert robot.succeed(f"cat /tmp/robot-{n}.log.rc").strip() == "0", n
-            s2_node = robot if n.startswith("local-") else edge
+            s2_node = robot if profile == "local" else edge
             assert s2_node.succeed(f"cat /tmp/s2/{n}.json.rc").strip() == "0", n
 
     with subtest("the supervisor classifies the injected outages as long, they end, and the robot reconnects"):
@@ -184,6 +212,13 @@ in
                 assert all(o["class"] != "unrecovered" for o in c["outages"]), c["outages"]
             if c["profile"] == "outage_long":
                 events = robot.succeed(f"cat {c['run_dir']}/events.jsonl")
-                assert '"state":"reconnected"' in events, f"{c['profile']} {c['ttft_s']}: no reconnection"
+                assert '"state":"reconnected"' in events, f"{c['scenario']} {c['profile']} {c['ttft_s']}: no reconnection"
+
+    with subtest("the dynamic scenarios react, and recover through S2"):
+        for c in placement["cells"]:
+            if c["scenario"] == "cup_moved":
+                assert c["reaction_s"] is not None, c
+            if c["scenario"] in ("slot_blocked", "fallback_expiry"):
+                assert c["recovery"] and c["recovery"]["fallback_engaged"], c["recovery"]
   '';
 }

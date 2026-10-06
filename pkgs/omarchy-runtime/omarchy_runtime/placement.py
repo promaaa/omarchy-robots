@@ -1,8 +1,10 @@
 """The S2 placement experiment (RQ5: where should S2 live?).
 
-A cell is one robot run of the two-cup task (scenario s2_placement) with S2
-in another process, over one network profile, with one S2 time to first
-token (TTFT). The profiles are emulated with tc netem between two VMs by
+A cell is one robot run of a scenario with S2 in another process, over one
+network profile, with one S2 time to first token (TTFT). The scenarios: the
+two-cup task (s2_placement), and three where the scene changes during the
+task (cup_moved, slot_blocked, fallback_expiry), for the reaction and the
+recovery times. The profiles are emulated with tc netem between two VMs by
 tests/s2-placement.nix. This module gathers the cells' results into one
 results.json and one table, compares every cell with the same task run in
 one process on simulated time, and writes the table into the documentation
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from omarchy_runtime.contracts import ConfigError, Json
-from omarchy_runtime.evaluate import scenario_result, table
+from omarchy_runtime.evaluate import md_table, scenario_result, table
 from omarchy_runtime.scenario import run
 from omarchy_runtime.trace import validate_run
 
@@ -53,6 +55,8 @@ def _cell(s: Json) -> Json:
     outages = [
         {"class": o["class"], "duration_s": o["duration_ns"] / 1e9, "from_s": o["from"] / 1e9} for o in (link or {}).get("outages", [])
     ]
+    dyn = s.get("dynamics") or {}
+    recovery = (dyn.get("recovery") or [None])[0]
     problems = list(s["problems"])
     for o in outages:
         if deadlines and o["class"] != "unrecovered" and o["class"] != ("long" if o["duration_s"] >= deadlines["long"] else "short"):
@@ -79,6 +83,8 @@ def _cell(s: Json) -> Json:
         "max_gap_s": link["max_gap_ns"] / 1e9 if link else None,
         "deadlines_s": deadlines,
         "outages": outages,
+        "reaction_s": dyn.get("reaction_s"),
+        "recovery": recovery and {k: recovery[k] for k in ("recovery_s", "fallback_engaged", "fallback_s", "fallback_expired")},
         "s0_hz": header["rates_hz"]["s0"],
         "loop": {
             n: {"steps": c["steps"], "overruns": c["overruns"], "interval_ms": _ms(c["interval_ns"]), "step_ms": _ms(c["step_ns"])}
@@ -107,6 +113,8 @@ def gather(paths: Sequence[Path]) -> Json:
                 references[key] = scenario_result(r, validate_run(r.dir))
             ref = references[key]
             c["simulated_task_time_s"] = expected = ref["task_time_s"]
+            c["simulated_reaction_s"] = ref["dynamics"]["reaction_s"]
+            c["simulated_recovery_s"] = ref["dynamics"]["recovery"][0]["recovery_s"] if ref["dynamics"]["recovery"] else None
             if c["executions"] != _expected(ref):
                 c["problems"].append(f"executions {c['executions']}, the simulated run gives {_expected(ref)}")
             s0 = c["loop"].get("s0")
@@ -124,13 +132,18 @@ def gather(paths: Sequence[Path]) -> Json:
     in_vms = bool(cells) and all(c["os"]["board"] == "vm" for c in cells)
     label = f"{'emulated network (tc netem)' if emulated else 'no emulated network'}, {'VMs' if in_vms else 'not in VMs'}, soft real-time"
     return {
-        "experiment": "S2 placement (RQ5), two-cup task",
+        "experiment": "S2 placement (RQ5): the two-cup task and the dynamic scenarios",
         "label": label,
         "measured": first.get("loop_label"),
         "dates": sorted({c["measured"] for c in cells}),
         "runtime": first.get("runtime"),
         "os": first.get("os"),
         "time": "wall-clock seconds on the robot's monotonic clock; simulated: the same task, S2 in one process, simulated time",
+        "reaction": "cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it",
+        "recovery": (
+            "slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S0 went from the fallback to HOLD "
+            "before the retry's first chunk (the fallback lasts 3 s in slot_blocked, 1.5 s in fallback_expiry)"
+        ),
         "rtt": "heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end",
         "tolerance": TOLERANCE,
         "cells": cells,
@@ -142,8 +155,60 @@ def _f(value: float | None, digits: int = 2) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
+def _vs(wall: float | None, simulated: float | None) -> str:
+    return "-" if wall is None else f"{wall:.2f} ({_f(simulated)})"
+
+
+def _recovery(c: Json | None) -> str:
+    if c is None or c["recovery"] is None:
+        return "-"
+    return _vs(c["recovery"]["recovery_s"], c["simulated_recovery_s"]) + (", expired" if c["recovery"]["fallback_expired"] else "")
+
+
+def summary(results: Json) -> tuple[list[str], list[list[str]]]:
+    """One row for each profile and TTFT, every scenario's cell in it: the
+    two-cup task time, cup_moved's reaction, the recovery times (wall-clock,
+    and simulated in parentheses), and safety over the row's cells."""
+    header = [
+        "profile",
+        "TTFT s",
+        "two-cup task s",
+        "cup_moved reaction s",
+        "slot_blocked recovery s",
+        "fallback_expiry recovery s",
+        "fallbacks expired",
+        "violations",
+        "S0 starvations",
+        "cells within tolerance",
+    ]
+    groups: dict[tuple[str, float], dict[str, Json]] = {}
+    for c in results["cells"]:
+        groups.setdefault((c["profile"], c["ttft_s"]), {})[c["scenario"]] = c
+    out = []
+    for (profile, ttft), by in groups.items():
+        cells = list(by.values())
+        two_cup, moved = by.get("s2_placement"), by.get("cup_moved")
+        recovered = [c for c in cells if c["recovery"]]
+        out.append(
+            [
+                profile,
+                _f(ttft, 1),
+                _vs(two_cup["task_time_s"], two_cup["simulated_task_time_s"]) if two_cup else "-",
+                _vs(moved["reaction_s"], moved["simulated_reaction_s"]) if moved else "-",
+                _recovery(by.get("slot_blocked")),
+                _recovery(by.get("fallback_expiry")),
+                f"{sum(c['recovery']['fallback_expired'] for c in recovered)} of {len(recovered)}" if recovered else "-",
+                str(sum(c["violations"] for c in cells)),
+                str(sum(c["starvation_events"] for c in cells)),
+                f"{sum(c['passed'] for c in cells)} of {len(cells)}",
+            ]
+        )
+    return header, out
+
+
 def rows(results: Json) -> tuple[list[str], list[list[str]]]:
     header = [
+        "scenario",
         "profile",
         "TTFT s",
         "outcomes",
@@ -157,6 +222,8 @@ def rows(results: Json) -> tuple[list[str], list[list[str]]]:
         "outages",
         "S0 interval p99/max ms",
         "S0 overruns",
+        "reaction s",
+        "recovery s",
     ]
     out = []
     for c in results["cells"]:
@@ -164,6 +231,7 @@ def rows(results: Json) -> tuple[list[str], list[list[str]]]:
         outcomes = sorted(set(c["outcomes"]))
         out.append(
             [
+                c["scenario"],
                 c["profile"],
                 _f(c["ttft_s"], 1),
                 f"{len(c['outcomes'])}x {outcomes[0]}" if len(outcomes) == 1 else " ".join(c["outcomes"]),
@@ -177,6 +245,8 @@ def rows(results: Json) -> tuple[list[str], list[list[str]]]:
                 ", ".join(f"{o['class']} {o['duration_s']:.1f} s" for o in c["outages"]) or "none",
                 "/".join(_f(s0["interval_ms"][k]) for k in ("p99", "max")) if s0 else "-",
                 f"{s0['overruns']} of {s0['steps']}" if s0 else "-",
+                _vs(c["reaction_s"], c["simulated_reaction_s"]),
+                _recovery(c),
             ]
         )
     return header, out
@@ -190,37 +260,44 @@ def caption(results: Json) -> str:
     system = f"Omarchy Robots {os_build['version']} (board {os_build['board']})" if os_build.get("board") else "no Omarchy Robots identity"
     revision = (rt.get("revision") or "unknown")[:12]
     return (
-        f"S2 placement, two-cup task ({results['label']}). Measured {when} with omarchy-runtime {rt.get('version')} ({revision}), "
-        f"{system}, S0 at {hz} Hz; {results['measured']}. Task and HOLD times are wall-clock; simulated is the same task "
-        f"with S2 in one process on simulated time. S2 RTT: {results['rtt']}."
+        f"S2 placement, the two-cup task and the dynamic scenarios ({results['label']}). "
+        f"Measured {when} with omarchy-runtime {rt.get('version')} ({revision}), "
+        f"{system}, S0 at {hz} Hz; {results['measured']}. Times are wall-clock; in parentheses and in the simulated column, "
+        f"the same task with S2 in one process on simulated time. Reaction, {results['reaction']}. Recovery, "
+        f"{results['recovery']}. S2 RTT: {results['rtt']}."
     )
 
 
 def report(results: Json) -> str:
-    header, body = rows(results)
-    parts = [caption(results), "", table(header, body), "", f"Tolerance: {results['tolerance']}"]
+    parts = [caption(results), "", table(*summary(results)), "", table(*rows(results)), "", f"Tolerance: {results['tolerance']}"]
     for c in results["cells"]:
         if not c["passed"]:
-            parts.append(f"FAILED {c['profile']} TTFT {c['ttft_s']} s: " + "; ".join(c["problems"]))
+            parts.append(f"FAILED {c['scenario']} {c['profile']} TTFT {c['ttft_s']} s: " + "; ".join(c["problems"]))
     parts.append(f"\n{sum(c['passed'] for c in results['cells'])} of {len(results['cells'])} cells within tolerance.")
     return "\n".join(parts)
 
 
 def markdown(results: Json, source: str | None = None) -> str:
-    """The table in Markdown; `source` says where the results come from (a CI run, a host)."""
-    header, body = rows(results)
+    """The tables in Markdown, every cell in a collapsed section; `source` says
+    where the results come from (a CI run, a host)."""
     text = caption(results) + (f" Source: {source}." if source else "")
-    lines = [text, "", "| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    lines += ["| " + " | ".join(r) + " |" for r in body]
+    every = f"<details><summary>Every cell ({len(results['cells'])})</summary>"
+    lines = [text, "", *md_table(*summary(results)), "", every, "", *md_table(*rows(results)), "", "</details>"]
     return "\n".join(lines + ["", f"Tolerance: {results['tolerance']}"])
 
 
-def write_docs(results: Json, files: Sequence[Path], source: str | None = None) -> None:
-    """Replace what is between the markers in each file with the table."""
-    block = f"{BEGIN}\n{markdown(results, source)}\n{END}"
+def write_block(files: Sequence[Path], name: str, text: str) -> None:
+    """Replace what is between the markers `<!-- name:begin -->` and
+    `<!-- name:end -->` in each file with `text`."""
+    begin, end = f"<!-- {name}:begin -->", f"<!-- {name}:end -->"
     for path in files:
-        text = path.read_text()
-        start, end = text.find(BEGIN), text.find(END)
-        if start < 0 or end < start:
-            raise ConfigError(f"{path}: no {BEGIN} ... {END} section")
-        path.write_text(text[:start] + block + text[end + len(END) :])
+        old = path.read_text()
+        start, stop = old.find(begin), old.find(end)
+        if start < 0 or stop < start:
+            raise ConfigError(f"{path}: no {begin} ... {end} section")
+        path.write_text(old[:start] + f"{begin}\n{text}\n{end}" + old[stop + len(end) :])
+
+
+def write_docs(results: Json, files: Sequence[Path], source: str | None = None) -> None:
+    """Replace what is between the markers in each file with the tables."""
+    write_block(files, "s2-placement", markdown(results, source))

@@ -156,6 +156,8 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `s2_placement` | both cups, for the S2 placement experiment below (S2 takes 1 s in one process) | SUCCEEDED twice |
 | `timing_observation_age`, `timing_pause_grasp` | observations 20 ms old; the whole robot stopped for 0.3 s during a descent: regressions for two S1 bugs CI met in v0.0.2 part 2 | SUCCEEDED |
 | `timing_s0_stall`, `timing_jitter` | S0 stalled for 0.3 s while carrying; S0 skipping 5 % of its ticks, jittery S1 latency and observation age | SUCCEEDED, steps within S0's bound |
+| `cup_moved` | a human moves the cup 6 cm during the approach; S1 plans the grasp again, without S2 | SUCCEEDED |
+| `slot_blocked`, `fallback_expiry` | a dish appears in the rack spot; S1 gives up, S0 runs S2's fallback, S2 chooses another spot; with a slow S2, the fallback expires first and S0 holds | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,
@@ -170,11 +172,14 @@ the runtime then reaches S2 through the tunnel only (manual, Security).
 > real network, nothing real-time, no hardware.
 
 Where should S2 live: on the robot, on an edge server, or in the cloud? In
-each cell the robot VM runs the two-cup task (`s2_placement`) with S2 in its
-own process, on the robot VM (`local`) or on a second VM (`edge`), over one
-network profile, with one S2 time to first token (TTFT). A TTFT of 0.1 s,
-1 s and 5 s stands in for a model on the robot, on an edge server and in the
-cloud. Delays are round trips, applied half on each VM; loss applies to
+each cell the robot VM runs one scenario with S2 in its own process, on the
+robot VM (`local`) or on a second VM (`edge`), over one network profile,
+with one S2 time to first token (TTFT). The scenarios: the two-cup task
+(`s2_placement`), and the three scenes that change (`cup_moved`, where S1
+reacts alone; `slot_blocked` and `fallback_expiry`, where S0 waits under
+the fallback until S2 chooses again). The S2 process's TTFT replaces the
+scenario's S2 latency. A TTFT of 0.1 s, 1 s and 5 s stands in for a model
+on the robot, on an edge server and in the cloud. Delays are round trips, applied half on each VM; loss applies to
 every packet in each direction.
 
 | Profile | Link |
@@ -188,14 +193,16 @@ every packet in each direction.
 | `outage_long` | `lan`, then every packet dropped for 20 s during the first execution: the robot connects again |
 
 ```sh
-nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage, outage_long x TTFT 0.1, 1 s (in nix flake check)
-nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
+nix build .#checks.x86_64-linux.vm-s2-placement   # in nix flake check: 14 cells (below)
+nix build .#s2-placement                          # every scenario x profile x TTFT 0.1, 1, 5 s; wants KVM
 nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
   --source "CI run <id>, ..."      # writes the table below
 ```
 
-The last command writes the table below, here and in the manual, from the
-results of a full run; CI runs the full matrix on demand (workflow
+In `nix flake check`, the two-cup task runs on lan, degraded, outage and
+outage_long with a TTFT of 0.1 s and 1 s, and each changing scene on lan and
+outage_long with 1 s. The last command writes the tables below, here and in
+the manual, from the results of a full run; CI runs the full matrix on demand (workflow
 dispatch, `placement`) and keeps its results as an artifact. Each cell must
 keep the safety invariants and stay within the stated tolerance of the
 same task in one process on simulated time.
@@ -253,7 +260,8 @@ for latency, not for recovery.
 
 The manual's [Runtime chapter](https://promaaa.github.io/omarchy-robots/runtime/)
 has the concepts, the trace format and the extension points for
-collaborators (observation filter, verifier, recovery policy, S2 latency).
+collaborators (observation filter, verifier, recovery policy, S2 latency,
+chunk corrector, inference trigger).
 
 ## Support matrix
 

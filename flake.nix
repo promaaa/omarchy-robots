@@ -93,8 +93,8 @@
               default = self.packages.x86_64-linux.vm;
               installer-vm = installer self.nixosConfigurations.vm;
               installer-pc = installer self.nixosConfigurations.pc;
-              # The S2 placement experiment, every profile and S2 time to first
-              # token: two VMs, an emulated network. Wants KVM (10 min in CI).
+              # The S2 placement experiment, every scenario, profile and S2 time
+              # to first token: two VMs, an emulated network. Wants KVM.
               s2-placement = pkgs.testers.runNixOSTest (
                 import ./tests/s2-placement.nix {
                   inherit pkgs robotModules onBoard;

@@ -288,13 +288,16 @@ class TestRemoteS2(unittest.TestCase):
     verdict, the ground truth and the safety invariants must be those of the
     simulated run exactly; the task time within placement.TOLERANCE of it."""
 
-    def test_s2_in_another_process(self) -> None:
+    def s2(self) -> tuple[subprocess.Popen[str], int]:
         env = os.environ | {"PYTHONPATH": str(HERE)}
         command = [sys.executable, "-m", "omarchy_runtime", "s2", "--listen", "127.0.0.1:0", "--ttft", "0.1", "--timeout", "60"]
         s2 = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         self.addCleanup(s2.kill)
         assert s2.stdout is not None
-        port = int(s2.stdout.readline().rsplit(":", 1)[1])
+        return s2, int(s2.stdout.readline().rsplit(":", 1)[1])
+
+    def test_s2_in_another_process(self) -> None:
+        s2, port = self.s2()
         r = run("nominal_a", tmpdir() / "remote", clock="wall", s2=("127.0.0.1", port), s2_timeout=ns(30.0), tags={"profile": "local"})
         out, err = s2.communicate(timeout=60)
         self.assertEqual(s2.returncode, 0, err)
@@ -356,6 +359,27 @@ class TestRemoteS2(unittest.TestCase):
         doc.write_text("no markers\n")
         with self.assertRaises(ConfigError):
             placement.write_docs(gathered, [doc])
+
+    def test_a_recovery_through_s2_in_another_process(self) -> None:
+        # slot_blocked: S1 gives up, S0 waits under the fallback, and S2 in the other
+        # process chooses another spot. The cell carries the recovery, as the simulated run.
+        s2, port = self.s2()
+        r = run("slot_blocked", tmpdir() / "blocked", clock="wall", s2=("127.0.0.1", port), s2_timeout=ns(30.0), tags={"profile": "local"})
+        self.assertEqual(s2.wait(timeout=60), 0)
+        cell = tmpdir() / "results.json"
+        cell.write_text(json.dumps({"scenarios": [scenario_result(r, validate_run(r.dir))]}))
+        gathered = placement.gather([cell])
+        self.assertTrue(gathered["passed"], gathered["cells"][0]["problems"])
+        c = gathered["cells"][0]
+        assert c["recovery"] is not None
+        self.assertTrue(c["recovery"]["fallback_engaged"])
+        self.assertFalse(c["recovery"]["fallback_expired"])  # S2 answers in 0.1 s; the fallback lasts 3 s
+        self.assertAlmostEqual(c["simulated_recovery_s"], 0.15, places=2)
+        self.assertLess(c["recovery"]["recovery_s"], 1.0)
+        header, body = placement.summary(gathered)
+        row = dict(zip(header, body[0], strict=True))
+        self.assertEqual((row["fallbacks expired"], row["cells within tolerance"], row["two-cup task s"]), ("0 of 1", "1 of 1", "-"))
+        self.assertTrue(row["slot_blocked recovery s"].endswith("(0.15)"))
 
 
 if __name__ == "__main__":

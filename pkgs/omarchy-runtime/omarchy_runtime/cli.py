@@ -150,6 +150,17 @@ def cmd_placement_docs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_inference_matrix(args: argparse.Namespace) -> int:
+    out = fresh(runs_dir(args), f"inference-{stamp()}")
+    results = evaluate.inference_matrix(out)
+    print(evaluate.inference_report(results))
+    print(f"\nTraces and results.json: {out}")
+    if args.docs:
+        placement.write_block([Path(f) for f in args.docs], "inference-matrix", evaluate.inference_markdown(results))
+        print(f"The inference matrix in {', '.join(args.docs)} is now this run's.")
+    return 0 if all(c["violations"] == 0 for c in results["cells"]) else 1
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     status = 0
     for run in args.run_dir:
@@ -207,6 +218,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("files", nargs="+", help="for example README.md manual/runtime.md")
     p.add_argument("--source", help='where the results come from, for the caption, e.g. "CI run 123, GitHub runner, 2 CPUs, KVM"')
     p.set_defaults(func=cmd_placement_docs)
+    p = sub.add_parser(
+        "inference-matrix",
+        help="S1 inference delay x chunk corrector x inference trigger, simulated; a baseline for asynchronous inference",
+    )
+    p.add_argument("--runs", help="where run directories go (default: $OMARCHY_RUNTIME_RUNS, else ./runs)")
+    p.add_argument("--docs", nargs="+", metavar="FILE", help="also write the table into these files, between their markers")
+    p.set_defaults(func=cmd_inference_matrix)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")
     p.set_defaults(func=cmd_show)

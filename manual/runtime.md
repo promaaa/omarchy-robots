@@ -53,6 +53,7 @@ nix run .#omarchy-runtime -- eval     # every scenario, and the results table
 | `omarchy-runtime show RUN_DIR` | A summary of one run directory. |
 | `omarchy-runtime validate-trace RUN_DIR ...` | Checks run directories against the trace schema; exits 1 if one is incomplete. |
 | `omarchy-runtime s2` | Is S2 for one robot run in another process: waits for the robot, runs the scripted S2 on the wall clock, prints its own report. See "S2 in another process". |
+| `omarchy-runtime inference-matrix` | S1's inference delay x chunk corrector x inference trigger on `nominal_a` and `cup_moved`, in simulated time. See "Asynchronous inference". |
 | `omarchy-runtime scenarios` | Lists the scenarios. |
 
 `--runs DIR` chooses where run directories go (default: `$OMARCHY_RUNTIME_RUNS`, else `./runs`). `--record-s0` also writes S0's per-tick record for each execution.
@@ -78,6 +79,9 @@ A simulated kitchen in a vertical plane: a table with two cups, a counter with a
 | `timing_pause_grasp` | The whole robot process stops for 0.3 s while the arm descends to the cup. Regression: v0.0.2 part 1's S1 pushed the held cup into the table here | SUCCEEDED |
 | `timing_s0_stall` | S0 alone does not tick for 0.3 s while the arm carries the cup: one late tick, no catch-up jump | SUCCEEDED |
 | `timing_jitter` | S0 skips 5 % of its ticks, S1's latency and the observations' age are lognormal | SUCCEEDED twice |
+| `cup_moved` | A human moves the cup 6 cm while the arm approaches it. S1 plans the grasp again from fresh observations, without S2 | SUCCEEDED |
+| `slot_blocked` | A dish appears in the rack spot the arm is carrying the cup to. S1 gives up (blocked), S0 runs S2's fallback (held 3 s), S2 chooses another spot (`retry_elsewhere`) | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
+| `fallback_expiry` | `slot_blocked` with S2 taking 2 s and a fallback that lasts 1.5 s: the fallback expires, S0 returns to HOLD with the cup held, then S2's new goal runs | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 
 Each scenario is a TOML file in `pkgs/omarchy-runtime/omarchy_runtime/scenarios/`: seed, body, faults, S2's goals and latency, S1's inference latency, and the expected outcome of each execution.
 
@@ -94,6 +98,25 @@ A loaded machine changes the timing a wall-clock run meets. A scenario reproduce
 | `[[faults]]` | `kind = "s0_stall"` | S0 alone does not tick for `duration_s` |
 
 `tests/test_timing.py` runs `timing_observation_age` and `timing_pause_grasp` with the S1 behaviour of the two bugs CI found in v0.0.2 part 2, and each fails there: a timeout, a held cup pushed into the table.
+
+### Scenes that change
+
+The scene can change during a task. A change is a `[[faults]]` entry, at a delay after a lifecycle point (`after`, `delay_s`), like the other faults:
+
+| Kind | Keys | Effect |
+|---|---|---|
+| `move` | `entity`, `x` | the entity moves by `x` along the table (refused while it is held) and settles on the support below |
+| `appear` | `entity`, `x` | an object declared absent (`present = false` in `world.toml`, as `dish_1`) appears at `x` |
+
+S2's fallback has a duration: `fallback_lasts_s` in a scenario's `[s2]` (by default, the duration of its rows). S0 holds the fallback's last row until then, and then returns to HOLD; S0's counters count each expiry (`fallback_expiries`). When an execution fails, the runtime engages the installed fallback.
+
+The evaluation measures how the robot met each change (`dynamics` in `results.json`, seconds on the run's clock):
+
+- **reaction**: from a move to S0 executing the first chunk computed from an observation taken after it;
+- **freeze**: from the first observation after the move reaching S1 to that tick, while S0 executes a plan the belief already contradicts;
+- **recovery**: for each failed execution that a retry follows, from the failure to the retry running, the time S0 spent in the fallback meanwhile, whether the fallback engaged, and whether it expired before the retry's first chunk;
+- **discontinuity**: the largest jump of S0's desired position, and of its desired velocity, where one chunk takes over from another;
+- **inferences**: how many times S1 inferred.
 
 ## S2 in another process
 
@@ -142,10 +165,10 @@ Every run writes one directory:
 
 | File | Contents |
 |---|---|
-| `run.json` | Header: `trace_schema` (3), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
-| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `run.end`. |
+| `run.json` | Header: `trace_schema` (4), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
+| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions, with `observed_at` and `inference_ns`), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `run.end`. |
 | `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, configuration hash and seed. |
-| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity), kept in a preallocated buffer and written once at the end. |
+| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity, and when the chunk's observation was taken), kept in a preallocated buffer and written once at the end. |
 | `results.json` | Written by the evaluation harness only: ground truth and agreement for each execution. |
 
 Keys that start with `wall` are wall-clock values. Everything else follows from the scenario and its seed: the same scenario with the same seed gives the same trace.
@@ -154,7 +177,7 @@ Keys that start with `wall` are wall-clock values. Everything else follows from 
 
 > **Emulated network, VMs, soft real-time.** Two QEMU VMs, the network between them shaped with `tc netem`, Python on a general-purpose OS. Not a real network, nothing real-time, no hardware.
 
-Where should S2 live: on the robot, on an edge server, or in the cloud (research question RQ5)? The VM test `tests/s2-placement.nix` starts a robot VM (Omarchy Robots, vm board, runtime enabled) and an edge VM. In each cell the robot runs the two-cup task (`s2_placement`) with S2 in its own process, on the robot VM (`local`) or on the edge VM, over one network profile, with one S2 time to first token (TTFT): 0.1 s, 1 s and 5 s stand in for a model on the robot, on an edge server and in the cloud. Delays are round trips, applied half on each VM; loss applies to every packet in each direction; with jitter, netem also reorders packets.
+Where should S2 live: on the robot, on an edge server, or in the cloud (research question RQ5)? The VM test `tests/s2-placement.nix` starts a robot VM (Omarchy Robots, vm board, runtime enabled) and an edge VM. In each cell the robot runs one scenario with S2 in its own process, on the robot VM (`local`) or on the edge VM, over one network profile, with one S2 time to first token (TTFT): 0.1 s, 1 s and 5 s stand in for a model on the robot, on an edge server and in the cloud. The scenarios are the two-cup task (`s2_placement`), and the three scenes that change (see "Scenes that change"): in `cup_moved` S1 reacts alone, in `slot_blocked` and `fallback_expiry` S0 waits under the fallback until S2 chooses another spot. The S2 process's TTFT replaces the scenario's S2 latency, `fallback_expiry`'s 2 s included: the matrix shows for which placements the fallback (3 s in `slot_blocked`, 1.5 s in `fallback_expiry`) outlasts S2's answer. Delays are round trips, applied half on each VM; loss applies to every packet in each direction; with jitter, netem also reorders packets.
 
 | Profile | Link |
 |---|---|
@@ -166,16 +189,16 @@ Where should S2 live: on the robot, on an edge server, or in the cloud (research
 | `outage` | `lan`, then every packet dropped for 5 s during the first execution |
 | `outage_long` | `lan`, then every packet dropped for 20 s during the first execution: the robot connects again |
 
-For every cell the table gives the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and the same task's time in one process on simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, and S0's loop intervals and overruns.
+The first table has one row for each profile and TTFT: the two-cup task time, `cup_moved`'s reaction time, the recovery time of `slot_blocked` and `fallback_expiry` (from S1 giving up to the retry running; "expired" when the fallback ended before it), how many fallbacks expired, and the violations, starvations and cells within tolerance over the row. Times are wall-clock, and in parentheses the same task in one process on simulated time. Every cell then follows: the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and its simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, S0's loop intervals and overruns, and the reaction and recovery times.
 
 ```sh
-nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage, outage_long x TTFT 0.1, 1 s (in nix flake check)
-nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
+nix build .#checks.x86_64-linux.vm-s2-placement   # in nix flake check: 14 cells (below)
+nix build .#s2-placement                          # every scenario x profile x TTFT 0.1, 1, 5 s; wants KVM
 nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
   --source "CI run <id>, ..."      # writes the table below
 ```
 
-`result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
+In `nix flake check`, the two-cup task runs on lan, degraded, outage and outage_long with a TTFT of 0.1 s and 1 s, and each scene that changes on lan and outage_long with 1 s: 14 cells. `result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
 
 <!-- s2-placement:begin -->
 S2 placement, two-cup task (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (f814e5c4f79f), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Task and HOLD times are wall-clock; simulated is the same task with S2 in one process on simulated time. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37448327750 (https://github.com/promaaa/omarchy-robots/actions/runs/37448327750), the full matrix on f814e5c alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
@@ -215,8 +238,10 @@ Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_run
 |---|---|---|
 | `ObservationFilter.apply(observation)` returns the filtered observation and what it changed | `identity` | anonymization and privacy: it runs before the belief and the trace see an observation; it keeps entity ids stable within a run and says what it changed |
 | `Verifier.verify(goal, belief, not_before)` returns a verdict with its evidence | `geometric`, per predicate | judging success independently of the executor |
-| `RecoveryPolicy.decide(goal, summary, belief)` returns `Retry` or `GiveUp` | `retry_once`: once after VIOLATED; give up otherwise | retrying with modifications (`Retry` carries the conditioning passed to S1) |
+| `RecoveryPolicy.decide(goal, summary, belief)` returns `Retry` or `GiveUp` | `retry_once`: once after VIOLATED; give up otherwise. Also `retry_elsewhere`: after a blocked place spot, the first free spot of the container | retrying with modifications (`Retry` carries the conditioning passed to S1) |
 | `LatencyModel.sample(rng)` returns a delay, S2's time to first token | `fixed`; also `lognormal` (sampled for each decision) | where S2 should run (R2) |
+| `ChunkCorrector.correct(chunk, history, state, now)` returns the chunk S0 executes | `none`; also `blend` | asynchronous inference: correcting a chunk computed from an older observation (see below) |
+| `InferenceTrigger.due(context)` says whether S1 infers now | `periodic`; also `mismatch` | asynchronous inference: when to infer again (see below) |
 
 An extension that raises, or returns the wrong type, never stops the run: a failing filter loses that observation (unfiltered data never reaches the belief), a failing verifier gives INCONCLUSIVE, a failing recovery policy means giving up, and each leaves an `error` event in the trace.
 
@@ -226,6 +251,50 @@ To add one: write the class, add it to the registry in `extensions.py`, select i
 cd pkgs/omarchy-runtime
 nix develop ../.. -c python3 -m unittest discover -s tests -t .
 ```
+
+## Asynchronous inference
+
+A VLA model infers a chunk from an observation, and the robot moves while it infers: when the chunk reaches S0, it was computed for a state that is already gone. Two extension points, both on the robot side in S1's host, never in the runtime, let a method act on this:
+
+- A **chunk corrector** (`ChunkCorrector.correct(chunk, history, state, now)`) is applied when a new chunk is handed to S0, and returns the chunk S0 executes. It receives the chunk, with `observed_at` (when its observation was taken) and `inference_ns` (how long the inference took), S0's ticks since `observed_at` (`S0History`: tick times, commanded and desired positions) and S0's current status. A corrector keeps the chunk's seq, source, action space and observation time.
+- An **inference trigger** (`InferenceTrigger.due(context)`) is asked at S1's rate whether S1 infers now. `context` (`InferenceContext`) holds S0's status, its last 0.5 s of history, the inferences on their way, the last measured inference latency and S1's period. A trigger must ask for an inference when S0 has no chunk and none is on its way.
+
+Each call returns within about 0.5 ms (the contract tests measure it): a corrector runs in S0's loop. Neither blocks, reads ground truth or calls S0: they receive data and return data. One that raises fails the execution, never S0. `[extensions]` in `runtime.toml` chooses them by id (`corrector`, `trigger`); their parameters are in `[s1_host]`. The baselines are naive on purpose: `blend` blends from S0's position into the new chunk over 0.1 s, a stand-in for smoothing methods such as Real-Time Chunking; `mismatch` infers when S0's state is 0.02 from what it tracks. To add one, register it in `CORRECTORS` or `INFERENCE_TRIGGERS` in `extensions.py` and mix `CorrectorContract` or `TriggerContract` from `tests/contracts.py` into its test case.
+
+`omarchy-runtime inference-matrix --docs manual/runtime.md` runs S1's inference delay (50, 150, 300 ms) x every registered corrector x every registered trigger on `nominal_a` and `cup_moved`, in simulated time, and writes the table below. A new corrector or trigger joins the matrix once it is registered. A baseline, not a claim about which method is best.
+
+<!-- inference-matrix:begin -->
+Inference matrix (simulated time; a baseline for asynchronous inference, not a claim about which method is best).
+
+| scenario | inference s | corrector | trigger | outcomes | violations | task s | starvations | inferences | jump | velocity jump /s | reaction s | freeze s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| nominal_a | 0.05 | none | periodic | SUCCEEDED | 0 | 8.20 | 0 | 155 | 0.00 | 1.37 | - | - |
+| nominal_a | 0.05 | none | mismatch | SUCCEEDED | 0 | 8.20 | 0 | 23 | 0.00 | 0.63 | - | - |
+| nominal_a | 0.05 | blend | periodic | SUCCEEDED | 0 | 9.05 | 0 | 172 | 0.00 | 2.68 | - | - |
+| nominal_a | 0.05 | blend | mismatch | SUCCEEDED | 0 | 8.25 | 0 | 26 | 0.00 | 1.36 | - | - |
+| nominal_a | 0.15 | none | periodic | SUCCEEDED | 0 | 8.35 | 0 | 158 | 0.08 | 1.45 | - | - |
+| nominal_a | 0.15 | none | mismatch | SUCCEEDED | 0 | 8.20 | 0 | 32 | 0.00 | 0.03 | - | - |
+| nominal_a | 0.15 | blend | periodic | SUCCEEDED | 0 | 8.75 | 0 | 166 | 0.00 | 2.60 | - | - |
+| nominal_a | 0.15 | blend | mismatch | SUCCEEDED | 0 | 8.25 | 0 | 32 | 0.00 | 0.98 | - | - |
+| nominal_a | 0.30 | none | periodic | SUCCEEDED | 0 | 8.50 | 0 | 161 | 0.08 | 1.42 | - | - |
+| nominal_a | 0.30 | none | mismatch | SUCCEEDED | 0 | 10.30 | 27 | 29 | - | - | - | - |
+| nominal_a | 0.30 | blend | periodic | SUCCEEDED | 0 | 8.85 | 0 | 168 | 0.03 | 2.50 | - | - |
+| nominal_a | 0.30 | blend | mismatch | SUCCEEDED | 0 | 11.00 | 29 | 31 | - | - | - | - |
+| cup_moved | 0.05 | none | periodic | SUCCEEDED | 0 | 9.15 | 0 | 174 | 0.04 | 1.55 | 0.10 | 0.05 |
+| cup_moved | 0.05 | none | mismatch | SUCCEEDED | 0 | 9.25 | 0 | 26 | 0.04 | 0.84 | 0.10 | 0.05 |
+| cup_moved | 0.05 | blend | periodic | SUCCEEDED | 0 | 10.15 | 0 | 194 | 0.00 | 1.65 | 0.10 | 0.05 |
+| cup_moved | 0.05 | blend | mismatch | SUCCEEDED | 0 | 9.15 | 0 | 28 | 0.00 | 1.74 | 0.10 | 0.05 |
+| cup_moved | 0.15 | none | periodic | SUCCEEDED | 0 | 9.20 | 0 | 175 | 0.12 | 1.79 | 0.20 | 0.15 |
+| cup_moved | 0.15 | none | mismatch | SUCCEEDED | 0 | 9.65 | 0 | 38 | 0.12 | 0.82 | 0.35 | 0.30 |
+| cup_moved | 0.15 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.02 | 1.74 | 0.20 | 0.15 |
+| cup_moved | 0.15 | blend | mismatch | SUCCEEDED | 0 | 9.75 | 0 | 38 | 0.00 | 1.83 | 0.40 | 0.35 |
+| cup_moved | 0.30 | none | periodic | SUCCEEDED | 0 | 10.60 | 0 | 203 | 0.75 | 3.00 | 0.35 | 0.30 |
+| cup_moved | 0.30 | none | mismatch | SUCCEEDED | 0 | 10.65 | 28 | 30 | - | - | 0.35 | 0.30 |
+| cup_moved | 0.30 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.03 | 1.95 | 0.35 | 0.30 |
+| cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 11.70 | 31 | 33 | - | - | 0.35 | 0.30 |
+
+jump: the largest jump of S0's desired position at a chunk switch (rad for the arm's joints); velocity jump: of its desired velocity. reaction: from the cup's move to S0 executing a chunk computed after it; freeze: from the first observation after the move reaching S1 to that tick.
+<!-- inference-matrix:end -->
 
 ## What is not here
 

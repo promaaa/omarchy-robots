@@ -94,7 +94,7 @@ jobs:
     name: S2 placement experiment, full matrix (x86_64, KVM)
     if: github.event_name == 'workflow_dispatch' && inputs.placement
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@v5
       - name: Machine

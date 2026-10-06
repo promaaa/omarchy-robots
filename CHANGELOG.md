@@ -7,6 +7,52 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Changed
+
+- Contract change, chunk timing: `ActionChunk` carries `observed_at` (when
+  the observation it was computed from was taken) and `inference_ns` (how
+  long S1's inference took); the trace's `chunk` events carry both. Every S0
+  keeps a bounded history of its ticks (2 s in the simulated S0) and returns
+  it with `S0.history(since)` (`S0History`: tick times, commanded and
+  desired positions), for the robot side only.
+- Contract change, fallback duration: `FallbackSpec` gains `lasts`, how
+  long S0 holds the fallback's last row before it returns to HOLD (by
+  default, the rows' duration; `fallback_lasts_s` in a scenario's `[s2]`).
+  `S0.hold(fallback=True)` engages the installed fallback: when an execution
+  fails, the runtime now engages it instead of holding. S0's counters gain
+  `fallback_expiries`.
+- Trace schema 4: S0's per-tick record gains `observed_at`; `chunk` events
+  carry `observed_at` and `inference_ns`; S0's counters gain
+  `fallback_expiries`. Validators of schema 3 refuse these traces.
+- The simulated S1 plans its grasp again when its target moved by more than
+  1.5 cm, and gives up ("blocked") when an object stands in its place spot.
+
+### Added
+
+- Scenes that change during a task: `[[faults]]` kinds `move` (an entity
+  moved by `x`) and `appear` (an object declared with `present = false`
+  placed at `x`). Scenarios `cup_moved` (S1 reacts alone), `slot_blocked`
+  (S1 gives up, S0 waits under the fallback, S2 chooses another spot) and
+  `fallback_expiry` (the fallback expires before S2 answers). The recovery
+  policy `retry_elsewhere` retries with the first free spot of the
+  container (`{"place_x": x}`).
+- Evaluation measures the dynamics of each run (`dynamics` in
+  `results.json`): reaction time to a scene change, freeze time, recovery
+  time with the time in fallback and whether it expired, the discontinuity
+  at chunk switches, and the number of inferences.
+- The S2 placement experiment runs the dynamic scenarios too: the full
+  matrix is 4 scenarios x 7 profiles x 3 TTFTs. The table gains a summary
+  with one row for each profile and TTFT: the two-cup task time,
+  cup_moved's reaction, the recovery times, the fallback expiries and
+  safety; every cell follows in a collapsed section.
+- The asynchronous inference seam, on the robot side: `ChunkCorrector`
+  (`none`, `blend`), `InferenceTrigger` (`periodic`, `mismatch`) and
+  `InferenceContext`, chosen by id in `[extensions]` of `runtime.toml`, with
+  their parameters in `[s1_host]`, and contract tests (`CorrectorContract`,
+  `TriggerContract`). `omarchy-runtime
+  inference-matrix` runs S1's inference delay (50, 150, 300 ms) x corrector
+  x trigger on `nominal_a` and `cup_moved` in simulated time.
+
 ## [0.0.2] - 2026-10-06
 
 ### Part 3 (2026-10-06)
