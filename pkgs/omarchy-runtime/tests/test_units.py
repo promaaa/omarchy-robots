@@ -22,6 +22,7 @@ from omarchy_runtime.contracts import (
     FallbackSpec,
     Goal,
     GoalRequest,
+    Heartbeat,
     InstallFallback,
     LifecycleError,
     Message,
@@ -314,6 +315,8 @@ class TestMessages(unittest.TestCase):
             InstallFallback("run-x01", spec),
             Cancel("run-x02"),
             Decision("t01", "run-x01", "retry", "verification failed", "retry_once@1"),
+            Heartbeat(3, ns(0.2), (ns(0.0012), ns(0.0009))),
+            Heartbeat(4, ns(0.3), final=True),
         ]
         for message in messages:
             with self.subTest(type(message).__name__):
@@ -336,6 +339,8 @@ class TestMessages(unittest.TestCase):
             good | {"retry_of": True},
             {k: v for k, v in good.items() if k != "task_id"},
             good | {"goal": {"predicate": "in"}},
+            Heartbeat(1, 0).to_json() | {"rtt": [-1]},
+            Heartbeat(1, 0).to_json() | {"final": 1},
             InstallFallback("x", FallbackSpec.make(ARM.action_space, ARM.dims, 1, [[0.0] * 4], 0, 1, "s")).to_json() | {"spec": {}},
         ]
         for value in bad:

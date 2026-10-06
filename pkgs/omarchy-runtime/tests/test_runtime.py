@@ -24,6 +24,7 @@ from omarchy_runtime.contracts import (
     FallbackSpec,
     Goal,
     GoalRequest,
+    Heartbeat,
     InstallFallback,
     Json,
     Ns,
@@ -127,7 +128,16 @@ class Rig:
         self.policy = policy or FakePolicy()
         self.s0, self.host, self.inbox = FakeS0(), FakeHost(), Mailbox[Observation]()
         self.dir = tmpdir() / "run"
-        p = {"deadline": 20.0, "s1_stall_timeout": 3.0, "freshness": 1.0, "settle": 0.3, "verify_budget": 2.0} | params
+        p = {
+            "deadline": 20.0,
+            "s1_stall_timeout": 3.0,
+            "freshness": 1.0,
+            "settle": 0.3,
+            "verify_budget": 2.0,
+            "s2_lost": 0.5,
+            "s2_long": 2.0,
+        }
+        p |= params
         self.runtime = Runtime(
             body=GANTRY,
             capabilities=config.capabilities(GANTRY_CFG),
@@ -364,6 +374,58 @@ class TestFallbacksAndApi(unittest.TestCase):
         self.assertIn("decision", kinds)
         check = validate_run(rig.dir)
         self.assertEqual([e for e in check.errors if not e.startswith("run.json")], [])  # the rig's header is minimal
+
+
+class TestS2Liveness(unittest.TestCase):
+    """The supervisor watches S2's heartbeats from the first to the final one,
+    and classifies each outage by its duration against the deadlines."""
+
+    def beat(self, rig: Rig, seconds: float) -> None:
+        for _ in range(round(seconds / 0.1)):  # every 0.1 s, each handled at the runtime's next step
+            self.seq += 1
+            rig.runtime.submit(Heartbeat(self.seq, rig.t, (ns(0.002),)))
+            rig.run(0.1)
+
+    def test_outages_classified_by_the_deadlines(self) -> None:
+        rig, self.seq = Rig(), 0
+        rig.run(1.0)  # no heartbeat yet: S2 is not watched
+        self.beat(rig, 1.0)
+        rig.run(1.0)  # silent 1.1 s: lost after 0.5 s, then a short outage
+        self.beat(rig, 0.5)
+        rig.run(3.0)  # silent 3.1 s: a long outage
+        self.beat(rig, 0.5)
+        rig.run(0.4)  # silent 0.5 s: not more than the lost deadline, no outage
+        self.beat(rig, 0.2)
+        rig.runtime.submit(Heartbeat(self.seq + 1, rig.t, final=True))
+        rig.run(2.0)  # S2 left: silence is not an outage
+        link = rig.runtime.s2_link(rig.t)
+        assert link is not None
+        self.assertEqual([(o["class"], round(o["duration_ns"] / 1e9, 2)) for o in link["outages"]], [("short", 1.1), ("long", 3.1)])
+        self.assertEqual(link["max_gap_ns"], ns(3.1))
+        self.assertEqual(link["heartbeats"], 23)
+        self.assertEqual(link["rtt_ns"]["n"], 22)
+        self.assertEqual(link["deadlines_ns"], {"lost": ns(0.5), "long": ns(2.0)})
+        stream = [e for e in rig.events() if e["type"] == "s2.link"]
+        self.assertEqual([e["payload"]["state"] for e in stream], ["up", "lost", "recovered", "lost", "recovered", "left"])
+        lost = stream[1]
+        self.assertGreater(lost["payload"]["silent_ns"], ns(0.5))
+        self.assertLessEqual(lost["payload"]["silent_ns"], ns(0.55))  # noticed at the first step past the deadline
+        self.assertEqual(rig.events()[-1]["payload"]["s2_link"]["outages"], link["outages"])
+
+    def test_an_outage_still_open_at_the_end_is_unrecovered(self) -> None:
+        rig, self.seq = Rig(), 0
+        self.beat(rig, 0.3)
+        rig.run(1.0)
+        link = rig.runtime.s2_link(rig.t)
+        assert link is not None
+        self.assertEqual([o["class"] for o in link["outages"]], ["unrecovered"])
+        self.assertIsNone(link["outages"][0]["to"])
+
+    def test_no_heartbeat_no_watch(self) -> None:
+        rig = Rig()
+        rig.run(2.0)
+        self.assertIsNone(rig.runtime.s2_link(rig.t))
+        self.assertNotIn("s2_link", rig.events()[-1]["payload"])
 
 
 class Raises:

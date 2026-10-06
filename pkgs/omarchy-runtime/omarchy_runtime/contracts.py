@@ -71,6 +71,12 @@ class TraceError(OmarchyError):
     category = "trace"
 
 
+class LinkError(OmarchyError):
+    """The link between two processes is closed, or the peer broke the protocol."""
+
+    category = "link"
+
+
 class Name(enum.StrEnum):
     """A string enum whose values are the member names, as written in traces."""
 
@@ -638,8 +644,39 @@ class Decision:
         return Decision(*(_field(value, k, str, "decision") for k in ("task_id", "execution_id", "action", "reason", "policy")))
 
 
-Message = GoalRequest | InstallFallback | Cancel | Decision
-MESSAGES: Mapping[str, Any] = {"request": GoalRequest, "install_fallback": InstallFallback, "cancel": Cancel, "decision": Decision}
+@dataclass(frozen=True)
+class Heartbeat:
+    """S2 is alive: sent every heartbeat period when S2 runs in another process.
+    The runtime's supervisor starts watching S2 at the first one, and stops at
+    a `final` one (S2 is leaving). `sent` is on S2's clock: the link echoes it
+    back, and S2 measures the round trip; `rtt` holds the round trips S2
+    measured since its previous heartbeat."""
+
+    seq: int
+    sent: Ns
+    rtt: tuple[Ns, ...] = ()
+    final: bool = False
+
+    def to_json(self) -> Json:
+        return {"type": "heartbeat", "seq": self.seq, "sent": self.sent, "rtt": list(self.rtt), "final": self.final}
+
+    @staticmethod
+    def from_json(value: Any) -> Heartbeat:
+        what = "heartbeat"
+        rtt = _field(value, "rtt", list, what)
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in rtt):
+            raise ContractError(f"{what}: rtt must be non-negative integers (ns)")
+        return Heartbeat(_field(value, "seq", int, what), _field(value, "sent", int, what), tuple(rtt), _field(value, "final", bool, what))
+
+
+Message = GoalRequest | InstallFallback | Cancel | Decision | Heartbeat
+MESSAGES: Mapping[str, Any] = {
+    "request": GoalRequest,
+    "install_fallback": InstallFallback,
+    "cancel": Cancel,
+    "decision": Decision,
+    "heartbeat": Heartbeat,
+}
 
 
 def message_from_json(value: Any) -> Message:
@@ -705,6 +742,19 @@ class RuntimeApi(Protocol):
 
     def poll(self) -> list[Update]:
         """Updates since the last poll, oldest first."""
+
+
+class Transport(Protocol):
+    """Frames, each one JSON object, between the runtime's process and another
+    one (S2). It never blocks: send queues, receive returns what has arrived.
+    Both raise LinkError once the link is closed; frames that arrived before
+    the close are returned first."""
+
+    def send(self, frame: Json) -> None: ...
+
+    def receive(self) -> list[Json]: ...
+
+    def close(self) -> None: ...
 
 
 class S1Policy(Protocol):
@@ -804,7 +854,8 @@ class RecoveryPolicy(Protocol):
 
 
 class LatencyModel(Protocol):
-    """How long S2 takes to decide: the delay between what S2 sees and what it sends."""
+    """How long S2 takes to decide: the delay between what S2 sees and what it
+    sends, its time to first token. Fixed or sampled from `rng`."""
 
     @property
     def id(self) -> str: ...

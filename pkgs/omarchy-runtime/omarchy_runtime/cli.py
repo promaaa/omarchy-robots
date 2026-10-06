@@ -12,8 +12,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from omarchy_runtime import __version__, config, evaluate
-from omarchy_runtime.contracts import OmarchyError, seconds
+from omarchy_runtime import __version__, config, evaluate, link, scenario
+from omarchy_runtime.contracts import ConfigError, OmarchyError, ns, seconds
 from omarchy_runtime.trace import runtime_identity, validate_run
 from omarchy_runtime.wallclock import stamp
 
@@ -49,8 +49,12 @@ def narrate(results: dict[str, object]) -> str:
 def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
     for name in names:
         config.scenario_path(name)  # fail before running anything
+    tags = dict(t.partition("=")[::2] for t in args.tag)
+    if any(not k for k in tags):
+        raise ConfigError(f"--tag takes KEY=VALUE, not {args.tag}")
+    remote = {"s2": link.address(args.s2), "s2_timeout": ns(args.s2_timeout)} if args.s2 else {}
     out = fresh(runs_dir(args), f"{prefix}-{stamp()}")
-    results = evaluate.evaluate(names, out, record_s0=args.record_s0, clock=args.clock, s0_hz=args.s0_hz)
+    results = evaluate.evaluate(names, out, record_s0=args.record_s0, clock=args.clock, s0_hz=args.s0_hz, tags=tags, **remote)
     if prefix == "demo":
         print(narrate(results))
         print()
@@ -104,6 +108,12 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_s2(args: argparse.Namespace) -> int:
+    report = scenario.serve_s2(link.address(args.listen), ttft=args.ttft, spread=args.ttft_spread, timeout=ns(args.timeout), announce=True)
+    print(json.dumps(report, indent=2))
+    return 0 if report["done"] else 1
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     status = 0
     for run in args.run_dir:
@@ -131,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
         help="simulated time (default, deterministic) or the wall clock (soft real-time, Python)",
     )
     runs.add_argument("--s0-hz", type=int, help="S0's rate, instead of the configured one")
+    runs.add_argument("--s2", metavar="HOST:PORT", help="connect to an S2 process there (omarchy-runtime s2) instead of running S2 here")
+    runs.add_argument("--s2-timeout", type=float, default=120.0, help="seconds to wait for the S2 process (default 120)")
+    runs.add_argument("--tag", action="append", default=[], metavar="KEY=VALUE", help="recorded in the trace header (repeatable)")
     p = sub.add_parser("demo", parents=[runs], help=f"run {' and '.join(DEMO)}, and tell what happened")
     p.set_defaults(func=lambda a: cmd_eval(a, DEMO, "demo"))
     p = sub.add_parser("eval", parents=[runs], help="run scenarios (default: all) and print the results table")
@@ -139,6 +152,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", parents=[runs], help="run one scenario (a name, or a path to a .toml file)")
     p.add_argument("scenario")
     p.set_defaults(func=cmd_run)
+    p = sub.add_parser("s2", help="be S2 for one robot run: listen, run the scripted S2 on the wall clock, report")
+    p.add_argument("--listen", default="127.0.0.1:7447", metavar="HOST:PORT", help="where to wait for the robot (default 127.0.0.1:7447)")
+    p.add_argument("--ttft", type=float, help="S2's median time to first token, s (default: the scenario's latency)")
+    p.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of the time to first token (default 0: fixed)")
+    p.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for the robot (default 600)")
+    p.set_defaults(func=cmd_s2)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")
     p.set_defaults(func=cmd_show)

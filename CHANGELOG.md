@@ -16,8 +16,15 @@ All notable changes to this project are documented here. The format follows
   not when it is submitted. Every client changes: the scripted S2 names its
   requests, learns the execution from the Updates, and opens a fallback's
   window at the Update's `t` (the runtime's clock) instead of its own time.
+- Contract change for latency models: the `LATENCY` registry makes a model
+  from a median time to first token and a spread, `(seconds, spread)`;
+  `fixed` refuses a spread.
+- Contract change: `Message` includes `Heartbeat`, and the runtime's
+  `Params` gain the S2 link deadlines (`[s2_link]` in `runtime.toml`).
 - Trace schema 2: execution summaries and `request` events carry
-  `request_id`. Validators of schema 1 refuse these traces.
+  `request_id`; the header names where S2 ran (`s2`) and the run's `tags`;
+  a new event type `s2.link`; `run.end` carries S2's liveness when S2 ran in
+  another process. Validators of schema 1 refuse these traces.
 
 ### Added
 
@@ -28,6 +35,21 @@ All notable changes to this project are documented here. The format follows
   `run.end`, labelled with where they were measured. Simulated time stays
   the default and stays deterministic. Only `wallclock.py` reads the clock
   or sleeps.
+- S2 in another process, maybe on another machine: `omarchy-runtime s2`
+  (the scripted S2, its recovery policy and latency model) and `run ...
+  --clock wall --s2 HOST:PORT` (the runtime, S1, S0, the world and the
+  sensor). One transport interface (`Transport`) and its first
+  implementation, newline-delimited JSON over TCP, standard library only.
+  S2 listens and the robot connects out. Only control-plane traffic
+  crosses: hellos (run identity, body spec), requests, fallback installs,
+  cancels, decisions, heartbeats, execution updates with summaries, echoes.
+- S2 liveness: S2 sends a heartbeat every 0.1 s and measures the round trip
+  from its echo; the runtime's supervisor records the link lost after 0.5 s
+  without one, and each outage with its class against the deadlines (short,
+  long from 2 s, unrecovered). Executions continue and S0 never waits.
+- `lognormal`: a latency model whose time to first token is sampled for
+  each decision (median and spread), registered in `extensions.py` and
+  held to `LatencyContract`.
 - `from_json()` for every message of the API (`message_from_json`), for
   `Update` and for `BodySpec`, with a round-trip test.
 

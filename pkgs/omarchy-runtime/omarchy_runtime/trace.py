@@ -61,6 +61,7 @@ EVENT_TYPES = frozenset(
         "verify.evidence",
         "verdict",
         "error",
+        "s2.link",
     }
 )
 # The per-tick S0 record never enters the event stream: at most this many
@@ -201,6 +202,7 @@ HEADER = {
     "body": str,
     "extensions": dict,
     "rates_hz": dict,
+    "s2": dict,
 }
 EVENT = {"seq": int, "t": int, "wall_ns": int, "type": str, "execution": (str, NULL), "payload": dict}
 SUMMARY = {

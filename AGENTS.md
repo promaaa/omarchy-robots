@@ -42,7 +42,7 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 |---|---|
 | `robot.nix`, `modules/` | the OS: options, base, boards (`vm`, `pc`, Jetson), identity (`build.json`), the runtime option |
 | `pkgs/omarchy-robot/` | `omarchy-robot`: info, validate, update, rollback |
-| `pkgs/omarchy-runtime/omarchy_runtime/` | the runtime core: `contracts.py` (all data and interfaces), `runtime.py` (resolver, lifecycle, supervisor, verification), `belief.py`, `sched.py`, `trace.py`, `config.py`, `wallclock.py` |
+| `pkgs/omarchy-runtime/omarchy_runtime/` | the runtime core: `contracts.py` (all data and interfaces), `runtime.py` (resolver, lifecycle, supervisor, verification), `belief.py`, `sched.py` (simulated and wall-clock schedulers), `trace.py`, `config.py`, `wallclock.py`, `link.py` (the link to an S2 in another process: TCP transport, robot and S2 ends) |
 | `.../extensions.py` | the collaborator extension points and their registries |
 | `.../s2.py` | the scripted S2, a client of the public API |
 | `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics |
@@ -70,7 +70,8 @@ there when their handles are known.
    SUCCEEDED needs a SATISFIED verdict from observations taken after the
    claim; INCONCLUSIVE is never success.
 6. Injected time: components get `now` from the scheduler; only
-   `wallclock.py` reads the wall clock, for overhead and wall stamps.
+   `wallclock.py` reads the wall clock or sleeps, for overhead, wall stamps
+   and the wall-clock scheduler.
 7. S0 never waits: a valid chunk, else a valid fallback, else HOLD; S0
    enforces the body's limits itself.
 8. Explicit failure: `OmarchyError` categories and outcome categories; no
@@ -89,7 +90,8 @@ there when their handles are known.
 1. Write a class with `id`, `version` and the method its interface in
    `contracts.py` names, in a new module next to `extensions.py`.
 2. Add it to the registry in `extensions.py` (`VERIFIERS`, `FILTERS`,
-   `RECOVERY`, `LATENCY`).
+   `RECOVERY`, `LATENCY`). A latency model is made from a median time to
+   first token and a spread: `(seconds, spread)`.
 3. Select it by id in `config/runtime.toml` `[extensions]`, or in one
    scenario's `[extensions]` table. Verifiers are chosen per predicate.
 4. Reuse the contract tests: mix `VerifierContract`, `FilterContract`,

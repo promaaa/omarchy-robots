@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import unittest
 
-from omarchy_runtime.contracts import GiveUp, Goal, LatencyModel, ObservationFilter, RecoveryPolicy, Retry, Verifier
-from omarchy_runtime.extensions import FILTERS, LATENCY, RECOVERY, VERIFIERS, FixedLatency, GeometricVerifier, IdentityFilter, RetryOnce
+import numpy as np
+
+from omarchy_runtime.contracts import ConfigError, GiveUp, Goal, LatencyModel, ObservationFilter, RecoveryPolicy, Retry, Verifier, ns
+from omarchy_runtime.extensions import (
+    FILTERS,
+    LATENCY,
+    RECOVERY,
+    VERIFIERS,
+    FixedLatency,
+    GeometricVerifier,
+    IdentityFilter,
+    LognormalLatency,
+    RetryOnce,
+)
 from tests.contracts import FilterContract, LatencyContract, RecoveryContract, VerifierContract
 from tests.helpers import scenario
 
@@ -44,9 +56,25 @@ class TestFixedLatency(LatencyContract, unittest.TestCase):
         return FixedLatency(1.5)
 
     def test_value(self) -> None:
-        import numpy as np
-
         self.assertEqual(FixedLatency(1.5).sample(np.random.default_rng(0)), 1_500_000_000)
+        with self.assertRaises(ConfigError):
+            FixedLatency(1.0, 0.5)
+
+
+class TestLognormalLatency(LatencyContract, unittest.TestCase):
+    def make(self) -> LatencyModel:
+        return LognormalLatency(1.0, 0.5)
+
+    def test_median_and_spread(self) -> None:
+        rng = np.random.default_rng(1)
+        samples = np.array([LognormalLatency(5.0, 0.5).sample(rng) for _ in range(4000)]) / 1e9
+        self.assertAlmostEqual(float(np.median(samples)), 5.0, delta=0.15)
+        low, high = np.percentile(samples, [5, 95])
+        self.assertAlmostEqual(float(low), 5.0 * 0.44, delta=0.15)
+        self.assertAlmostEqual(float(high), 5.0 * 2.28, delta=0.5)
+        self.assertEqual(LognormalLatency(0.1, 0.0).sample(rng), ns(0.1))
+        with self.assertRaises(ConfigError):
+            LognormalLatency(0.0, 0.5)
 
 
 class TestRegistries(unittest.TestCase):
@@ -56,8 +84,8 @@ class TestRegistries(unittest.TestCase):
         for registry in (FILTERS, VERIFIERS, RECOVERY):
             for key, make in registry.items():
                 self.assertEqual(make().id, key)
-        for key, make_latency in LATENCY.items():
-            self.assertEqual(make_latency(0.0).id, key)
+        self.assertEqual(LATENCY["fixed"](0.0, 0.0).id, "fixed")
+        self.assertEqual(LATENCY["lognormal"](1.0, 0.5).id, "lognormal")
 
 
 if __name__ == "__main__":

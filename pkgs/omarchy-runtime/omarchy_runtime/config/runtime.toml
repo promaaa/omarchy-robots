@@ -13,6 +13,11 @@ margin_m = 0.01  # positions this close to a boundary are UNKNOWN
 min_confidence = 0.5
 grasp_radius_m = 0.03  # an object this close to a closed gripper is held
 
+[s2_link]  # S2 in another process (omarchy-runtime s2), on the wall clock
+heartbeat_s = 0.1  # S2 sends a heartbeat this often (it learns the period from the robot's hello)
+lost_s = 0.5  # no heartbeat for longer than this: the supervisor records the link as lost
+long_s = 2.0  # an outage this long or longer is long (a link failure); a shorter one is short (TCP retransmission)
+
 [extensions]  # ids from omarchy_runtime/extensions.py
 filter = "identity"
 recovery = "retry_once"

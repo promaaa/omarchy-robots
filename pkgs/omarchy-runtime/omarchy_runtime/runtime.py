@@ -31,6 +31,7 @@ from omarchy_runtime.contracts import (
     Decision,
     Goal,
     GoalRequest,
+    Heartbeat,
     InstallFallback,
     Json,
     LifecycleError,
@@ -52,7 +53,7 @@ from omarchy_runtime.contracts import (
     Verifier,
     seconds,
 )
-from omarchy_runtime.sched import Mailbox
+from omarchy_runtime.sched import Mailbox, distribution
 from omarchy_runtime.trace import TraceWriter, dumps
 from omarchy_runtime.wallclock import perf_ns
 
@@ -86,6 +87,8 @@ class Params:
     freshness: Ns
     settle: Ns
     verify_budget: Ns
+    s2_lost: Ns  # no heartbeat from S2 for longer than this: the link is lost
+    s2_long: Ns  # an outage this long or longer is "long", a shorter one "short"
 
 
 @dataclass(frozen=True)
@@ -297,6 +300,14 @@ class Runtime:
         self._chunk: ChunkMeta | None = None
         self.executions: dict[str, Execution] = {}
         self.finished: list[Json] = []  # summaries, in the order executions ended
+        # S2's liveness, watched from its first heartbeat to its final one.
+        self._s2_watch = False
+        self._s2_seen: Ns | None = None  # when the last heartbeat was handled
+        self._s2_lost: Ns | None = None  # when the current outage was declared
+        self._s2_heartbeats = 0
+        self._s2_max_gap: Ns = 0
+        self._s2_rtt: list[tuple[Ns, Ns]] = []  # (when reported, round trip S2 measured)
+        self.s2_outages: list[Json] = []
 
     # Public API.
 
@@ -305,7 +316,7 @@ class Runtime:
         then, in an Update carrying its request_id. Raises ContractError for
         anything but the API's messages, a message that is not JSON (it could
         not be traced), or a request_id already used in this run."""
-        if not isinstance(message, GoalRequest | InstallFallback | Cancel | Decision):
+        if not isinstance(message, GoalRequest | InstallFallback | Cancel | Decision | Heartbeat):
             raise ContractError(f"not a runtime message: {type(message).__name__}")
         try:
             dumps(message.to_json())
@@ -325,6 +336,24 @@ class Runtime:
         """Nothing running, nothing queued, no message waiting."""
         return self._active is None and not self._queue and not self._inbox
 
+    def s2_link(self, now: Ns) -> Json | None:
+        """S2's liveness so far: heartbeats, the round trips S2 reported, the
+        largest gap between heartbeats, and every outage with its class. None
+        if S2 never sent a heartbeat (it runs in this process)."""
+        if self._s2_seen is None:
+            return None
+        outages = list(self.s2_outages)
+        if self._s2_lost is not None:
+            outages.append(self._outage(self._s2_seen, None, now - self._s2_seen))
+        return {
+            "deadlines_ns": {"lost": self.params.s2_lost, "long": self.params.s2_long},
+            "heartbeats": self._s2_heartbeats,
+            "max_gap_ns": self._s2_max_gap,
+            "rtt_ns": distribution([rtt for _, rtt in self._s2_rtt]),
+            "rtt_samples": [[t, rtt] for t, rtt in self._s2_rtt],
+            "outages": outages,
+        }
+
     # The step: observations, S0 status, messages, then supervision.
 
     def step(self, now: Ns) -> None:
@@ -333,6 +362,9 @@ class Runtime:
         self._sample(now)
         for message in self._inbox.drain():
             self._handle(message, now)
+        if self._s2_watch and self._s2_lost is None and self._s2_seen is not None and now - self._s2_seen > self.params.s2_lost:
+            self._s2_lost = now
+            self._event(now, "s2.link", None, {"state": "lost", "last_heartbeat": self._s2_seen, "silent_ns": now - self._s2_seen})
         if self._active is None and self._queue:
             self._start(self._queue.popleft(), now)
         ex = self._active
@@ -342,8 +374,10 @@ class Runtime:
             self._verify(ex, now)
 
     def close(self, now: Ns, reason: str, **extra: Json) -> None:
-        """End the trace: run.end with the reason and any `extra` (such as the loop statistics)."""
-        self._trace.close(now, {"reason": reason} | extra)
+        """End the trace: run.end with the reason, S2's liveness if it was
+        watched, and any `extra` (such as the loop statistics)."""
+        link = self.s2_link(now)
+        self._trace.close(now, {"reason": reason} | ({"s2_link": link} if link else {}) | extra)
 
     def _event(self, now: Ns, kind: str, ex: Execution | None, payload: Json) -> None:
         self._trace.event(now, kind, ex.id if ex else None, payload)
@@ -392,8 +426,32 @@ class Runtime:
             self._cancel(message, now)
         elif isinstance(message, InstallFallback):
             self._install(message, now)
+        elif isinstance(message, Heartbeat):
+            self._heartbeat(message, now)
         else:
             assert_never(message)
+
+    def _outage(self, start: Ns, end: Ns | None, duration: Ns) -> Json:
+        kind = "unrecovered" if end is None else "long" if duration >= self.params.s2_long else "short"
+        return {"from": start, "to": end, "duration_ns": duration, "class": kind}
+
+    def _heartbeat(self, hb: Heartbeat, now: Ns) -> None:
+        """S2 is alive. A gap longer than the lost deadline was an outage; it
+        is classified by its duration against the deadlines when it ends."""
+        self._s2_heartbeats += 1
+        self._s2_rtt += [(now, rtt) for rtt in hb.rtt]
+        if self._s2_seen is None:
+            self._event(now, "s2.link", None, {"state": "up", "seq": hb.seq})
+        else:
+            self._s2_max_gap = max(self._s2_max_gap, now - self._s2_seen)
+            if self._s2_lost is not None:
+                outage = self._outage(self._s2_seen, now, now - self._s2_seen)
+                self.s2_outages.append(outage)
+                self._event(now, "s2.link", None, {"state": "recovered", "seq": hb.seq} | outage)
+                self._s2_lost = None
+        self._s2_seen, self._s2_watch = now, not hb.final
+        if hb.final:
+            self._event(now, "s2.link", None, {"state": "left", "seq": hb.seq})
 
     def _set(self, ex: Execution, to: State, now: Ns, category: Category | None = None, reason: str = "") -> None:
         before = ex.state

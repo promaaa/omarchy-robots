@@ -17,7 +17,7 @@ from omarchy_runtime.runtime import Binding, Capability, Params
 HERE = Path(__file__).parent
 CONFIG = HERE / "config"
 SCENARIOS = HERE / "scenarios"
-OVERRIDABLE = ("runtime", "verification", "extensions")  # scenario tables merged into runtime.toml
+OVERRIDABLE = ("runtime", "verification", "extensions", "s2_link")  # scenario tables merged into runtime.toml
 
 
 def load(path: Path) -> Json:
@@ -156,13 +156,18 @@ def bindings(cfg: Json) -> list[Binding]:
 
 
 def params(cfg: Json) -> Params:
-    r, v = cfg["runtime"]["runtime"], cfg["runtime"]["verification"]
+    r, v, link = cfg["runtime"]["runtime"], cfg["runtime"]["verification"], cfg["runtime"]["s2_link"]
+    lost, long = ns(get(link, "lost_s", float, "s2_link")), ns(get(link, "long_s", float, "s2_link"))
+    if not ns(get(link, "heartbeat_s", float, "s2_link")) < lost <= long:
+        raise ConfigError("s2_link: expected heartbeat_s < lost_s <= long_s")
     return Params(
         deadline=ns(get(r, "deadline_s", float, "runtime")),
         s1_stall_timeout=ns(get(r, "s1_stall_timeout_s", float, "runtime")),
         freshness=ns(get(r, "freshness_s", float, "runtime")),
         settle=ns(get(v, "settle_s", float, "verification")),
         verify_budget=ns(get(v, "budget_s", float, "verification")),
+        s2_lost=lost,
+        s2_long=long,
     )
 
 

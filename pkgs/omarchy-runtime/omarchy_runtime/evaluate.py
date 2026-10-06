@@ -110,6 +110,9 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
         "run_dir": str(r.dir),
         "s2_latency_s": r.cfg["scenario"]["s2"]["latency_s"],
         "clock": r.clock,
+        "tags": dict(r.tags),
+        "s2": r.s2,
+        "s2_link": r.s2_link,
         "task_time_s": seconds(end),
         "idle_fraction": float(np.mean(modes != TRACKING)) if len(modes) else 0.0,
         "task_fallback_s": seconds(int(spans[modes == FALLBACK].sum())),
@@ -260,6 +263,15 @@ def report(results: Json) -> str:
         parts.append(f"\nS2 decision latency, two-cup task ({clock})")
         parts.append(table(["S2 latency s", "outcomes", "task time s", "robot idle", "violations", "starvations"], lat))
     for s in results["scenarios"]:
+        link = s["s2_link"]
+        if link:
+            rtt, outages = link["rtt_ns"], link["outages"]
+            kinds = ", ".join(f"{o['class']} {o['duration_ns'] / 1e9:.2f} s" for o in outages) or "none"
+            parts.append(
+                f"\nS2 link, {s['scenario']} (S2 at {s['s2']['address']}): {link['heartbeats']} heartbeats, round trip "
+                f"p50 {_ms(rtt['p50'])} ms, p99 {_ms(rtt['p99'])} ms, max {_ms(rtt['max'])} ms (heartbeat echo, wall-clock); "
+                f"largest gap {link['max_gap_ns'] / 1e9:.2f} s; outages: {kinds}"
+            )
         if s["loop"]:
             parts.append(f"\nLoop intervals, {s['scenario']} ({s['loop']['label']})")
             parts.append(loop_table(s["loop"]))
