@@ -52,7 +52,11 @@ class TestEveryScenario(unittest.TestCase):
                 r = scenario(name)
                 rec = r.record()
                 self.assertEqual(len(rec["t"]), r.s0.c["ticks"])
-                self.assertTrue(np.all(np.diff(rec["t"]) == SECOND // 1000), "a tick is missing")
+                if r.s0_timing_faults:  # skipped ticks are the point: bounded steps instead
+                    self.assertTrue(np.all(np.diff(rec["t"]) > 0))
+                    self.assertTrue(np.all(np.abs(np.diff(rec["position"], axis=0)) <= r.s0.bound * (1 + 1e-9) + 1e-12))
+                else:
+                    self.assertTrue(np.all(np.diff(rec["t"]) == SECOND // 1000), "a tick is missing")
                 self.assertTrue(set(np.unique(rec["mode"]).tolist()) <= {TRACKING, FALLBACK, HOLD})
                 # TRACKING only on a valid chunk, and never past its validity.
                 tracking = rec["mode"] == TRACKING

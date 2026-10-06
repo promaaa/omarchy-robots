@@ -21,6 +21,19 @@ All notable changes to this project are documented here. The format follows
   tick. Every S0 implementation, a hardware one included, keeps this.
 - Trace schema 3: S0's counters gain `late_ticks`, `max_interval_ns` and
   `max_step`; a new event type `s0.late`.
+- The simulated S1's inference latency is drawn for each chunk (`[s1]
+  latency_spread`, lognormal) and chunks reach S0 in the order they arrive.
+
+### Added
+
+- Deterministic timing faults in simulated time, from a scenario's seed:
+  observation age (`[timing] observation_age_s`, `_spread`), S0 tick jitter
+  (`s0_skip_probability`), S0 stalls and whole-process pauses (`[[faults]]`
+  kinds `s0_stall` and `pause`), S1 latency distributions. Scenarios
+  `timing_observation_age` and `timing_pause_grasp` reproduce the two S1
+  bugs CI found in v0.0.2 part 2 and fail with the S1 behaviour of each bug
+  (`tests/test_timing.py`); `timing_s0_stall` and `timing_jitter` exercise
+  late ticks and noisy timing.
 
 ## [0.0.2] - 2026-10-06
 

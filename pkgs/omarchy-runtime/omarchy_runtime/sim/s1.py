@@ -8,10 +8,10 @@ be wrong, as a learned one's can.
 
 from __future__ import annotations
 
+import heapq
 import logging
 import math
-from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -96,13 +96,20 @@ class ScriptedPickPlace:
             (place_x, transit, OPEN),
         ]
 
+    def _judged_at(self, observation: Observation, now: Ns) -> Ns:
+        """The time at which S1 compares an observation with its plan: when it
+        was taken. (Comparing at `now` made an old observation look off the
+        plan: v0.0.2 part 2's first fix, tests/test_timing.py.)"""
+        return observation.t
+
+    def _reach_spot_first(self, spot: Point, here: Point) -> bool:
+        """A gripper change happens in place: a replan into a grasp or release
+        reaches its spot first, unless the body is there already."""
+        return math.hypot(spot[0] - here[0], spot[1] - here[1]) > REACHED[0]
+
     def _replan(self, now: Ns, here: Point, first: int) -> None:
-        # A gripper change happens in place: when the next waypoint grasps or
-        # releases and the body is not at its spot yet, reach the spot first,
-        # then change the gripper there. At the spot, the change goes on.
         if 0 < first < len(self._waypoints) and self._waypoints[first][:2] == self._waypoints[first - 1][:2]:
-            spot = self._waypoints[first]
-            if math.hypot(spot[0] - here[0], spot[1] - here[1]) > REACHED[0]:
+            if self._reach_spot_first(self._waypoints[first], here):
                 first -= 1
         self._plan, t, p = [], now, here
         for i in range(first, len(self._waypoints)):
@@ -124,7 +131,7 @@ class ScriptedPickPlace:
             return None
         q = observation.proprio.position
         here = (*observation.proprio.ee, q[self._gripper])
-        seen = observation.t  # the body was `here` then, not at `now`
+        seen = self._judged_at(observation, now)  # the body was `here` then, not at `now`
         if not self._plan:
             self._replan(seen, here, 0)
         planned, index = self._at(seen)
@@ -164,9 +171,12 @@ class Stall:
 class SimS1Host:
     """Steps the attached policy at the S1 rate, holds each chunk for the
     simulated inference latency (a chunk computed at t reaches S0 at t +
-    latency), and hands it straight to S0. Never through the runtime."""
+    latency, the latency drawn for each chunk), and hands it straight to S0,
+    in the order the chunks arrive. Never through the runtime."""
 
-    def __init__(self, s0: SimS0, observations: Latest[Observation], latency: Ns, stalls: Sequence[Stall], world: World) -> None:
+    def __init__(
+        self, s0: SimS0, observations: Latest[Observation], latency: Callable[[], Ns], stalls: Sequence[Stall], world: World
+    ) -> None:
         self.s0 = s0
         self.observations = observations
         self.latency = latency
@@ -174,15 +184,15 @@ class SimS1Host:
         self.world = world
         self.policy: S1Policy | None = None
         self.failure: str | None = None
-        self._in_flight: deque[tuple[Ns, ActionChunk]] = deque()
+        self._in_flight: list[tuple[Ns, int, ActionChunk]] = []  # a heap: arrival time, then sequence
 
     def attach(self, policy: S1Policy) -> None:
         self.policy, self.failure = policy, None
-        self._in_flight.clear()
+        self._in_flight = []
 
     def detach(self) -> None:
         self.policy = None
-        self._in_flight.clear()
+        self._in_flight = []
 
     def error(self) -> str | None:
         return self.failure
@@ -196,11 +206,11 @@ class SimS1Host:
             self.failure = f"{type(e).__name__}: {e}"
             return
         if chunk is not None:
-            self._in_flight.append((now + self.latency, chunk))
+            heapq.heappush(self._in_flight, (now + self.latency(), chunk.seq, chunk))
 
     def deliver(self, now: Ns) -> None:
         while self._in_flight and self._in_flight[0][0] <= now:
-            _, chunk = self._in_flight.popleft()
+            _, _, chunk = heapq.heappop(self._in_flight)
             try:
                 self.s0.submit_chunk(chunk, now)
             except ChunkRejected as e:

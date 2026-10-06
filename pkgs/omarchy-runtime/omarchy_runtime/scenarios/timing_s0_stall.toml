@@ -1,0 +1,25 @@
+description = """S0 alone does not tick for 0.3 s while the arm carries the cup. The tick
+after the stall is a late tick: S0 moves no more than its bound (velocity
+limit times the nominal period) and continues from where it is, without a
+catch-up jump; the trace records the late tick (s0.late)."""
+seed = 23
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "s0_stall"
+after = "grasp"
+delay_s = 1.0
+duration_s = 0.3
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

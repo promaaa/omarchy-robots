@@ -1,0 +1,26 @@
+description = """Every observation is 20 ms old when S1 and the runtime read it, as on the
+loaded CI runner in v0.0.2 part 2. S1 must compare what it sees with its plan at the
+time the observation was taken. Regression for v0.0.2 part 2's first S1 fix, which
+compared at its own time and reopened the gripper at every replan: that S1
+times out here (tests/test_timing.py)."""
+seed = 21
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[timing]
+observation_age_s = 0.02
+
+[runtime]
+deadline_s = 20  # the regression times out here instead of at 60 s
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

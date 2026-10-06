@@ -74,8 +74,26 @@ A simulated kitchen in a vertical plane: a table with two cups, a counter with a
 | `fallback_installed` | S2 installs a fallback (the safe pose, gripper closed); S1 stalls for 2.5 s; S0 runs the fallback, then HOLDs, then S1 resumes | SUCCEEDED |
 | `unsupported_clean` | `clean(cup_1)`: no capability achieves it, and the resolver says why | REJECTED/NO_CAPABILITY |
 | `s2_latency_0p1`, `_1`, `_5` | Both cups, with S2 taking 0.1 s, 1 s or 5 s for every decision | SUCCEEDED twice; only the task time and the robot's idle time change |
+| `timing_observation_age` | Every observation is 20 ms old when S1 reads it. Regression: v0.0.2 part 2's first S1 fix timed out here | SUCCEEDED |
+| `timing_pause_grasp` | The whole robot process stops for 0.3 s while the arm descends to the cup. Regression: v0.0.2 part 1's S1 pushed the held cup into the table here | SUCCEEDED |
+| `timing_s0_stall` | S0 alone does not tick for 0.3 s while the arm carries the cup: one late tick, no catch-up jump | SUCCEEDED |
+| `timing_jitter` | S0 skips 5 % of its ticks, S1's latency and the observations' age are lognormal | SUCCEEDED twice |
 
 Each scenario is a TOML file in `pkgs/omarchy-runtime/omarchy_runtime/scenarios/`: seed, body, faults, S2's goals and latency, S1's inference latency, and the expected outcome of each execution.
+
+### Timing faults
+
+A loaded machine changes the timing a wall-clock run meets. A scenario reproduces those conditions in simulated time, deterministically from its seed, so a timing bug is caught by the fast check instead of by a lucky CI run:
+
+| Where | Key | Effect |
+|---|---|---|
+| `[timing]` | `observation_age_s`, `observation_age_spread` | every observation reaches S1 and the runtime this much later than it was taken; fixed, or lognormal with a spread |
+| `[timing]` | `s0_skip_probability` | S0 skips a tick with this probability: tick jitter, late ticks |
+| `[s1]` | `latency_s`, `latency_spread` | S1's inference latency for each chunk; fixed, or lognormal |
+| `[[faults]]` | `kind = "pause"` | the whole robot process stops for `duration_s`: nothing is stepped |
+| `[[faults]]` | `kind = "s0_stall"` | S0 alone does not tick for `duration_s` |
+
+`tests/test_timing.py` runs `timing_observation_age` and `timing_pause_grasp` with the S1 behaviour of the two bugs CI found in v0.0.2 part 2, and each fails there: a timeout, a held cup pushed into the table.
 
 ## S2 in another process
 

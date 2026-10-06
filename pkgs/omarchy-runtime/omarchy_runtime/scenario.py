@@ -14,6 +14,7 @@ latency model.
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,7 @@ class RunResult:
     end: Ns
     clock: str  # "simulated" or "wall"
     loop: Json | None  # the wall-clock scheduler's loop statistics, with their label
+    s0_timing_faults: bool  # the scenario makes S0 skip ticks (pauses, S0 stalls, jitter)
     s2: Json  # where S2 ran: in-process, or remote with its address and hello
     s2_link: Json | None  # S2's liveness as the runtime's supervisor saw it (remote S2 only)
     tags: Mapping[str, str]
@@ -87,9 +89,43 @@ class RunResult:
         return [(t, what) for t, what in self.world.violations if t0 <= t <= end]
 
 
-def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion]]:
+@dataclass(frozen=True)
+class Timing:
+    """Deterministic timing faults, from a scenario's [timing] table and its
+    pause and s0_stall faults: the conditions a wall-clock run meets on a
+    loaded machine, reproduced in simulated time."""
+
+    observation_age: Callable[[], Ns] | None  # how old each observation is when S1 and the runtime read it
+    s0_skip: float  # probability that S0 skips a tick: S0 tick jitter, late ticks
+    pauses: list[Trigger]  # the whole robot process stops: nothing is stepped
+    s0_stalls: list[Trigger]  # S0 alone does not tick
+
+
+def _delay(table: Json, key: str, where: str, rng: np.random.Generator) -> Callable[[], Ns] | None:
+    """A delay `key`_s, fixed, or lognormal with a nonzero `key`_spread; None when both are 0."""
+    seconds_, spread = float(table.get(f"{key}_s", 0.0)), float(table.get(f"{key}_spread", 0.0))
+    if seconds_ < 0 or spread < 0:
+        raise ConfigError(f"{where}: {key}_s and {key}_spread must not be negative")
+    if seconds_ == 0 and spread == 0:
+        return None
+    model = LATENCY["fixed" if spread == 0 else "lognormal"](seconds_, spread)
+    return lambda: model.sample(rng)
+
+
+def _timing(cfg: Json, seed: int, pauses: list[Trigger], s0_stalls: list[Trigger]) -> Timing:
+    t = cfg["scenario"].get("timing", {})
+    unknown = set(t) - {"observation_age_s", "observation_age_spread", "s0_skip_probability"}
+    if unknown:
+        raise ConfigError(f"scenario timing: unknown {', '.join(sorted(unknown))}")
+    skip = float(t.get("s0_skip_probability", 0.0))
+    if not 0 <= skip < 1:
+        raise ConfigError(f"scenario timing.s0_skip_probability: {skip} is not in [0, 1)")
+    return Timing(_delay(t, "observation_age", "scenario timing", np.random.default_rng([seed, 6])), skip, pauses, s0_stalls)
+
+
+def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], list[Trigger], list[Trigger]]:
     scene = config.scene(cfg)
-    slips, stalls, occlusions = [], [], []
+    slips, stalls, occlusions, pauses, s0_stalls = [], [], [], [], []
     for n, f in enumerate(cfg["scenario"].get("faults", [])):
         where = f"scenario faults[{n}]"
         after = config.get(f, "after", str, where)
@@ -106,9 +142,13 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion]]:
             if region not in scene.regions:
                 raise ConfigError(f"{where}.region: no region {region!r}")
             occlusions.append(Occlusion(scene.regions[region], when))
+        elif kind == "pause":
+            pauses.append(when)
+        elif kind == "s0_stall":
+            s0_stalls.append(when)
         else:
-            raise ConfigError(f"{where}.kind: {kind!r} is not slip, s1_stall or occlusion")
-    return slips, stalls, occlusions
+            raise ConfigError(f"{where}.kind: {kind!r} is not slip, s1_stall, occlusion, pause or s0_stall")
+    return slips, stalls, occlusions, pauses, s0_stalls
 
 
 def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple[RecoveryPolicy, LatencyModel, Json]:
@@ -177,7 +217,8 @@ def run(
     verification = cfg["runtime"]["verification"]
     sensor_cfg = cfg["world"]["sensor"]
     ext = cfg["runtime"]["extensions"]
-    slips, stalls, occlusions = _faults(cfg)
+    slips, stalls, occlusions, pauses, s0_stalls = _faults(cfg)
+    timing = _timing(cfg, seed, pauses, s0_stalls)
     run_id = f"{int(np.random.default_rng([seed, 1]).integers(1 << 32)):08x}"
 
     world = World(scene, {k: v["x"] for k, v in cfg["world"]["objects"].items()}, body, slips)
@@ -194,7 +235,9 @@ def run(
     )
     for_s1: Latest[Observation] = Latest()
     for_runtime: Mailbox[Observation] = Mailbox()
-    host = SimS1Host(s0, for_s1, ns(config.get(s["s1"], "latency_s", float, "scenario s1")), stalls, world)
+    config.get(s["s1"], "latency_s", float, "scenario s1")
+    s1_latency = _delay(s["s1"], "latency", "scenario s1", np.random.default_rng([seed, 4]))
+    host = SimS1Host(s0, for_s1, s1_latency or (lambda: 0), stalls, world)
     try:
         observation_filter = FILTERS[ext["filter"]]()
         verifiers = {p: VERIFIERS[v]() for p, v in ext["verifiers"].items()}
@@ -269,24 +312,38 @@ def run(
     )
     truths: list[bool | None] = []
 
+    aging: list[tuple[Ns, int, Observation]] = []  # observations on their way, a heap by arrival time
+    skips = np.random.default_rng([seed, 5])
+
     def sense(now: Ns) -> None:
         observation = sensor.observe(now)
-        for_s1.put(observation)
-        for_runtime.put(observation)
+        age = timing.observation_age() if timing.observation_age else 0
+        heapq.heappush(aging, (now + age, sensor.count, observation))
+        while aging and aging[0][0] <= now:
+            _, _, ready = heapq.heappop(aging)
+            for_s1.put(ready)
+            for_runtime.put(ready)
 
     def control(now: Ns) -> None:
+        if any(w.active(world, now) for w in timing.s0_stalls) or (timing.s0_skip and skips.random() < timing.s0_skip):
+            return  # a late tick for S0: nothing commanded this period
         host.deliver(now)
         s0.tick(now)
+
+    def unless_paused(step: Callable[[Ns], None]) -> Callable[[Ns], None]:
+        if not timing.pauses:
+            return step
+        return lambda now: None if any(w.active(world, now) for w in timing.pauses) else step(now)
 
     def harness(now: Ns) -> None:
         while len(truths) < len(runtime.finished):
             truths.append(world.truth(Goal.from_json(runtime.finished[len(truths)]["goal"])))
 
     supervisor = SECOND // rates["supervisor"]
-    sched.add("sense", SECOND // rates["observation"], sense)
-    sched.add("s1", SECOND // rates["s1"], host.step)
-    sched.add("s0", SECOND // rates["s0"], control)
-    sched.add("runtime", supervisor, runtime.step)
+    sched.add("sense", SECOND // rates["observation"], unless_paused(sense))
+    sched.add("s1", SECOND // rates["s1"], unless_paused(host.step))
+    sched.add("s0", SECOND // rates["s0"], unless_paused(control))
+    sched.add("runtime", supervisor, unless_paused(runtime.step))
     s2_done: Callable[[], bool]
     robot_link = None
     if transport is None:
@@ -300,11 +357,11 @@ def run(
             fallback=bool(s["s2"].get("fallback", False)),
             task_prefix=run_id,
         )
-        sched.add("s2", SECOND // rates["s2"], scripted.step)
+        sched.add("s2", SECOND // rates["s2"], unless_paused(scripted.step))
         s2_done = lambda: scripted.done  # noqa: E731
     else:
         robot_link = link.RobotLink(transport, runtime, trace)
-        sched.add("link", SECOND // rates["link"], robot_link.step)
+        sched.add("link", SECOND // rates["link"], unless_paused(robot_link.step))
         s2_done = lambda: robot_link.s2_done  # noqa: E731
     sched.add("harness", supervisor, harness)
     trace.event(
@@ -330,14 +387,14 @@ def run(
         sched.now,
         sched.clock,
         loop,
+        bool(timing.pauses or timing.s0_stalls or timing.s0_skip),
         placement,
         s2_link,
         dict(tags or {}),
     )
     if record_s0:
         for summary in runtime.finished:
-            timing = summary["timing"]
-            rec = result.record(timing["requested"], timing["ended"])
+            rec = result.record(summary["timing"]["requested"], summary["timing"]["ended"])
             np.savez(run_dir / f"s0_{summary['execution_id']}.npz", **rec, dims=np.array(body.dims), modes=np.array(S0_MODES))
     return result
 

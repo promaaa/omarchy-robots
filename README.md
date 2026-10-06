@@ -153,6 +153,8 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `unsupported_clean` | `clean(cup_1)`: no capability, and the resolver's reasons | REJECTED/NO_CAPABILITY |
 | `s2_latency_0p1`, `_1`, `_5` | both cups, S2 taking 0.1 s, 1 s or 5 s per decision | same outcomes; longer task, more idle time |
 | `s2_placement` | both cups, for the S2 placement experiment below (S2 takes 1 s in one process) | SUCCEEDED twice |
+| `timing_observation_age`, `timing_pause_grasp` | observations 20 ms old; the whole robot stopped for 0.3 s during a descent: regressions for two S1 bugs CI met in v0.0.2 part 2 | SUCCEEDED |
+| `timing_s0_stall`, `timing_jitter` | S0 stalled for 0.3 s while carrying; S0 skipping 5 % of its ticks, jittery S1 latency and observation age | SUCCEEDED, steps within S0's bound |
 
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,

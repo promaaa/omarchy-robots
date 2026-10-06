@@ -1,0 +1,33 @@
+description = """Noisy timing, deterministic from the seed: S0 skips 5 % of its ticks, S1's
+inference latency is lognormal (median 50 ms), and every observation is
+lognormal 10 ms old. Both cups."""
+seed = 24
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+latency_spread = 0.5
+
+[s2]
+latency_s = 0.1
+goals = [
+  { predicate = "in", args = ["cup_1", "drying_rack"] },
+  { predicate = "in", args = ["cup_2", "drying_rack"] },
+]
+
+[timing]
+observation_age_s = 0.01
+observation_age_spread = 0.5
+s0_skip_probability = 0.05
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

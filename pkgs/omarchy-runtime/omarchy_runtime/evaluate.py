@@ -39,7 +39,7 @@ def _invariants(r: RunResult) -> list[str]:
         problems.append("S0 commanded a step above its bound (velocity limit times the nominal period)")
     if len(rec["t"]) != r.s0.c["ticks"]:
         problems.append("S0's record is incomplete")
-    elif r.clock == "simulated" and np.any(np.diff(rec["t"]) != tick):
+    elif r.clock == "simulated" and not r.s0_timing_faults and np.any(np.diff(rec["t"]) != tick):
         problems.append("S0 skipped a tick")
     elif np.any(np.diff(rec["t"]) <= 0):
         problems.append("S0's ticks do not go forward in time")

@@ -1,0 +1,26 @@
+description = """The whole robot process stops for 0.3 s while the arm descends to the cup,
+as the robot VM did in CI in v0.0.2 part 2. S0 then lags behind S1's plan, and S1
+replans into its grasp. Regression for v0.0.2 part 1's S1, which moved down and
+closed the gripper together and pushed the held cup 5 mm into the table
+(tests/test_timing.py)."""
+seed = 22
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "pause"
+after = "start"
+delay_s = 1.6
+duration_s = 0.3
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true
