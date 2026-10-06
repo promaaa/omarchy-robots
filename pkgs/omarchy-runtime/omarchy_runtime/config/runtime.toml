@@ -17,6 +17,10 @@ grasp_radius_m = 0.03  # an object this close to a closed gripper is held
 heartbeat_s = 0.1  # S2 sends a heartbeat this often (it learns the period from the robot's hello)
 lost_s = 0.5  # no heartbeat for longer than this: the supervisor records the link as lost
 long_s = 2.0  # an outage this long or longer is long (a link failure); a shorter one is short (TCP retransmission)
+reconnect_s = 3.0  # the robot drops a connection on which S2 has been silent this long, and connects again
+reconnect_backoff_s = 0.25  # first wait between connection attempts; it doubles
+reconnect_backoff_max_s = 2.0  # up to this
+connect_attempt_s = 1.0  # one connection attempt waits at most this long
 
 [extensions]  # ids from omarchy_runtime/extensions.py
 filter = "identity"

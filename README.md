@@ -182,9 +182,10 @@ every packet in each direction.
 | `wan` | about 100 ms, jitter 20 ms |
 | `degraded` | about 400 ms, jitter 100 ms, 5 % loss |
 | `outage` | `lan`, then every packet dropped for 5 s during the first execution |
+| `outage_long` | `lan`, then every packet dropped for 20 s during the first execution: the robot connects again |
 
 ```sh
-nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage x TTFT 0.1, 1 s (in nix flake check)
+nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage, outage_long x TTFT 0.1, 1 s (in nix flake check)
 nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
 nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
   --source "CI run <id>, ..."      # writes the table below

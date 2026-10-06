@@ -30,12 +30,14 @@ let
           "wan"
           "degraded"
           "outage"
+          "outage_long"
         ]
       else
         [
           "lan"
           "degraded"
           "outage"
+          "outage_long"
         ];
     ttft =
       if full then
@@ -90,9 +92,10 @@ in
         "wifi": "delay 10ms 5ms loss 1%",  # about 20 +- 10 ms, 1 % loss
         "wan": "delay 50ms 10ms",  # about 100 +- 20 ms
         "degraded": "delay 200ms 50ms loss 5%",  # about 400 +- 100 ms, 5 % loss
-        "outage": "delay 0.5ms",  # lan, then 100 % loss for OUTAGE_S seconds mid-task
+        "outage": "delay 0.5ms",  # lan, then 100 % loss for OUTAGES["outage"] seconds mid-task
+        "outage_long": "delay 0.5ms",  # lan, then 100 % loss for 20 s: the robot must reconnect
     }
-    OUTAGE_S = 5
+    OUTAGES = {"outage": 5, "outage_long": 20}  # seconds of 100 % loss, from 2 s into the first execution
     RUNS = "/var/lib/omarchy-runtime/runs"
 
     start_all()
@@ -128,11 +131,11 @@ in
         tags = f"--tag profile={profile} --tag netem={shlex.quote(spec or 'none')}"
         run = f"omarchy-runtime run s2_placement --clock wall --s2 {target} --runs {RUNS}/{name} {tags}"
         background(robot, f"su - admin -c {shlex.quote(run)}", f"/tmp/robot-{name}.log")
-        if profile == "outage":
+        if profile in OUTAGES:
             robot.wait_until_succeeds(f"grep -qs '\"to\":\"RUNNING\"' {RUNS}/{name}/run-*/s2_placement/events.jsonl", timeout=600)
             time.sleep(2)  # into the first execution
             shape(f"{spec} loss 100%")
-            time.sleep(OUTAGE_S)
+            time.sleep(OUTAGES[profile])
             shape(spec)
         robot.wait_until_succeeds(f"test -s /tmp/robot-{name}.log.rc", timeout=900)
         s2_node.wait_until_succeeds(f"test -s /tmp/s2/{name}.json.rc", timeout=120)
@@ -171,11 +174,14 @@ in
             s2_node = robot if n.startswith("local-") else edge
             assert s2_node.succeed(f"cat /tmp/s2/{n}.json.rc").strip() == "0", n
 
-    with subtest("the supervisor classifies the injected outage as long, and it ends"):
+    with subtest("the supervisor classifies the injected outages as long, they end, and the robot reconnects"):
         for c in placement["cells"]:
-            if c["profile"] == "outage":
+            if c["profile"] in OUTAGES:
                 long = [o for o in c["outages"] if o["class"] == "long"]
-                assert long and long[0]["duration_s"] >= OUTAGE_S - 1, c["outages"]
+                assert long and long[0]["duration_s"] >= OUTAGES[c["profile"]] - 1, c["outages"]
                 assert all(o["class"] != "unrecovered" for o in c["outages"]), c["outages"]
+            if c["profile"] == "outage_long":
+                events = robot.succeed(f"cat {c['run_dir']}/events.jsonl")
+                assert '"state":"reconnected"' in events, f"{c['profile']} {c['ttft_s']}: no reconnection"
   '';
 }

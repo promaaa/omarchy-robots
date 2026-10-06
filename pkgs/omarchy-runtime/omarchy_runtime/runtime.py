@@ -289,7 +289,9 @@ class Runtime:
         self._config_hash = config_hash
         self._seed = seed
         self._inbox: Mailbox[Message] = Mailbox()
-        self._requests: set[str] = set()
+        self._requests: dict[str, GoalRequest] = {}
+        self._by_request: dict[str, Execution] = {}
+        self._last_update: dict[str, Update] = {}  # per request_id
         self._outbox: list[Update] = []
         self._queue: deque[Execution] = deque()
         self._active: Execution | None = None
@@ -313,9 +315,12 @@ class Runtime:
 
     def submit(self, message: Message) -> None:
         """Queue a message for the next step. A GoalRequest's execution is named
-        then, in an Update carrying its request_id. Raises ContractError for
-        anything but the API's messages, a message that is not JSON (it could
-        not be traced), or a request_id already used in this run."""
+        then, in an Update carrying its request_id. A GoalRequest is idempotent
+        by request_id: the same request again (a client resending after a lost
+        connection) creates no second execution, and its latest Update comes
+        again. Raises ContractError for anything but the API's messages, a
+        message that is not JSON (it could not be traced), or a request_id
+        already used for another request."""
         if not isinstance(message, GoalRequest | InstallFallback | Cancel | Decision | Heartbeat):
             raise ContractError(f"not a runtime message: {type(message).__name__}")
         try:
@@ -323,9 +328,9 @@ class Runtime:
         except (TypeError, ValueError) as e:
             raise ContractError(f"{type(message).__name__} is not JSON-serializable: {e}") from e
         if isinstance(message, GoalRequest):
-            if message.request_id in self._requests:
-                raise ContractError(f"request_id {message.request_id} is already used in this run")
-            self._requests.add(message.request_id)
+            known = self._requests.setdefault(message.request_id, message)
+            if known.to_json() != message.to_json():
+                raise ContractError(f"request_id {message.request_id} already names another request in this run")
         self._inbox.put(message)
 
     def poll(self) -> list[Update]:
@@ -417,10 +422,15 @@ class Runtime:
             self._event(now, "s0.status", ex, status.to_json())
 
     def _handle(self, message: Message, now: Ns) -> None:
-        if isinstance(message, GoalRequest):
+        if isinstance(message, GoalRequest) and message.request_id in self._by_request:
+            ex = self._by_request[message.request_id]
+            self._event(now, "request", ex, message.to_json() | {"repeat": True})
+            self._outbox.append(self._last_update[message.request_id])
+        elif isinstance(message, GoalRequest):
             self._count += 1
             ex = Execution(f"{self._run_id}-x{self._count:02d}", message, now, self.belief.snapshot())
             self.executions[ex.id] = ex
+            self._by_request[message.request_id] = ex
             self._event(now, "request", ex, message.to_json())
             self._queue.append(ex)
             self._update(ex, now, None)
@@ -474,7 +484,9 @@ class Runtime:
             self._update(ex, now, None)
 
     def _update(self, ex: Execution, now: Ns, summary: Json | None) -> None:
-        self._outbox.append(Update(ex.request.request_id, ex.id, ex.request.task_id, ex.state, now, summary))
+        update = Update(ex.request.request_id, ex.id, ex.request.task_id, ex.state, now, summary)
+        self._last_update[ex.request.request_id] = update
+        self._outbox.append(update)
 
     def _start(self, ex: Execution, now: Ns) -> None:
         self._active = ex

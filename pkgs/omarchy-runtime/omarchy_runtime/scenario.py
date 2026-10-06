@@ -167,6 +167,14 @@ def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple
     return recovery, latency, {"recovery": describe(recovery), "s2_latency": describe(latency) | {"seconds": ttft, "spread": spread}}
 
 
+def _reconnect(cfg: Json) -> link.Reconnect:
+    t = cfg["runtime"]["s2_link"]
+    return link.Reconnect(*(ns(config.get(t, k, float, "s2_link")) for k in RECONNECT))
+
+
+RECONNECT = ("reconnect_s", "reconnect_backoff_s", "reconnect_backoff_max_s", "connect_attempt_s")
+
+
 def _connect_s2(where: tuple[str, int], timeout: Ns, robot_hello: Json) -> tuple[link.TcpTransport, Json]:
     transport = link.connect(*where, timeout)
     try:
@@ -360,7 +368,8 @@ def run(
         sched.add("s2", SECOND // rates["s2"], unless_paused(scripted.step))
         s2_done = lambda: scripted.done  # noqa: E731
     else:
-        robot_link = link.RobotLink(transport, runtime, trace)
+        assert s2 is not None
+        robot_link = link.RobotLink(transport, s2, robot_hello, runtime, trace, _reconnect(cfg))
         sched.add("link", SECOND // rates["link"], unless_paused(robot_link.step))
         s2_done = lambda: robot_link.s2_done  # noqa: E731
     sched.add("harness", supervisor, harness)
@@ -374,7 +383,7 @@ def run(
     s2_link = runtime.s2_link(sched.now)
     runtime.close(sched.now, "task complete" if completed else "time limit", **({"loop": loop} if loop else {}))
     if robot_link is not None:
-        robot_link.close()
+        robot_link.close(sched.now)
     result = RunResult(
         s["name"],
         run_dir,
@@ -408,7 +417,8 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
     Returns S2's own view: whether it finished its goals, why the link
     closed, what the robot refused, its round trips (heartbeat echo, S2's
     clock) and its loop statistics."""
-    transport = link.listen(*where, timeout, announce)
+    listener = link.Listener(*where, announce)
+    transport = listener.accept(timeout)
     try:
         robot = link.check_hello(transport.wait("hello", timeout), "robot")
         cfg = config.effective(config.get(robot, "scenario", str, "robot hello"))
@@ -417,13 +427,18 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
         seed = config.get(robot, "seed", int, "robot hello")
         run_id = config.get(robot, "run_id", str, "robot hello")
         heartbeat = ns(config.get(robot, "heartbeat_s", float, "robot hello"))
-        transport.send(link.hello("s2", runtime=runtime_identity(), **named))
+
+        def reply(ack: int) -> Json:
+            return link.hello("s2", runtime=runtime_identity(), ack=ack, **named)
+
+        transport.send(reply(0))
     except OmarchyError as e:
         transport.send({"type": "error", "reason": str(e)})
         transport.close()
+        listener.close()
         raise
     s = cfg["scenario"]
-    api = link.RemoteRuntime(transport, heartbeat)
+    api = link.RemoteRuntime(transport, listener, run_id, heartbeat, reply)
     s2 = ScriptedS2(
         api,
         config.goals(s["s2"], "scenario s2"),
@@ -438,17 +453,20 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
     sched.add("link", ns(0.001), api.step)
     sched.add("s2", SECOND // cfg["world"]["rates_hz"]["s2"], s2.step)
     limit = ns(float(s.get("limit_s", 60.0)))
-    sched.run(lambda: s2.done or api.closed is not None, until=limit, check_every=ns(0.01))
+    sched.run(lambda: s2.done, until=limit, check_every=ns(0.01))
     api.leave(sched.now)
-    # The robot ends the run once its last execution is over, and closes the link.
-    sched.run(lambda: api.closed is not None, until=sched.now + ns(30.0), check_every=ns(0.01))
-    transport.close()
+    # The robot ends the run once its last execution is over, and says bye.
+    sched.run(lambda: api.finished, until=sched.now + ns(30.0), check_every=ns(0.01))
+    if api.transport is not None:
+        api.transport.close()
+    listener.close()
     return {
         "scenario": s["name"],
         "run_id": run_id,
         "done": s2.done,
-        "closed": api.closed,
-        "refused": api.errors,
+        "bye": api.finished,
+        "sessions": api.sessions,
+        "errors": api.errors,
         "rtt_ns": distribution(api.rtt),
         "rtt_label": "heartbeat echo on S2's monotonic clock: the network both ways plus up to one loop period at each end",
         "loop": {"label": f"soft real-time, Python, {where_measured()}", "components": sched.stats()},

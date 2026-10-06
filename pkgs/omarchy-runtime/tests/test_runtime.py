@@ -347,11 +347,21 @@ class TestFallbacksAndApi(unittest.TestCase):
         with self.assertRaises(ContractError):
             Rig().runtime.submit(GoalRequest(IN_RACK, "task", "r1", conditioning={"speed": float("nan")}))
 
-    def test_a_request_id_is_used_once(self) -> None:
+    def test_a_request_is_idempotent_by_its_id(self) -> None:
+        # A client resending after a lost connection: no second execution, the latest Update again.
         rig = Rig()
         rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))
+        rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))  # still in the inbox
+        rig.run(0.2, chunks=True)
+        rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))  # executing
+        rig.run(0.1, chunks=True)
+        self.assertEqual(len(rig.runtime.executions), 1)
+        states = [u.state for u in rig.updates if u.request_id == "r1"]
+        self.assertEqual(states, [State.PENDING, State.PENDING, State.RUNNING, State.RUNNING])  # each repeat: the latest again
+        repeats = [e for e in rig.events() if e["type"] == "request" and e["payload"].get("repeat")]
+        self.assertEqual(len(repeats), 2)
         with self.assertRaises(ContractError):
-            rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))
+            rig.runtime.submit(GoalRequest(Goal("in", ("cup_2", "drying_rack")), "task", "r1"))  # another request, same id
 
     def test_updates_decisions_and_trace(self) -> None:
         rig = Rig()

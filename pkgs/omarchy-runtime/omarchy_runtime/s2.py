@@ -67,6 +67,7 @@ class ScriptedS2:
         self.tasks = 0
         self.requests = 0
         self.waiting: str | None = None  # the request S2 is waiting for
+        self.fallbacks: set[str] = set()  # the executions S2 installed a fallback for
         self.decided: list[tuple[Ns, Message]] = []  # decisions not sent yet, with the time they are ready
         self.goal: Goal | None = None
         self.task: str | None = None
@@ -103,7 +104,8 @@ class ScriptedS2:
     def _see(self, update: Update, now: Ns) -> None:
         if update.request_id != self.waiting:
             return
-        if update.state is State.RUNNING and self.fallback:
+        if update.state is State.RUNNING and self.fallback and update.execution_id not in self.fallbacks:
+            self.fallbacks.add(update.execution_id)
             # The window opens when the execution starts running, on the runtime's clock.
             b = self.body
             spec = FallbackSpec.make(

@@ -9,17 +9,18 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 
 from omarchy_runtime import placement
-from omarchy_runtime.contracts import ConfigError, LinkError, State, Update, ns
+from omarchy_runtime.contracts import ConfigError, ContractError, GoalRequest, LinkError, State, Update, ns
 from omarchy_runtime.evaluate import scenario_result
-from omarchy_runtime.link import RemoteRuntime, TcpTransport, address
+from omarchy_runtime.link import Inbox, Listener, Outbox, RemoteRuntime, TcpTransport, address
 from omarchy_runtime.scenario import run
 from omarchy_runtime.trace import validate_run
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
-from tests.helpers import scenario, tmpdir
+from tests.helpers import IN_RACK, scenario, tmpdir
 
 HERE = Path(__file__).parent.parent
 
@@ -32,6 +33,59 @@ def frames(t: TcpTransport, n: int) -> list[dict[str, object]]:
         got += t.receive()
         sleep_until(monotonic_ns() + ns(0.001))
     return got
+
+
+class Proxy:
+    """A TCP relay between the robot and S2 that can cut the link: cut()
+    breaks every connection and refuses new ones (accepts, then closes) for
+    a while, as a link that goes down and comes back."""
+
+    def __init__(self, target: int) -> None:
+        self.server = socket.create_server(("127.0.0.1", 0))
+        self.port = self.server.getsockname()[1]
+        self.target = target
+        self.down_until = 0
+        self.open: list[socket.socket] = []
+        self.lock = threading.Lock()
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                robot, _ = self.server.accept()
+            except OSError:
+                return
+            if monotonic_ns() < self.down_until:
+                robot.close()
+                continue
+            s2 = socket.create_connection(("127.0.0.1", self.target))
+            with self.lock:
+                self.open += [robot, s2]
+            for a, b in ((robot, s2), (s2, robot)):
+                threading.Thread(target=self._pump, args=(a, b), daemon=True).start()
+
+    def _pump(self, a: socket.socket, b: socket.socket) -> None:
+        try:
+            while data := a.recv(65536):
+                b.sendall(data)
+        except OSError:
+            pass  # the other pump, or cut(), closed the pair
+        for sock in (a, b):
+            sock.close()
+
+    def cut(self, seconds: float) -> None:
+        self.down_until = monotonic_ns() + ns(seconds)
+        with self.lock:
+            for sock in self.open:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)  # the peers see the connection end
+                except OSError:
+                    pass  # already closed by its pump
+                sock.close()
+            self.open = []
+
+    def close(self) -> None:
+        self.server.close()
 
 
 class TestTransport(unittest.TestCase):
@@ -87,32 +141,101 @@ class TestTransport(unittest.TestCase):
             address("edge")
 
 
+class TestNumbering(unittest.TestCase):
+    """Link numbers and acknowledgements: what a resumed session sends again."""
+
+    def test_outbox_keeps_what_is_not_acknowledged(self) -> None:
+        out = Outbox()
+        self.assertEqual([out.push({"type": "x"})["n"] for _ in range(3)], [1, 2, 3])
+        out.ack(2)
+        self.assertEqual([f["n"] for f in out.pending], [3])
+        out.ack(1)  # an older ack changes nothing
+        self.assertEqual([f["n"] for f in out.pending], [3])
+        with self.assertRaises(ContractError):
+            out.ack("3")
+
+    def test_inbox_applies_in_order_and_drops_repeats(self) -> None:
+        inbox = Inbox()
+        self.assertEqual([inbox.accept({"n": n}) for n in (1, 2, 2, 1, 3)], [True, True, False, False, True])
+        with self.assertRaises(LinkError):
+            inbox.accept({"n": 5})  # 4 is missing
+        with self.assertRaises(ContractError):
+            inbox.accept({"type": "request"})
+
+
 class TestRemoteRuntime(unittest.TestCase):
-    def test_heartbeats_round_trips_and_leaving(self) -> None:
+    def test_heartbeats_round_trips_acks_and_leaving(self) -> None:
         raw, other = socket.socketpair()
-        api = RemoteRuntime(TcpTransport(other), ns(0.1))
+        listener = Listener("127.0.0.1", 0)
+        self.addCleanup(listener.close)
+        api = RemoteRuntime(TcpTransport(other), listener, "run", ns(0.1), lambda ack: {"type": "hello", "ack": ack})
         self.addCleanup(raw.close)
-        self.addCleanup(api.transport.close)
         api.step(0)
         api.step(ns(0.05))
         robot = TcpTransport(raw)
         first = frames(robot, 1)
-        self.assertEqual([(f["type"], f["seq"], f["rtt"], f["final"]) for f in first], [("heartbeat", 1, [], False)])
-        robot.send({"type": "echo", "seq": 1, "sent": 0, "t": 5})
-        robot.send(Update("r1", "x1", "t1", State.PENDING, 5, None).to_json())
+        self.assertEqual([(f["type"], f["seq"], f["rtt"], f["final"], f["ack"]) for f in first], [("heartbeat", 1, [], False, 0)])
+        api.submit(GoalRequest(IN_RACK, "t1", "r1"))
+        self.assertEqual(frames(robot, 1)[0]["n"], 1)
+        robot.send({"type": "echo", "seq": 1, "sent": 0, "t": 5, "ack": 1})
+        robot.send(Update("r1", "x1", "t1", State.PENDING, 5, None).to_json() | {"n": 1})
+        robot.send(Update("r1", "x1", "t1", State.PENDING, 5, None).to_json() | {"n": 1})  # sent again: dropped
         sleep_until(monotonic_ns() + ns(0.01))
-        api.step(ns(0.1))  # handles the echo, then the next heartbeat carries its round trip
+        api.step(ns(0.1))  # handles the echo, then the next heartbeat carries its round trip and the ack
         self.assertEqual([u.request_id for u in api.poll()], ["r1"])
-        self.assertEqual(frames(robot, 1)[0]["rtt"], [ns(0.1)])
+        self.assertEqual(list(api.out.pending), [])  # the robot acknowledged the request
+        beat = frames(robot, 1)[0]
+        self.assertEqual((beat["rtt"], beat["ack"]), ([ns(0.1)], 1))
         api.leave(ns(0.15))
         self.assertTrue(frames(robot, 1)[0]["final"])
         api.step(ns(0.3))
         sleep_until(monotonic_ns() + ns(0.01))
         self.assertEqual(robot.receive(), [])  # nothing after the final heartbeat
-        robot.send({"type": "launch"})
+        robot.send({"type": "bye"})
         sleep_until(monotonic_ns() + ns(0.01))
         api.step(ns(0.4))
-        self.assertIn("unexpected frame", api.closed or "")
+        self.assertTrue(api.finished)
+
+
+class TestReconnection(unittest.TestCase):
+    """The link breaks 6.5 s into nominal_a and refuses connections for 3 s,
+    so the execution's final update is sent during the outage: the robot
+    connects again and sends it again, nothing is executed twice or lost,
+    the supervisor records the outage, the run succeeds."""
+
+    def test_the_robot_connects_again_and_the_session_resumes(self) -> None:
+        env = os.environ | {"PYTHONPATH": str(HERE)}
+        command = [sys.executable, "-m", "omarchy_runtime", "s2", "--listen", "127.0.0.1:0", "--ttft", "0.1", "--timeout", "60"]
+        s2 = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        self.addCleanup(s2.kill)
+        assert s2.stdout is not None
+        proxy = Proxy(int(s2.stdout.readline().rsplit(":", 1)[1]))
+        self.addCleanup(proxy.close)
+        cut = threading.Timer(6.5, proxy.cut, args=(3.0,))
+        cut.start()
+        self.addCleanup(cut.cancel)
+        r = run("nominal_a", tmpdir() / "reconnect", clock="wall", s2=("127.0.0.1", proxy.port), s2_timeout=ns(30.0))
+        out, err = s2.communicate(timeout=60)
+        self.assertEqual(s2.returncode, 0, err)
+        report = json.loads(out)
+
+        result = scenario_result(r, validate_run(r.dir))
+        self.assertEqual(result["problems"], [])
+        self.assertEqual([s["outcome"] for s in r.summaries], ["SUCCEEDED"])  # one execution: nothing repeated
+        events = [json.loads(line) for line in (r.dir / "events.jsonl").read_text().splitlines()]
+        states = [e["payload"]["state"] for e in events if e["type"] == "s2.link"]
+        self.assertIn("closed", states)
+        self.assertIn("reconnected", states)
+        self.assertLess(states.index("closed"), states.index("reconnected"))
+        self.assertEqual(states[-1], "left")
+        reconnected = next(e["payload"] for e in events if e["type"] == "s2.link" and e["payload"]["state"] == "reconnected")
+        self.assertGreaterEqual(reconnected["down_ns"], ns(2.5))  # refused for 3 s
+        self.assertLess(reconnected["down_ns"], ns(6.0))  # backoff bounded at 2 s
+        self.assertGreaterEqual(reconnected["resent"], 1)  # the SUCCEEDED update, sent again
+        link = r.s2_link
+        assert link is not None
+        self.assertEqual([o["class"] for o in link["outages"]], ["long"])
+        self.assertEqual((report["done"], report["bye"], report["sessions"]), (True, True, 2))
 
 
 class TestRemoteS2(unittest.TestCase):
@@ -164,7 +287,7 @@ class TestRemoteS2(unittest.TestCase):
         self.assertIn("loop", events[-1]["payload"])
 
         self.assertTrue(report["done"])
-        self.assertEqual(report["refused"], [])
+        self.assertEqual((report["errors"], report["bye"], report["sessions"]), ([], True, 1))
         self.assertGreater(report["rtt_ns"]["n"], 50)
         self.assertIn("soft real-time, Python", report["loop"]["label"])
 

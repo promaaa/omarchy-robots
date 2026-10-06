@@ -21,11 +21,29 @@ All notable changes to this project are documented here. The format follows
   tick. Every S0 implementation, a hardware one included, keeps this.
 - Trace schema 3: S0's counters gain `late_ticks`, `max_interval_ns` and
   `max_step`; a new event type `s0.late`.
+- Contract change, link protocol 2: every message from S2 and every update
+  from the robot carries a link number `n`; heartbeats and echoes carry
+  `ack`; the hellos carry `ack` and the robot's a `session`; the robot says
+  `bye` at the end of the run. Protocol 1 peers are refused.
+- Contract change: a `GoalRequest` is idempotent by `request_id`. The same
+  request again creates no second execution, and its latest update comes
+  again; another request with a used id is still refused.
 - The simulated S1's inference latency is drawn for each chunk (`[s1]
   latency_spread`, lognormal) and chunks reach S0 in the order they arrive.
 
 ### Added
 
+- Reconnection: after a broken connection, or 3 s of silence from S2
+  (application heartbeats, not TCP timing), the robot connects again
+  without blocking its loop, with a bounded backoff (0.25 s doubling to
+  2 s; `[s2_link]` in `runtime.toml`). S2 keeps listening and resumes the
+  session of the same run id; both ends send again what the other has not
+  acknowledged and ignore repeats, so a resumed session neither repeats nor
+  loses a goal. TCP_USER_TIMEOUT (3 s) and keepalive bound TCP's
+  retransmission backoff. The trace records `s2.link` `closed` and
+  `reconnected` (time down, attempts, updates sent again). A new placement
+  profile, `outage_long`: the link down for 20 s during the first
+  execution.
 - Deterministic timing faults in simulated time, from a scenario's seed:
   observation age (`[timing] observation_age_s`, `_spread`), S0 tick jitter
   (`s0_skip_probability`), S0 stalls and whole-process pauses (`[[faults]]`

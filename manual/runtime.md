@@ -106,6 +106,8 @@ omarchy-runtime run s2_latency_1 --clock wall --s2 edge:7447      # on the robot
 
 The link is newline-delimited JSON over TCP. S2 listens and the robot connects to it, so the robot's firewall still admits SSH only; the S2 machine admits the port. The robot speaks first: its hello carries the run's identity (run id, scenario, seed, configuration hash, the runtime and OS builds), the body spec S2 builds fallbacks from, and the heartbeat period. S2 answers with its own identity, latency model and recovery policy. Then only control-plane traffic crosses: requests, fallback installs, cancels, decisions and heartbeats from S2; execution updates with their summaries, heartbeat echoes and refusals from the robot. Action chunks never cross: S1 and S0 stay in the robot's process.
 
+A run survives a broken connection. Every message from S2 and every update from the robot carries a link number; heartbeats and echoes acknowledge the highest number applied. When S2 has been silent for 3 s, or the connection breaks, the robot connects again without blocking its loop, first at once, then after 0.25 s, doubling up to 2 s between attempts (`[s2_link]` in `config/runtime.toml`). S2 keeps listening for the whole run and resumes the session of the same run id. Both ends then send again, in order, what the other has not acknowledged, and ignore a number already applied, so a resumed session neither repeats nor loses a goal. The runtime itself treats a GoalRequest as idempotent by its `request_id`: the same request again creates no second execution, and its latest update comes again. TCP_USER_TIMEOUT (3 s) and keepalive bound how long the kernel holds unacknowledged data, so TCP's retransmission backoff no longer stretches an outage. The trace records each closed connection and each reconnection (`s2.link`: `closed`, `reconnected` with the time down, the attempts and the updates sent again).
+
 S2 sends a heartbeat every 0.1 s and measures each round trip from the robot's echo: the network both ways, plus up to one loop period at each end. The runtime's supervisor watches the heartbeats from the first to the final one. After 0.5 s without one it records the link as lost (an `s2.link` event). When heartbeats return it records the outage with its duration and class: short (under 2 s, what TCP retransmission on a lossy link gives), long (2 s or more), or unrecovered if the run ends first. Executions continue during an outage, and S0 never waits. The deadlines are in `config/runtime.toml` `[s2_link]`. The trace header names where S2 ran and S2's hello; `run.end` carries every outage, the round trips S2 reported (median, 99th percentile, maximum, and each sample), and the loop statistics.
 
 `--ttft SECONDS` sets S2's time to first token, the delay of every decision. With `--ttft-spread X` it is sampled for each decision from a lognormal distribution with that median (the `lognormal` latency model) instead of fixed. `--tag KEY=VALUE` on the robot records a label in the trace header.
@@ -162,11 +164,12 @@ Where should S2 live: on the robot, on an edge server, or in the cloud (research
 | `wan` | about 100 ms, jitter 20 ms |
 | `degraded` | about 400 ms, jitter 100 ms, 5 % loss |
 | `outage` | `lan`, then every packet dropped for 5 s during the first execution |
+| `outage_long` | `lan`, then every packet dropped for 20 s during the first execution: the robot connects again |
 
 For every cell the table gives the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and the same task's time in one process on simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, and S0's loop intervals and overruns.
 
 ```sh
-nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage x TTFT 0.1, 1 s (in nix flake check)
+nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage, outage_long x TTFT 0.1, 1 s (in nix flake check)
 nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
 nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
   --source "CI run <id>, ..."      # writes the table below
