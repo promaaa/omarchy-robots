@@ -31,6 +31,14 @@ All notable changes to this project are documented here. The format follows
 - The simulated S1's inference latency is drawn for each chunk (`[s1]
   latency_spread`, lognormal) and chunks reach S0 in the order they arrive.
 
+### Changed (CI)
+
+- CI runs `nix flake check` as parallel jobs: a first job lists every check
+  of the flake, and a matrix builds one VM test per job, every board's
+  evaluation (with `nix flake check --no-build` and the aarch64 installer
+  images) in one, and the rest in one. No check is removed; a new check is
+  always included. `check=false` still dispatches only the chosen jobs.
+
 ### Added
 
 - `omarchy.robot.s2Link`: the link to S2 over a WireGuard tunnel declared in
