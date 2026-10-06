@@ -195,9 +195,9 @@ def check_hello(frame: Json, role: str) -> Json:
 
 class RobotLink:
     """The robot's end: S2's messages into the runtime's API, its Updates and
-    the heartbeat echoes back. Stepped at S0's rate, so an echo leaves at
-    most one S0 period after its heartbeat arrived; the runtime handles the
-    messages at its own next step. A message the API refuses is answered
+    the heartbeat echoes back. Stepped at its own rate (1 kHz), so an echo
+    leaves at most one period after its heartbeat arrived; the runtime
+    handles the messages at its own next step. A message the API refuses is answered
     with an error frame and recorded; a closed link is recorded, and the
     robot carries on without S2: S0 never waits."""
 

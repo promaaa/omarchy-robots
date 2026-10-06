@@ -55,7 +55,7 @@ nix run .#omarchy-runtime -- eval     # every scenario, and the results table
 
 `--runs DIR` chooses where run directories go (default: `$OMARCHY_RUNTIME_RUNS`, else `./runs`). `--record-s0` also writes S0's per-tick record for each execution.
 
-`--clock wall` steps the same components on the wall clock instead of simulated time: soft real-time, in Python, on a general-purpose OS. Each component gets the real time elapsed since the run began. A step that starts a whole period or more late is an overrun, and the releases it missed are skipped, never caught up. The run ends with each component's loop statistics: intervals between steps and step durations (median, 99th percentile, maximum), overruns. They are labelled "soft real-time, Python" with where they were measured. `--s0-hz N` changes S0's rate. Simulated time stays the default, and it alone is deterministic.
+`--clock wall` steps the same components on the wall clock instead of simulated time: soft real-time, in Python, on a general-purpose OS. Each component gets the real time elapsed since the run began. A step that starts a whole period or more late is an overrun, and the releases it missed are skipped, never caught up. The run ends with each component's loop statistics: intervals between steps and step durations (median, 99th percentile, maximum), overruns. They are labelled "soft real-time, Python" with where they were measured. On the wall clock S0 runs at 200 Hz, not 1 kHz, and the robot's end of an S2 link is polled at 1 kHz (`[wall_rates_hz]` in `config/world.toml`): Python did not keep S0 at 1 kHz in a KVM VM. `--s0-hz N` changes S0's rate. Simulated time stays the default, and it alone is deterministic.
 
 ## The scenarios
 

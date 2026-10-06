@@ -32,8 +32,10 @@ All notable changes to this project are documented here. The format follows
   stepped on the real clock with the real elapsed time, soft real-time in
   Python. It records every component's loop intervals and step durations
   (median, 99th percentile, maximum) and its overruns, and writes them into
-  `run.end`, labelled with where they were measured. Simulated time stays
-  the default and stays deterministic. Only `wallclock.py` reads the clock
+  `run.end`, labelled with where they were measured. On the wall clock S0
+  runs at 200 Hz (`[wall_rates_hz]` in `world.toml`): at 1 kHz, Python
+  overran in 6 to 20 % of S0's steps in a KVM VM. Simulated time stays the
+  default (S0 at 1 kHz) and stays deterministic. Only `wallclock.py` reads the clock
   or sleeps.
 - S2 in another process, maybe on another machine: `omarchy-runtime s2`
   (the scripted S2, its recovery policy and latency model) and `run ...

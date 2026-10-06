@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      check:
+        description: Run nix flake check (off to run only the jobs chosen below)
+        type: boolean
+        default: true
       jetson:
         description: Also build the orin-agx-devkit system on an arm64 runner (hours)
         type: boolean
@@ -17,6 +21,7 @@ on:
 jobs:
   check:
     name: nix flake check (x86_64, VM tests)
+    if: github.event_name != 'workflow_dispatch' || inputs.check
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:

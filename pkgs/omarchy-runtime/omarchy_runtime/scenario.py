@@ -162,6 +162,8 @@ def run(
     if s2 is not None and ttft is not None:
         raise ConfigError("an S2 in another process has its own time to first token: give --ttft to omarchy-runtime s2")
     cfg = config.effective(name)
+    if clock == "wall":
+        cfg["world"]["rates_hz"] |= config.get(cfg["world"], "wall_rates_hz", dict, "world.toml")
     if s0_hz is not None:
         if s0_hz <= 0 or SECOND % s0_hz:
             raise ConfigError(f"S0 rate {s0_hz} Hz: the period must be a whole number of nanoseconds")
@@ -299,9 +301,8 @@ def run(
         sched.add("s2", SECOND // rates["s2"], scripted.step)
         s2_done = lambda: scripted.done  # noqa: E731
     else:
-        # S0's rate: a heartbeat's echo waits at most one S0 period.
         robot_link = link.RobotLink(transport, runtime, trace)
-        sched.add("link", SECOND // rates["s0"], robot_link.step)
+        sched.add("link", SECOND // rates["link"], robot_link.step)
         s2_done = lambda: robot_link.s2_done  # noqa: E731
     sched.add("harness", supervisor, harness)
     trace.event(
