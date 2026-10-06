@@ -7,6 +7,7 @@
     ./jetson.nix
     ./pc.nix
     ./runtime.nix
+    ./s2-link.nix
     ./vm.nix
   ];
 }

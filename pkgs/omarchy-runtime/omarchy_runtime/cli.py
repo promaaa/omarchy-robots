@@ -52,7 +52,10 @@ def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
     tags = dict(t.partition("=")[::2] for t in args.tag)
     if any(not k for k in tags):
         raise ConfigError(f"--tag takes KEY=VALUE, not {args.tag}")
-    remote = {"s2": link.address(args.s2), "s2_timeout": ns(args.s2_timeout)} if args.s2 else {}
+    remote = {}
+    if args.s2:
+        where = link.address(args.s2)
+        remote = {"s2": where, "s2_timeout": ns(args.s2_timeout), "s2_bind": link.through_tunnel(link.tunnel(), where[0], listening=False)}
     out = fresh(runs_dir(args), f"{prefix}-{stamp()}")
     results = evaluate.evaluate(
         names,
@@ -119,7 +122,10 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_s2(args: argparse.Namespace) -> int:
-    report = scenario.serve_s2(link.address(args.listen), ttft=args.ttft, spread=args.ttft_spread, timeout=ns(args.timeout), announce=True)
+    tunnel = link.tunnel()
+    where = link.address(args.listen or (f"{tunnel['address']}:{tunnel['port']}" if tunnel else "127.0.0.1:7447"))
+    link.through_tunnel(tunnel, where[0], listening=True)
+    report = scenario.serve_s2(where, ttft=args.ttft, spread=args.ttft_spread, timeout=ns(args.timeout), announce=True)
     print(json.dumps(report, indent=2))
     return 0 if report["done"] else 1
 
@@ -185,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("scenario")
     p.set_defaults(func=cmd_run)
     p = sub.add_parser("s2", help="be S2 for one robot run: listen, run the scripted S2 on the wall clock, report")
-    p.add_argument("--listen", default="127.0.0.1:7447", metavar="HOST:PORT", help="where to wait for the robot (default 127.0.0.1:7447)")
+    p.add_argument(
+        "--listen", metavar="HOST:PORT", help="where to wait for the robot (default: the S2 link's tunnel address, else 127.0.0.1:7447)"
+    )
     p.add_argument("--ttft", type=float, help="S2's median time to first token, s (default: the scenario's latency)")
     p.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of the time to first token (default 0: fixed)")
     p.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for the robot (default 600)")

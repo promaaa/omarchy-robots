@@ -266,6 +266,9 @@ in
   vm-s2-placement = pkgs.testers.runNixOSTest (
     import ./s2-placement.nix { inherit pkgs robotModules onBoard; }
   );
+  vm-s2-link = pkgs.testers.runNixOSTest (
+    import ./s2-link.nix { inherit pkgs robotModules onBoard; }
+  );
   eval-runtime-orin-agx-devkit = evaluatesWithRuntime "orin-agx-devkit";
   eval-runtime-pc = evaluatesWithRuntime "pc";
   eval-gpu-orin-agx-devkit = evaluatesWithGpu "orin-agx-devkit";

@@ -33,6 +33,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `omarchy.robot.s2Link`: the link to S2 over a WireGuard tunnel declared in
+  `robot.nix` (`enable`, `address`, `listenPort`, `privateKeyFile`, `port`,
+  `peer.address`, `peer.publicKey` or `peer.publicKeyFile`,
+  `peer.endpoint`; `role = "s2"` on S2's machine). The private key is a
+  path read at run time, never in the Nix store (the build refuses one
+  there). `/etc/omarchy-robot/s2-link.json` names the tunnel: `omarchy-runtime
+  run --s2` then connects from and to tunnel addresses only, and
+  `omarchy-runtime s2` listens on the tunnel only. The VM test `vm-s2-link`
+  generates keys at test time, runs a task through the tunnel, captures the
+  LAN to show no S2 traffic in the clear, and checks the refusals outside
+  it. No TLS in the runtime: the OS owns transport security.
 - Reconnection: after a broken connection, or 3 s of silence from S2
   (application heartbeats, not TCP timing), the robot connects again
   without blocking its loop, with a bounded backoff (0.25 s doubling to

@@ -16,7 +16,8 @@ from pathlib import Path
 from omarchy_runtime import placement
 from omarchy_runtime.contracts import ConfigError, ContractError, GoalRequest, LinkError, State, Update, ns
 from omarchy_runtime.evaluate import scenario_result
-from omarchy_runtime.link import Inbox, Listener, Outbox, RemoteRuntime, TcpTransport, address
+from omarchy_runtime.link import Inbox, Listener, Outbox, RemoteRuntime, TcpTransport, address, through_tunnel
+from omarchy_runtime.link import tunnel as link_tunnel
 from omarchy_runtime.scenario import run
 from omarchy_runtime.trace import validate_run
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
@@ -133,6 +134,21 @@ class TestTransport(unittest.TestCase):
             t.wait("hello", ns(2.0))
         with self.assertRaisesRegex(LinkError, "no hello within"):
             t.wait("hello", ns(0.05))
+
+    def test_with_the_s2_link_enabled_only_the_tunnel(self) -> None:
+        path = tmpdir() / "s2-link.json"
+        self.assertIsNone(link_tunnel(path))
+        path.write_text(json.dumps({"role": "robot", "interface": "wg-s2", "address": "10.77.0.1", "peer": "10.77.0.2", "port": 7447}))
+        t = link_tunnel(path)
+        self.assertEqual(through_tunnel(t, "10.77.0.2", listening=False), "10.77.0.1")  # connect from the tunnel address
+        self.assertEqual(through_tunnel(t, "10.77.0.1", listening=True), "10.77.0.1")
+        for host, listening in (("edge", False), ("192.168.1.1", False), ("0.0.0.0", True)):
+            with self.subTest(host), self.assertRaisesRegex(ConfigError, "the S2 link is enabled"):
+                through_tunnel(t, host, listening=listening)
+        self.assertIsNone(through_tunnel(None, "edge", listening=False))
+        path.write_text("[]")
+        with self.assertRaises(ConfigError):
+            link_tunnel(path)
 
     def test_addresses(self) -> None:
         self.assertEqual(address("edge:7447"), ("edge", 7447))

@@ -34,9 +34,11 @@ import socket
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from omarchy_runtime.contracts import (
+    ConfigError,
     ContractError,
     Heartbeat,
     Json,
@@ -55,6 +57,34 @@ PROTOCOL = 2
 MAX_FRAME = 1 << 22  # bytes; a longer line is a protocol error
 CLOSE_TIMEOUT = ns(5.0)  # to send what is still buffered when closing
 USER_TIMEOUT_MS = 3000  # TCP_USER_TIMEOUT: unacknowledged data older than this aborts the connection
+
+
+S2_LINK_JSON = Path("/etc/omarchy-robot/s2-link.json")  # written by omarchy.robot.s2Link
+
+
+def tunnel(path: Path = S2_LINK_JSON) -> Json | None:
+    """The S2 link's tunnel (role, interface, address, peer, port), or None when it is not enabled."""
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        raise ConfigError(f"{path}: {e}") from e
+    if not isinstance(value, dict) or not {"role", "interface", "address", "peer", "port"} <= set(value):
+        raise ConfigError(f"{path}: not an S2 link description")
+    return value
+
+
+def through_tunnel(link: Json | None, host: str, *, listening: bool) -> str | None:
+    """With the S2 link enabled, S2 is reached, or listens, on the tunnel only:
+    refuse any other address. Returns the local address to bind, or None."""
+    if link is None:
+        return None
+    wanted = link["address"] if listening else link["peer"]
+    if host != wanted:
+        verb = "listens" if listening else "is reached"
+        raise ConfigError(f"the S2 link is enabled ({link['interface']}): S2 {verb} on {wanted} only, not on {host}")
+    return str(link["address"])
 
 
 def address(text: str) -> tuple[str, int]:

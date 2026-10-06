@@ -175,8 +175,8 @@ def _reconnect(cfg: Json) -> link.Reconnect:
 RECONNECT = ("reconnect_s", "reconnect_backoff_s", "reconnect_backoff_max_s", "connect_attempt_s")
 
 
-def _connect_s2(where: tuple[str, int], timeout: Ns, robot_hello: Json) -> tuple[link.TcpTransport, Json]:
-    transport = link.connect(*where, timeout)
+def _connect_s2(where: tuple[str, int], timeout: Ns, robot_hello: Json, bind: str | None) -> tuple[link.TcpTransport, Json]:
+    transport = link.connect(*where, timeout, bind)
     try:
         transport.send(robot_hello)
         return transport, link.check_hello(transport.wait("hello", timeout), "s2")
@@ -194,6 +194,7 @@ def run(
     s0_hz: int | None = None,
     s2: tuple[str, int] | None = None,
     s2_timeout: Ns = S2_TIMEOUT,
+    s2_bind: str | None = None,
     ttft: float | None = None,
     ttft_spread: float = 0.0,
     tags: Mapping[str, str] | None = None,
@@ -201,7 +202,8 @@ def run(
     """Run one scenario. `clock` is "simulated" or "wall"; `s0_hz` replaces
     S0's configured rate; `s2` is the address of an S2 process (omarchy-runtime
     s2) to connect to, waiting up to `s2_timeout`, instead of S2 in this
-    process; `ttft` and `ttft_spread` replace the latency of S2 in this
+    process, from the local address `s2_bind` if given (the S2 link's
+    tunnel); `ttft` and `ttft_spread` replace the latency of S2 in this
     process (see s2_parts). `tags` go into the trace header as they are."""
     if clock not in ("simulated", "wall"):
         raise ConfigError(f"clock {clock!r} is not simulated or wall")
@@ -268,7 +270,7 @@ def run(
             body=body.to_json(),
             heartbeat_s=config.get(cfg["runtime"]["s2_link"], "heartbeat_s", float, "s2_link"),
         )
-        transport, peer = _connect_s2(s2, s2_timeout, robot_hello)
+        transport, peer = _connect_s2(s2, s2_timeout, robot_hello, s2_bind)
         placement = {"placement": "remote", "address": f"{s2[0]}:{s2[1]}", "hello": peer}
         s2_named = {k: peer[k] for k in ("recovery", "s2_latency")}  # S2's own, as it said
     sched = Scheduler(SECOND // rates["s0"]) if clock == "simulated" else WallScheduler()
@@ -369,7 +371,7 @@ def run(
         s2_done = lambda: scripted.done  # noqa: E731
     else:
         assert s2 is not None
-        robot_link = link.RobotLink(transport, s2, robot_hello, runtime, trace, _reconnect(cfg))
+        robot_link = link.RobotLink(transport, s2, robot_hello, runtime, trace, _reconnect(cfg), bind=s2_bind)
         sched.add("link", SECOND // rates["link"], unless_paused(robot_link.step))
         s2_done = lambda: robot_link.s2_done  # noqa: E731
     sched.add("harness", supervisor, harness)

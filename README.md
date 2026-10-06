@@ -159,6 +159,8 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,
 soft real-time (`omarchy-runtime s2`, `run ... --clock wall --s2 HOST:PORT`).
+The OS secures that link: `omarchy.robot.s2Link` carries it over WireGuard, and
+the runtime then reaches S2 through the tunnel only (manual, Security).
 
 ### S2 placement experiment
 
@@ -447,7 +449,8 @@ closure over SSH; nothing is compiled on the robot.
 nix flake check                 # format, statix, deadnix, ruff, mypy, unit tests, the runtime's
                                 # scenario matrix, every board evaluated (with and without the
                                 # runtime), VM tests (base, update/rollback, installer on vm and pc,
-                                # runtime, S2 placement reduced to 3 profiles x 2 TTFTs)
+                                # runtime, S2 placement reduced to 4 profiles x 2 TTFTs, S2 link over
+                                # WireGuard)
 nix fmt                         # nixfmt (RFC style) on every .nix file
 nix develop                     # nixfmt, statix, deadnix, ruff, python3 with numpy and mypy
 ```

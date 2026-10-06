@@ -40,6 +40,7 @@ Every option lives under `omarchy.robot`. Types and defaults are in [`modules/op
 | `gpu.enable` | `false` | Jetson only. Installs the NVIDIA GPU userspace and the CUDA and TensorRT samples that `validate` runs. Large. |
 | `power.mode` | `null` (board default) | Jetson only. The `nvpmodel` mode ID applied at boot. IDs differ per board: `nvpmodel -p --verbose` on the robot lists them. |
 | `runtime.enable` | `false` | Installs [`omarchy-runtime`](../runtime/), the execution runtime (simulated for now), with `/var/lib/omarchy-runtime/runs` for its run directories. A command, not a service. |
+| `s2Link.enable`, `.address`, `.listenPort`, `.privateKeyFile`, `.port`, `.peer.address`, `.peer.publicKey` (or `.peer.publicKeyFile`), `.peer.endpoint` | off | Carries the link to an S2 on another machine over a WireGuard tunnel; the runtime then reaches S2 through the tunnel only. See [Security](../security/#the-s2-link). |
 | `generations` | `10` | Systems kept for rollback, between 2 and 100. Both the boot menu and the weekly garbage collection respect it. |
 
 ## Guard rails
