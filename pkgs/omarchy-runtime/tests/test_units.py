@@ -38,6 +38,7 @@ from omarchy_runtime.runtime import Binding, Capability, Execution, resolve
 from omarchy_runtime.sched import Mailbox, Scheduler, WallScheduler, distribution
 from omarchy_runtime.sim.kinematics import Kinematics
 from omarchy_runtime.sim.s0 import SimS0
+from omarchy_runtime.sim.s1 import ScriptedPickPlace
 from omarchy_runtime.sim.world import World
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
 from tests.helpers import ARM, ARM_CFG, GANTRY, IN_RACK, RACK_SPOT, SCENE, TABLE_SPOT, belief, observation
@@ -398,6 +399,26 @@ class TestScheduler(unittest.TestCase):
             box.put(i)
         self.assertEqual(box.drain(), [0, 1, 2])
         self.assertEqual(box.drain(), [])
+
+
+class TestScriptedS1(unittest.TestCase):
+    def test_after_a_lag_it_reaches_the_grasp_point_before_closing(self) -> None:
+        # Found by vm-s2-placement in CI: the wall-clock loop stalled for 283 ms,
+        # S0 lagged more than REPLAN behind the plan, and the plan was replanned
+        # into its gripper-closing waypoint. Moving down and closing together,
+        # the gripper caught the cup above the grasp point and pushed it into the
+        # table. A gripper change happens in place: reach the spot, then close.
+        policy = ScriptedPickPlace("pick_place.gantry")
+        policy.start(IN_RACK, belief(observation(1, 0.0, {"cup_1": TABLE_SPOT})).snapshot(), GANTRY, {})
+        self.assertIsNotNone(policy.step(0, observation(2, 0.0, {})))
+        closing = next(start for start, _, a, b, i in policy._plan if a[:2] == b[:2] and b[2] < a[2])
+        grasp_x, grasp_z = policy._waypoints[1][:2]
+        late = observation(3, (closing + ns(0.2)) / 1e9, {}, gripper=1.0, ee=(grasp_x, grasp_z + 0.04))  # 4 cm above, open
+        chunk = policy.step(closing + ns(0.2), late)
+        assert chunk is not None
+        for _, z, g in chunk.actions.tolist():
+            if g < 0.5:  # where the cup would attach
+                self.assertLessEqual(z, grasp_z + 0.002, f"the gripper closes at z = {z:.3f}, above the grasp point {grasp_z:.3f}")
 
 
 class TestKinematics(unittest.TestCase):

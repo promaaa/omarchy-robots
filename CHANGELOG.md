@@ -80,6 +80,16 @@ is real-time.
 - `from_json()` for every message of the API (`message_from_json`), for
   `Update` and for `BodySpec`, with a round-trip test.
 
+#### Fixed
+
+- The scripted S1 could push a held cup into the table. Found by
+  `vm-s2-placement` in CI: the robot VM's loop stalled for 283 ms, S0 fell
+  more than 3 cm behind S1's plan, and S1 replanned straight into its
+  gripper-closing waypoint, moving down and closing together; the gripper
+  caught the cup above the grasp point (ground truth: held cup_2 5 mm into
+  the table). A replan now reaches a grasp or release spot before it
+  changes the gripper. Simulated scenarios give the same results.
+
 
 ### Part 1 (2026-10-04)
 

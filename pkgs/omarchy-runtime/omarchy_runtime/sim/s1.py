@@ -96,6 +96,10 @@ class ScriptedPickPlace:
         ]
 
     def _replan(self, now: Ns, here: Point, first: int) -> None:
+        # A gripper change happens in place: when the next waypoint grasps or
+        # releases, reach its spot first, then change the gripper there.
+        if 0 < first < len(self._waypoints) and self._waypoints[first][:2] == self._waypoints[first - 1][:2]:
+            first -= 1
         self._plan, t, p = [], now, here
         for i in range(first, len(self._waypoints)):
             w = self._waypoints[i]
