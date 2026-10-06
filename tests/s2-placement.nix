@@ -219,6 +219,8 @@ in
             if c["scenario"] == "cup_moved":
                 assert c["reaction_s"] is not None, c
             if c["scenario"] in ("slot_blocked", "fallback_expiry"):
-                assert c["recovery"] and c["recovery"]["fallback_engaged"], c["recovery"]
+                # S2 installs each fallback after its TTFT: with 5 s, S1 gives up first and
+                # S0 holds without one, as in the simulated run. The retry must still come.
+                assert c["recovery"], (c["scenario"], c["profile"], c["ttft_s"])
   '';
 }

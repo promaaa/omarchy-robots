@@ -29,7 +29,7 @@ PENETRATION = 0.005  # how far below a surface top a held cup may dip before it 
 
 @dataclass(frozen=True)
 class Trigger:
-    """A fault window: `delay` after the first `after` event ("start", "grasp" or "release"), for `duration`."""
+    """A fault window: `delay` after the first `after` event ("start", "moving", "grasp" or "release"), for `duration`."""
 
     after: str
     delay: Ns
@@ -115,6 +115,8 @@ class World:
             if dt and abs(v - self.q[i]) > b.max_velocity[i] * dt * (1 + 1e-6) + TOLERANCE:
                 self._violate(now, f"{b.dims[i]} moves at {abs(v - self.q[i]) / dt:.3f}/s, limit {b.max_velocity[i]}")
         was_open = self.q[self.gripper] >= 0.5
+        if "moving" not in self.first and any(abs(v - q) > 1e-6 for v, q in zip(command, self.q, strict=True)):
+            self.first["moving"] = now  # the body's first motion: S0 executing a first chunk
         self.q = list(command)
         self._last = now
         x, z = self.ee = self.kin.ee(self.q)

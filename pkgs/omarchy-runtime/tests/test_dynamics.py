@@ -10,7 +10,6 @@ import unittest
 from typing import Any
 
 from omarchy_runtime import config
-from omarchy_runtime.contracts import ns
 from omarchy_runtime.evaluate import inference_markdown, inference_matrix, scenario_result
 from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
 from omarchy_runtime.scenario import RunResult, run
@@ -97,7 +96,10 @@ class TestInferenceMatrix(unittest.TestCase):
                 self.assertEqual(c["violations"], 0)
                 self.assertEqual([p for p in c["problems"] if p.startswith("S0")], [])
         moved = [c for c in results["cells"] if c["scenario"] == "cup_moved" and c["trigger"] == "periodic" and c["corrector"] == "none"]
-        self.assertEqual([c["reaction_s"] for c in moved], [ns(d) / 1e9 + 0.05 for d in (0.05, 0.15, 0.3)])
+        for c, delay in zip(moved, (0.05, 0.15, 0.3), strict=True):
+            # The next observation (every 50 ms), then S1's inference delay.
+            self.assertGreater(c["reaction_s"], delay)
+            self.assertLessEqual(c["reaction_s"], delay + 0.05 + 1e-9)
         self.assertIn("| cup_moved | 0.05 | none | periodic | SUCCEEDED | 0 |", inference_markdown(results))
 
 

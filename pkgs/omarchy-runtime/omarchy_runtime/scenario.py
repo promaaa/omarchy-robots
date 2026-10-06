@@ -48,7 +48,7 @@ from omarchy_runtime.sim.world import Change, Trigger, World
 from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity, where_measured
 from omarchy_runtime.wallclock import stamp
 
-TRIGGERS = ("start", "grasp", "release")
+TRIGGERS = ("start", "moving", "grasp", "release")  # the run starts; the body first moves; the first grasp; the first release
 S2_TIMEOUT = ns(120.0)  # how long the robot waits for an S2 process to answer
 
 

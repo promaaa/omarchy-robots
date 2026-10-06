@@ -42,7 +42,8 @@ nothing is real-time.
 
 - Scenes that change during a task: `[[faults]]` kinds `move` (an entity
   moved by `x`) and `appear` (an object declared with `present = false`
-  placed at `x`). Scenarios `cup_moved` (S1 reacts alone), `slot_blocked`
+  placed at `x`). A new fault trigger, `moving`: the body's first motion,
+  after S2's first decision whatever its latency. Scenarios `cup_moved` (S1 reacts alone), `slot_blocked`
   (S1 gives up, S0 waits under the fallback, S2 chooses another spot) and
   `fallback_expiry` (the fallback expires before S2 answers). The recovery
   policy `retry_elsewhere` retries with the first free spot of the

@@ -17,8 +17,8 @@ goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
 [[faults]]
 kind = "move"
 entity = "cup_1"
-after = "start"
-delay_s = 1.2
+after = "moving"  # S2 decides first: with any S2 latency, the arm is approaching
+delay_s = 0.95
 x = 0.06
 
 [[expect]]

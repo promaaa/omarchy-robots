@@ -101,7 +101,7 @@ A loaded machine changes the timing a wall-clock run meets. A scenario reproduce
 
 ### Scenes that change
 
-The scene can change during a task. A change is a `[[faults]]` entry, at a delay after a lifecycle point (`after`, `delay_s`), like the other faults:
+The scene can change during a task. A change is a `[[faults]]` entry, at a delay (`delay_s`) after a point of the run (`after`), like the other faults: `start` (the run starts), `moving` (the body first moves, S0 executing the first chunk: after S2's first decision, whatever its latency), `grasp` or `release` (the first of each):
 
 | Kind | Keys | Effect |
 |---|---|---|
@@ -284,14 +284,14 @@ Inference matrix (simulated time; a baseline for asynchronous inference, not a c
 | cup_moved | 0.05 | none | mismatch | SUCCEEDED | 0 | 9.25 | 0 | 26 | 0.04 | 0.84 | 0.10 | 0.05 |
 | cup_moved | 0.05 | blend | periodic | SUCCEEDED | 0 | 10.15 | 0 | 194 | 0.00 | 1.65 | 0.10 | 0.05 |
 | cup_moved | 0.05 | blend | mismatch | SUCCEEDED | 0 | 9.15 | 0 | 28 | 0.00 | 1.74 | 0.10 | 0.05 |
-| cup_moved | 0.15 | none | periodic | SUCCEEDED | 0 | 9.20 | 0 | 175 | 0.12 | 1.79 | 0.20 | 0.15 |
-| cup_moved | 0.15 | none | mismatch | SUCCEEDED | 0 | 9.65 | 0 | 38 | 0.12 | 0.82 | 0.35 | 0.30 |
-| cup_moved | 0.15 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.02 | 1.74 | 0.20 | 0.15 |
-| cup_moved | 0.15 | blend | mismatch | SUCCEEDED | 0 | 9.75 | 0 | 38 | 0.00 | 1.83 | 0.40 | 0.35 |
-| cup_moved | 0.30 | none | periodic | SUCCEEDED | 0 | 10.60 | 0 | 203 | 0.75 | 3.00 | 0.35 | 0.30 |
-| cup_moved | 0.30 | none | mismatch | SUCCEEDED | 0 | 10.65 | 28 | 30 | - | - | 0.35 | 0.30 |
-| cup_moved | 0.30 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.03 | 1.95 | 0.35 | 0.30 |
-| cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 11.70 | 31 | 33 | - | - | 0.35 | 0.30 |
+| cup_moved | 0.15 | none | periodic | SUCCEEDED | 0 | 9.40 | 0 | 179 | 0.13 | 1.77 | 0.20 | 0.15 |
+| cup_moved | 0.15 | none | mismatch | SUCCEEDED | 0 | 9.65 | 0 | 38 | 0.12 | 0.82 | 0.25 | 0.20 |
+| cup_moved | 0.15 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.01 | 2.34 | 0.20 | 0.15 |
+| cup_moved | 0.15 | blend | mismatch | SUCCEEDED | 0 | 9.75 | 0 | 38 | 0.00 | 1.83 | 0.30 | 0.25 |
+| cup_moved | 0.30 | none | periodic | SUCCEEDED | 0 | 10.30 | 0 | 197 | 0.30 | 1.94 | 0.35 | 0.30 |
+| cup_moved | 0.30 | none | mismatch | SUCCEEDED | 0 | 11.35 | 30 | 32 | - | - | 0.60 | 0.55 |
+| cup_moved | 0.30 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.04 | 2.15 | 0.35 | 0.30 |
+| cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 12.75 | 34 | 36 | - | - | 0.60 | 0.55 |
 
 jump: the largest jump of S0's desired position at a chunk switch (rad for the arm's joints); velocity jump: of its desired velocity. reaction: from the cup's move to S0 executing a chunk computed after it; freeze: from the first observation after the move reaching S1 to that tick.
 <!-- inference-matrix:end -->
