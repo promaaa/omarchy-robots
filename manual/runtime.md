@@ -6,15 +6,15 @@ permalink: /runtime/
 
 The Omarchy Robots runtime sits between the intelligence that decides what a robot should do and the body that does it. An application or a planner asks for a **goal**, such as "cup_1 is in the drying rack". The runtime finds a capability that can achieve it on this body, runs it, checks the result from fresh observations, and records everything that happened as a trace that names the exact system it ran on.
 
-> **Everything here is simulated.** The bodies, the controller, the policy and the camera are simulated in Python, in simulated time. Nothing is real-time, and no part of the runtime has run on hardware. Every number below says whether it is simulated time or wall-clock time, and where it was measured.
+> **Everything here is simulated.** The bodies, the controller, the policy and the camera are simulated in Python, in simulated time or on the wall clock (soft real-time). Nothing is real-time, and no part of the runtime has run on hardware. Every number below says whether it is simulated time or wall-clock time, and where it was measured.
 
 ## Three layers, one control plane
 
-| Layer | Role | Rate (simulated) | In R1 |
+| Layer | Role | Rate | In R2 |
 |---|---|---|---|
-| S2 | Slow reasoning and planning. Requests goals, may install a fallback, decides what to do after a failure. | about 10 Hz, decisions taking 0.1 s to 5 s | a scripted planner with a latency model |
+| S2 | Slow reasoning and planning. Requests goals, may install a fallback, decides what to do after a failure. | about 10 Hz, decisions taking 0.1 s to 5 s | a scripted planner with a latency model, in the runtime's process or in its own |
 | S1 | Action generation: turns a goal into short timestamped trajectories, **action chunks**. | 20 Hz | a scripted pick-and-place policy |
-| S0 | Real-time execution: the only layer that commands actuators, and it enforces the body's limits. | 1 kHz | a simulated controller |
+| S0 | Real-time execution: the only layer that commands actuators, and it enforces the body's limits. | 1 kHz (200 Hz on the wall clock) | a simulated controller |
 
 ![S2 and the runtime above; S1, S0 and the body below]({{ '/assets/runtime-layers.svg' | relative_url }})
 

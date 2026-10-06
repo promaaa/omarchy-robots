@@ -16,13 +16,15 @@ screen and the installer's menus, its logo on the login banners.
 On top of it runs the first slice of the [runtime](#runtime), the layer
 between intelligence and robot bodies: an application asks for a goal, the
 runtime executes it, verifies it from fresh observations and records a trace
-that names the exact system it ran on. **The runtime is simulated**: no robot,
-nothing real-time.
+that names the exact system it ran on. **The robot is simulated** and nothing
+is real-time: the runtime runs in simulated time, or on the wall clock as soft
+real-time Python, with S2 in its process or in its own, on another machine.
 
-**Status:** v0.0.2 part 1 (milestone R1) runs and is tested in virtual machines: the
+**Status:** v0.0.2 part 2 (milestone R2) runs and is tested in virtual machines: the
 base system, the runtime's simulated scenarios (on a laptop and inside an
-Omarchy Robots VM), and the installation of a generic PC onto an emulated
-disk. The Jetson and pc targets evaluate and are partly built; none has run on
+Omarchy Robots VM), the runtime on the wall clock with S2 in its own process
+on a second VM over an emulated network (the S2 placement experiment), and
+the installation of a generic PC onto an emulated disk. The Jetson and pc targets evaluate and are partly built; none has run on
 hardware yet (see the [support matrix](#support-matrix)).
 
 ## One file
@@ -107,8 +109,9 @@ timestamp, the kernel and every check with its data.
 ## Runtime
 
 > **Simulated.** Bodies, controller, policy and camera are Python simulations
-> running in simulated time. Nothing is real-time and nothing has run on
-> hardware. Every number says whether it is simulated or wall-clock time.
+> running in simulated time, or on the wall clock as soft real-time Python.
+> Nothing is real-time and nothing has run on hardware. Every number says
+> whether it is simulated or wall-clock time, and where it was measured.
 
 `omarchy-runtime` is the control plane between a slow planner (S2), a policy
 that produces short trajectories, action chunks (S1), and the controller that
@@ -476,8 +479,9 @@ to which component and how to extend the runtime.
 ## Versioning
 
 Before 1.0, releases count up: v0.0.1 part 3 to v0.0.1 were milestone OS-1 (the base system,
-VM-validated), v0.0.2 part 1 is milestone R1 (the runtime, simulated, and the pc
-board). The first board booted and
+VM-validated), v0.0.2 part 1 milestone R1 (the runtime, simulated, and the pc
+board), v0.0.2 part 2 is milestone R2 (S2 in its own process, the wall clock, the S2
+placement experiment). The first board booted and
 validated on hardware takes v0.1.0. The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; their changes are noted

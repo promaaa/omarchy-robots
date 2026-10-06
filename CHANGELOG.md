@@ -7,7 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Changed
+## [0.0.2] - 2026-10-06
+
+### Part 2 (2026-10-06)
+
+Milestone R2: S2 in its own process, on the robot or on another machine,
+connected to the runtime over TCP; the runtime on the wall clock; and the S2
+placement experiment (RQ5) on two VMs with an emulated network. Soft
+real-time Python, an emulated network, VMs: not hardware-tested, and nothing
+is real-time.
+
+#### Changed
 
 - Contract change, the runtime's API is asynchronous: `RuntimeApi.submit()`
   returns nothing; a `GoalRequest` carries a `request_id` chosen by its
@@ -26,7 +36,7 @@ All notable changes to this project are documented here. The format follows
   a new event type `s2.link`; `run.end` carries S2's liveness when S2 ran in
   another process. Validators of schema 1 refuse these traces.
 
-### Added
+#### Added
 
 - A wall-clock scheduler (`--clock wall`, `--s0-hz`): the same components,
   stepped on the real clock with the real elapsed time, soft real-time in
@@ -34,9 +44,9 @@ All notable changes to this project are documented here. The format follows
   (median, 99th percentile, maximum) and its overruns, and writes them into
   `run.end`, labelled with where they were measured. On the wall clock S0
   runs at 200 Hz (`[wall_rates_hz]` in `world.toml`): at 1 kHz, Python
-  overran in 6 to 20 % of S0's steps in a KVM VM. Simulated time stays the
-  default (S0 at 1 kHz) and stays deterministic. Only `wallclock.py` reads the clock
-  or sleeps.
+  overran in 6 to 20 % of S0's steps in a KVM VM; at 200 Hz, at most once
+  per run. Simulated time stays the default (S0 at 1 kHz) and stays
+  deterministic. Only `wallclock.py` reads the clock or sleeps.
 - S2 in another process, maybe on another machine: `omarchy-runtime s2`
   (the scripted S2, its recovery policy and latency model) and `run ...
   --clock wall --s2 HOST:PORT` (the runtime, S1, S0, the world and the
@@ -58,7 +68,10 @@ All notable changes to this project are documented here. The format follows
   (writes the table into the README and the manual). `nix flake check`
   runs lan, degraded and outage with S2 times to first token 0.1 and 1 s;
   `nix build .#s2-placement` and the manual CI job (`placement`) run every
-  profile with 0.1, 1 and 5 s.
+  profile with 0.1, 1 and 5 s. The README and the manual hold the latest
+  table, written by `placement-docs`.
+- CI: workflow_dispatch inputs `placement` (the full matrix, alone on its
+  runner, results kept as an artifact) and `check` (on by default).
 - `run --ttft S [--ttft-spread X]`: S2's time to first token in one
   process, instead of the scenario's latency.
 - `lognormal`: a latency model whose time to first token is sampled for
@@ -67,7 +80,6 @@ All notable changes to this project are documented here. The format follows
 - `from_json()` for every message of the API (`message_from_json`), for
   `Update` and for `BodySpec`, with a round-trip test.
 
-## [0.0.2] - 2026-10-04
 
 ### Part 1 (2026-10-04)
 
