@@ -1,16 +1,22 @@
-"""S2 in R1: scripted slow reasoning, a client of the runtime's public API only.
+"""The scripted S2: slow reasoning, a client of the runtime's public API only.
 
 It works through a list of goals, one task each. Every decision it takes
 (request a goal, install a fallback, retry or give up) is sent only after its
-latency model's delay, in simulated time. It may pre-install a fallback for
-each execution: the body's safe pose with the gripper closed. After a
-failure it asks its recovery policy what to do.
+latency model's delay, on the clock its scheduler injects. It may pre-install
+a fallback for each execution: the body's safe pose with the gripper closed.
+After a failure it asks its recovery policy what to do.
+
+It uses the API asynchronously, in the same way in the runtime's process and
+in another one: it names each request, and learns the execution from the
+Updates that carry that name. Times it sends (a fallback's window) are on the
+runtime's clock, taken from those Updates, never on its own.
 """
 
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -59,7 +65,8 @@ class ScriptedS2:
         self.task_prefix = task_prefix
         self.goals = deque(goals)
         self.tasks = 0
-        self.waiting: str | None = None  # the execution S2 is waiting for
+        self.requests = 0
+        self.waiting: str | None = None  # the request S2 is waiting for
         self.decided: list[tuple[Ns, Message]] = []  # decisions not sent yet, with the time they are ready
         self.goal: Goal | None = None
         self.task: str | None = None
@@ -77,28 +84,32 @@ class ScriptedS2:
         ready = [m for t, m in self.decided if t <= now]
         self.decided = [(t, m) for t, m in self.decided if t > now]
         for message in ready:
-            execution = self.api.submit(message)
+            self.api.submit(message)
             if isinstance(message, GoalRequest):
-                self.waiting = execution
+                self.waiting = message.request_id
         if self.waiting is None and not self.decided:
             if self.goals:
                 self.tasks += 1
                 self.goal, self.task = self.goals.popleft(), f"{self.task_prefix}-t{self.tasks:02d}"
-                self._decide(now, GoalRequest(self.goal, self.task))
+                self._decide(now, self._request(self.goal))
             else:
                 self.done = True
 
+    def _request(self, goal: Goal, retry_of: str | None = None, conditioning: Mapping[str, Any] | None = None) -> GoalRequest:
+        assert self.task is not None
+        self.requests += 1
+        return GoalRequest(goal, self.task, f"{self.task}-r{self.requests:02d}", retry_of, conditioning or {})
+
     def _see(self, update: Update, now: Ns) -> None:
-        if update.execution_id != self.waiting:
+        if update.request_id != self.waiting:
             return
         if update.state is State.RUNNING and self.fallback:
-            # The fallback is built when the decision is sent: its window starts then.
-            ready = now + self.latency.sample(self.rng)
+            # The window opens when the execution starts running, on the runtime's clock.
             b = self.body
             spec = FallbackSpec.make(
-                b.action_space, b.dims, FALLBACK_DURATION, [b.safe_pose], ready, ready + FALLBACK_WINDOW, "s2.scripted"
+                b.action_space, b.dims, FALLBACK_DURATION, [b.safe_pose], update.t, update.t + FALLBACK_WINDOW, "s2.scripted"
             )
-            self.decided.append((ready, InstallFallback(update.execution_id, spec)))
+            self._decide(now, InstallFallback(update.execution_id, spec))
         if update.summary is None:
             return
         self.waiting = None
@@ -119,5 +130,5 @@ class ScriptedS2:
             self._decide(
                 now,
                 Decision(self.task, update.execution_id, "retry", choice.reason, policy),
-                GoalRequest(choice.goal, self.task, update.execution_id, choice.conditioning),
+                self._request(choice.goal, update.execution_id, choice.conditioning),
             )

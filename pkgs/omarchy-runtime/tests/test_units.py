@@ -3,6 +3,7 @@ scheduler, kinematics and configuration."""
 
 from __future__ import annotations
 
+import json
 import math
 import unittest
 
@@ -11,17 +12,25 @@ import numpy as np
 from omarchy_runtime import config
 from omarchy_runtime.contracts import (
     ActionChunk,
+    BodySpec,
+    Cancel,
     Category,
     ChunkRejected,
     ConfigError,
+    ContractError,
+    Decision,
     FallbackSpec,
     Goal,
     GoalRequest,
+    InstallFallback,
     LifecycleError,
+    Message,
     Rejection,
     S0Mode,
     State,
     Truth,
+    Update,
+    message_from_json,
     ns,
 )
 from omarchy_runtime.runtime import Binding, Capability, Execution, resolve
@@ -210,7 +219,7 @@ class TestS0(unittest.TestCase):
 
 class TestLifecycle(unittest.TestCase):
     def execution(self) -> Execution:
-        return Execution("x1", GoalRequest(IN_RACK, "t1"), 0, {})
+        return Execution("x1", GoalRequest(IN_RACK, "t1", "r1"), 0, {})
 
     def test_legal_path(self) -> None:
         ex = self.execution()
@@ -291,6 +300,50 @@ class TestResolver(unittest.TestCase):
 
     def test_capability_shapes(self) -> None:
         self.assertEqual(self.caps, [Capability("place_in", "in", ("object", "container"), ("gripper",), self.caps[0].preconditions)])
+
+
+class TestMessages(unittest.TestCase):
+    """Every message of the API, every Update and a body spec survive JSON, as they do between processes."""
+
+    def test_round_trip(self) -> None:
+        spec = FallbackSpec.make(ARM.action_space, ARM.dims, ns(1.5), [list(ARM.safe_pose)], ns(2.0), ns(62.0), "s2.scripted")
+        messages: list[Message] = [
+            GoalRequest(IN_RACK, "t01", "t01-r01"),
+            GoalRequest(IN_RACK, "t01", "t01-r02", "run-x01", {"speed": 0.5, "note": ["a", 1]}),
+            InstallFallback("run-x01", spec),
+            Cancel("run-x02"),
+            Decision("t01", "run-x01", "retry", "verification failed", "retry_once@1"),
+        ]
+        for message in messages:
+            with self.subTest(type(message).__name__):
+                wire = json.loads(json.dumps(message.to_json()))
+                again = message_from_json(wire)
+                self.assertIs(type(again), type(message))
+                self.assertEqual(again.to_json(), message.to_json())
+        self.assertEqual(message_from_json(messages[1].to_json()), messages[1])
+        update = Update("t01-r01", "run-x01", "t01", State.SUCCEEDED, ns(8.05), {"outcome": "SUCCEEDED"})
+        self.assertEqual(Update.from_json(json.loads(json.dumps(update.to_json()))), update)
+        for body in (ARM, GANTRY):
+            self.assertEqual(BodySpec.from_json(json.loads(json.dumps(body.to_json()))), body)
+
+    def test_refuses_what_is_not_a_message(self) -> None:
+        good = GoalRequest(IN_RACK, "t01", "t01-r01").to_json()
+        bad = [
+            [],
+            {"type": "launch"},
+            good | {"request_id": 7},
+            good | {"retry_of": True},
+            {k: v for k, v in good.items() if k != "task_id"},
+            good | {"goal": {"predicate": "in"}},
+            InstallFallback("x", FallbackSpec.make(ARM.action_space, ARM.dims, 1, [[0.0] * 4], 0, 1, "s")).to_json() | {"spec": {}},
+        ]
+        for value in bad:
+            with self.subTest(value), self.assertRaises(ContractError):
+                message_from_json(value)
+        with self.assertRaises(ContractError):
+            Update.from_json(Update("r", "x", "t", State.RUNNING, 0, None).to_json() | {"state": "DANCING"})
+        with self.assertRaises(ContractError):
+            BodySpec.from_json(ARM.to_json() | {"workspace": [0.0, 1.0]})
 
 
 class TestScheduler(unittest.TestCase):

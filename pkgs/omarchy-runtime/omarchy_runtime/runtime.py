@@ -285,7 +285,8 @@ class Runtime:
         self._run_id = run_id
         self._config_hash = config_hash
         self._seed = seed
-        self._inbox: Mailbox[tuple[str | None, Message]] = Mailbox()
+        self._inbox: Mailbox[Message] = Mailbox()
+        self._requests: set[str] = set()
         self._outbox: list[Update] = []
         self._queue: deque[Execution] = deque()
         self._active: Execution | None = None
@@ -299,22 +300,22 @@ class Runtime:
 
     # Public API.
 
-    def submit(self, message: Message) -> str | None:
-        """Queue a message for the next step. A GoalRequest gets its execution id now.
-        Raises ContractError for anything but the four messages, or a message that
-        is not JSON (it could not be traced)."""
+    def submit(self, message: Message) -> None:
+        """Queue a message for the next step. A GoalRequest's execution is named
+        then, in an Update carrying its request_id. Raises ContractError for
+        anything but the API's messages, a message that is not JSON (it could
+        not be traced), or a request_id already used in this run."""
         if not isinstance(message, GoalRequest | InstallFallback | Cancel | Decision):
             raise ContractError(f"not a runtime message: {type(message).__name__}")
         try:
             dumps(message.to_json())
         except (TypeError, ValueError) as e:
             raise ContractError(f"{type(message).__name__} is not JSON-serializable: {e}") from e
-        execution_id = None
         if isinstance(message, GoalRequest):
-            self._count += 1
-            execution_id = f"{self._run_id}-x{self._count:02d}"
-        self._inbox.put((execution_id, message))
-        return execution_id
+            if message.request_id in self._requests:
+                raise ContractError(f"request_id {message.request_id} is already used in this run")
+            self._requests.add(message.request_id)
+        self._inbox.put(message)
 
     def poll(self) -> list[Update]:
         updates, self._outbox = self._outbox, []
@@ -330,8 +331,8 @@ class Runtime:
         for observation in self._observations.drain():
             self._observe(observation, now)
         self._sample(now)
-        for execution_id, message in self._inbox.drain():
-            self._handle(execution_id, message, now)
+        for message in self._inbox.drain():
+            self._handle(message, now)
         if self._active is None and self._queue:
             self._start(self._queue.popleft(), now)
         ex = self._active
@@ -376,14 +377,14 @@ class Runtime:
         if ex is not None:
             self._event(now, "s0.status", ex, status.to_json())
 
-    def _handle(self, execution_id: str | None, message: Message, now: Ns) -> None:
+    def _handle(self, message: Message, now: Ns) -> None:
         if isinstance(message, GoalRequest):
-            assert execution_id is not None
-            ex = Execution(execution_id, message, now, self.belief.snapshot())
+            self._count += 1
+            ex = Execution(f"{self._run_id}-x{self._count:02d}", message, now, self.belief.snapshot())
             self.executions[ex.id] = ex
             self._event(now, "request", ex, message.to_json())
             self._queue.append(ex)
-            self._outbox.append(Update(ex.id, message.task_id, ex.state, None))
+            self._update(ex, now, None)
         elif isinstance(message, Decision):
             self._event(now, "decision", self.executions.get(message.execution_id), message.to_json())
         elif isinstance(message, Cancel):
@@ -405,9 +406,12 @@ class Runtime:
             summary = self._summary(ex)
             self._trace.execution(summary)
             self.finished.append(summary)
-            self._outbox.append(Update(ex.id, ex.request.task_id, to, summary))
+            self._update(ex, now, summary)
         else:
-            self._outbox.append(Update(ex.id, ex.request.task_id, to, None))
+            self._update(ex, now, None)
+
+    def _update(self, ex: Execution, now: Ns, summary: Json | None) -> None:
+        self._outbox.append(Update(ex.request.request_id, ex.id, ex.request.task_id, ex.state, now, summary))
 
     def _start(self, ex: Execution, now: Ns) -> None:
         self._active = ex
@@ -575,6 +579,7 @@ class Runtime:
             verdict = ex.verdict.to_json() | {"evidence_t": ex.evidence_t, "not_before": ex.not_before, "attempts": ex.attempts}
         return {
             "execution_id": ex.id,
+            "request_id": ex.request.request_id,
             "task_id": ex.request.task_id,
             "retry_of": ex.request.retry_of,
             "goal": ex.request.goal.to_json(),

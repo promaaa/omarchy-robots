@@ -94,13 +94,15 @@ The runtime's **belief** is built only from observations, each estimate with its
 
 Retries are new executions of the same task, linked by `task_id` and `retry_of`.
 
+S2 and applications use the runtime through two calls, `submit(message)` and `poll()`, with JSON messages: `request` (a goal), `install_fallback`, `cancel` and `decision`. The API is asynchronous. A request carries a `request_id` that its sender chooses, and every update about the execution it creates carries that id back, with the execution id and the runtime's time of the change. The same calls work in the runtime's process and from another process.
+
 ## Traces
 
 Every run writes one directory:
 
 | File | Contents |
 |---|---|
-| `run.json` | Header: `trace_schema` (1), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated`), body, rates, and the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model. |
+| `run.json` | Header: `trace_schema` (2), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated`), body, rates, and the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model. |
 | `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `run.end`. |
 | `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, configuration hash and seed. |
 | `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity), kept in a preallocated buffer and written once at the end. |

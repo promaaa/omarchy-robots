@@ -7,6 +7,23 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Changed
+
+- Contract change, the runtime's API is asynchronous: `RuntimeApi.submit()`
+  returns nothing; a `GoalRequest` carries a `request_id` chosen by its
+  sender; every `Update` carries that `request_id` and the runtime's time `t`
+  of the change. The runtime names an execution when it handles the request,
+  not when it is submitted. Every client changes: the scripted S2 names its
+  requests, learns the execution from the Updates, and opens a fallback's
+  window at the Update's `t` (the runtime's clock) instead of its own time.
+- Trace schema 2: execution summaries and `request` events carry
+  `request_id`. Validators of schema 1 refuse these traces.
+
+### Added
+
+- `from_json()` for every message of the API (`message_from_json`), for
+  `Update` and for `BodySpec`, with a round-trip test.
+
 ## [0.0.2] - 2026-10-04
 
 ### Part 1 (2026-10-04)

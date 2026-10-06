@@ -151,7 +151,8 @@ class Rig:
         self.t: Ns = 0
         self.n = 0
         self.cups: dict[str, tuple[float, float]] = {"cup_1": TABLE_SPOT}
-        self.updates: list[Any] = []
+        self.updates: list[Update] = []
+        self.requests = 0
 
     def run(self, seconds: float, chunks: bool = False) -> None:
         for _ in range(round(seconds / 0.05)):
@@ -165,12 +166,18 @@ class Rig:
             self.updates += self.runtime.poll()
 
     def request(self, goal: Goal = IN_RACK) -> str:
-        execution = self.runtime.submit(GoalRequest(goal, "task"))
-        assert execution is not None
-        return execution
+        """Submit a request; returns its request_id."""
+        self.requests += 1
+        request_id = f"r{self.requests}"
+        self.runtime.submit(GoalRequest(goal, "task", request_id))
+        return request_id
 
-    def summary(self, execution: str) -> Json:
-        return next(s for s in self.runtime.finished if s["execution_id"] == execution)
+    def execution(self, request_id: str) -> str:
+        """The execution of a request, from the Updates seen so far."""
+        return next(u.execution_id for u in self.updates if u.request_id == request_id)
+
+    def summary(self, request_id: str) -> Json:
+        return next(s for s in self.runtime.finished if s["request_id"] == request_id)
 
     def close(self) -> None:
         if not self.closed:
@@ -225,13 +232,13 @@ class TestFailures(unittest.TestCase):
         rig = Rig()
         first, second = rig.request(), rig.request()
         rig.run(0.2, chunks=True)
-        self.assertIs(rig.runtime.executions[first].state, State.RUNNING)
-        self.assertIs(rig.runtime.executions[second].state, State.PENDING)
-        rig.runtime.submit(Cancel(first))
+        self.assertIs(rig.runtime.executions[rig.execution(first)].state, State.RUNNING)
+        self.assertIs(rig.runtime.executions[rig.execution(second)].state, State.PENDING)
+        rig.runtime.submit(Cancel(rig.execution(first)))
         rig.run(0.1, chunks=True)
         self.assertEqual(rig.summary(first)["category"], "CANCELLED")
-        self.assertIs(rig.runtime.executions[second].state, State.RUNNING)
-        rig.runtime.submit(Cancel(second))
+        self.assertIs(rig.runtime.executions[rig.execution(second)].state, State.RUNNING)
+        rig.runtime.submit(Cancel(rig.execution(second)))
         rig.run(0.1, chunks=True)
         self.assertEqual(rig.host.detached, 2)
         self.assertTrue(rig.runtime.idle())
@@ -294,9 +301,11 @@ class TestFallbacksAndApi(unittest.TestCase):
 
     def test_installed_for_a_running_execution_and_cleared_when_it_stops(self) -> None:
         rig = Rig()
-        x = rig.request()
-        rig.runtime.submit(InstallFallback(x, self.spec()))  # still PENDING when handled: rejected
+        rig.request()
+        rig.runtime.submit(InstallFallback("rig-x01", self.spec()))  # still PENDING when handled: rejected
         rig.run(0.2, chunks=True)
+        x = rig.execution("r1")
+        self.assertEqual(x, "rig-x01")
         rig.runtime.submit(InstallFallback(x, self.spec()))
         rig.runtime.submit(InstallFallback(x, self.spec(until=0.0)))  # expired: S0 refuses it
         rig.run(0.1, chunks=True)
@@ -312,9 +321,9 @@ class TestFallbacksAndApi(unittest.TestCase):
 
     def test_a_fallback_for_another_body_is_refused(self) -> None:
         rig = Rig()
-        x = rig.request()
+        r = rig.request()
         rig.run(0.2, chunks=True)
-        rig.runtime.submit(InstallFallback(x, self.spec(config.body(config.effective("nominal_a")))))
+        rig.runtime.submit(InstallFallback(rig.execution(r), self.spec(config.body(config.effective("nominal_a")))))
         rig.run(0.1, chunks=True)
         self.assertEqual(rig.s0.installed, [])
 
@@ -324,21 +333,31 @@ class TestFallbacksAndApi(unittest.TestCase):
 
     def test_messages_must_be_json(self) -> None:
         with self.assertRaises(ContractError):
-            Rig().runtime.submit(GoalRequest(IN_RACK, "task", conditioning={"speed": object()}))
+            Rig().runtime.submit(GoalRequest(IN_RACK, "task", "r1", conditioning={"speed": object()}))
         with self.assertRaises(ContractError):
-            Rig().runtime.submit(GoalRequest(IN_RACK, "task", conditioning={"speed": float("nan")}))
+            Rig().runtime.submit(GoalRequest(IN_RACK, "task", "r1", conditioning={"speed": float("nan")}))
+
+    def test_a_request_id_is_used_once(self) -> None:
+        rig = Rig()
+        rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))
+        with self.assertRaises(ContractError):
+            rig.runtime.submit(GoalRequest(IN_RACK, "task", "r1"))
 
     def test_updates_decisions_and_trace(self) -> None:
         rig = Rig()
-        x = rig.request()
+        r = rig.request()
         rig.run(0.2, chunks=True)
         rig.policy.result = Report(Claim.DONE, "done")
         rig.cups = {"cup_1": RACK_SPOT}
         rig.run(1.0, chunks=True)
+        x = rig.execution(r)
         rig.runtime.submit(Decision("task", x, "give_up", "nothing to do", "test@1"))
         rig.run(0.1)
-        states = [u.state for u in rig.updates if u.execution_id == x]
-        self.assertEqual(states, [State.PENDING, State.RUNNING, State.VERIFYING, State.SUCCEEDED])
+        mine = [u for u in rig.updates if u.request_id == r]
+        self.assertEqual([u.state for u in mine], [State.PENDING, State.RUNNING, State.VERIFYING, State.SUCCEEDED])
+        self.assertEqual({u.execution_id for u in mine}, {x})
+        self.assertEqual([u.t for u in mine], sorted(u.t for u in mine))
+        self.assertEqual(mine[0].t, STEP)  # handled at the first step after submission
         self.assertIsNotNone(rig.updates[-1].summary)
         json.dumps([u.to_json() for u in rig.updates])
         kinds = [e["type"] for e in rig.events()]
@@ -394,9 +413,8 @@ class TestScriptedS2(unittest.TestCase):
         class Api:
             sent: list[Any] = []
 
-            def submit(self, message: Any) -> str | None:
+            def submit(self, message: Any) -> None:
                 self.sent.append(message)
-                return "x1" if isinstance(message, GoalRequest) else None
 
             def poll(self) -> list[Update]:
                 return []
@@ -412,7 +430,8 @@ class TestScriptedS2(unittest.TestCase):
         s2.step(0)
         s2.step(STEP)
         failed = {"outcome": "FAILED", "category": "S1_STALL", "belief_final": {}}
-        s2._see(Update("x1", "t-t01", State.FAILED, failed), 2 * STEP)
+        self.assertEqual(api.sent[0].request_id, "t-t01-r01")
+        s2._see(Update("t-t01-r01", "x1", "t-t01", State.FAILED, 2 * STEP, failed), 2 * STEP)
         s2.step(3 * STEP)
         s2.step(4 * STEP)
         decision = api.sent[-1]

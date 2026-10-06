@@ -16,6 +16,7 @@ import enum
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import NoneType
 from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
@@ -160,6 +161,22 @@ def _strings(value: Any, what: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _field(value: Any, key: str, kind: type | tuple[type, ...], what: str) -> Any:
+    """value[key], refused with a ContractError unless it is a `kind` (a bool is never an int)."""
+    if not isinstance(value, dict) or key not in value:
+        raise ContractError(f"{what}: missing {key}")
+    item = value[key]
+    if not isinstance(item, kind) or (isinstance(item, bool) and bool not in (kind if isinstance(kind, tuple) else (kind,))):
+        raise ContractError(f"{what}: {key} is {type(item).__name__}")
+    return item
+
+
+def _floats(value: Any, what: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or not all(isinstance(v, int | float) and not isinstance(v, bool) for v in value):
+        raise ContractError(f"{what} must be a list of numbers, not {value!r}")
+    return tuple(float(v) for v in value)
+
+
 @dataclass(frozen=True)
 class Goal:
     """A goal predicate over entities, such as in(cup_1, drying_rack).
@@ -278,6 +295,29 @@ class BodySpec:
             "safe_pose": list(self.safe_pose),
             "kinematics": dict(self.kinematics),
         }
+
+    @staticmethod
+    def from_json(value: Any) -> BodySpec:
+        def numbers(key: str) -> tuple[float, ...]:
+            return _floats(_field(value, key, list, "body"), f"body {key}")
+
+        workspace = numbers("workspace")
+        if len(workspace) != 4:
+            raise ContractError(f"body workspace has {len(workspace)} values, not 4")
+        return BodySpec(
+            id=_field(value, "id", str, "body"),
+            kind=_field(value, "kind", str, "body"),
+            action_space=_field(value, "action_space", str, "body"),
+            dims=_strings(_field(value, "dims", list, "body"), "body dims"),
+            lower=numbers("lower"),
+            upper=numbers("upper"),
+            max_velocity=numbers("max_velocity"),
+            workspace=(workspace[0], workspace[1], workspace[2], workspace[3]),
+            features=_strings(_field(value, "features", list, "body"), "body features"),
+            home=numbers("home"),
+            safe_pose=numbers("safe_pose"),
+            kinematics=_field(value, "kinematics", dict, "body"),
+        )
 
 
 def _actions(rows: Any, dims: Sequence[str], what: str) -> Array:
@@ -506,27 +546,43 @@ class GiveUp:
 
 # Messages into the runtime's public API (a mailbox, processed at the runtime's
 # next step) and updates out of it. All JSON-compatible: an LLM tool-calling
-# agent, or S2 on another machine, can drive the same API.
+# agent, or S2 on another machine, can drive the same API. The API is
+# asynchronous: the sender of a GoalRequest chooses its `request_id`, and every
+# Update of the execution it creates carries it back.
 
 
 @dataclass(frozen=True)
 class GoalRequest:
     """Ask for a goal. Executions of one task share `task_id`; a retry names the
-    execution it retries in `retry_of`. `conditioning` is passed to S1 as is."""
+    execution it retries in `retry_of`. `conditioning` is passed to S1 as is.
+    `request_id` is the sender's, unique within a run."""
 
     goal: Goal
     task_id: str
+    request_id: str
     retry_of: str | None = None
     conditioning: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def to_json(self) -> Json:
         return {
             "type": "request",
+            "request_id": self.request_id,
             "goal": self.goal.to_json(),
             "task_id": self.task_id,
             "retry_of": self.retry_of,
             "conditioning": dict(self.conditioning),
         }
+
+    @staticmethod
+    def from_json(value: Any) -> GoalRequest:
+        what = "request"
+        return GoalRequest(
+            Goal.from_json(_field(value, "goal", dict, what)),
+            _field(value, "task_id", str, what),
+            _field(value, "request_id", str, what),
+            _field(value, "retry_of", (str, NoneType), what),
+            _field(value, "conditioning", dict, what),
+        )
 
 
 @dataclass(frozen=True)
@@ -539,6 +595,11 @@ class InstallFallback:
     def to_json(self) -> Json:
         return {"type": "install_fallback", "execution_id": self.execution_id, "spec": self.spec.to_json()}
 
+    @staticmethod
+    def from_json(value: Any) -> InstallFallback:
+        what = "install_fallback"
+        return InstallFallback(_field(value, "execution_id", str, what), FallbackSpec.from_json(_field(value, "spec", dict, what)))
+
 
 @dataclass(frozen=True)
 class Cancel:
@@ -546,6 +607,10 @@ class Cancel:
 
     def to_json(self) -> Json:
         return {"type": "cancel", "execution_id": self.execution_id}
+
+    @staticmethod
+    def from_json(value: Any) -> Cancel:
+        return Cancel(_field(value, "execution_id", str, "cancel"))
 
 
 @dataclass(frozen=True)
@@ -568,27 +633,63 @@ class Decision:
             "policy": self.policy,
         }
 
+    @staticmethod
+    def from_json(value: Any) -> Decision:
+        return Decision(*(_field(value, k, str, "decision") for k in ("task_id", "execution_id", "action", "reason", "policy")))
+
 
 Message = GoalRequest | InstallFallback | Cancel | Decision
+MESSAGES: Mapping[str, Any] = {"request": GoalRequest, "install_fallback": InstallFallback, "cancel": Cancel, "decision": Decision}
+
+
+def message_from_json(value: Any) -> Message:
+    """Any message of the API from its JSON form; a ContractError for anything else."""
+    kind = _field(value, "type", str, "message")
+    if kind not in MESSAGES:
+        raise ContractError(f"message: unknown type {kind!r}")
+    message: Message = MESSAGES[kind].from_json(value)
+    return message
 
 
 @dataclass(frozen=True)
 class Update:
-    """An execution changed state. `summary` (the executions.jsonl record) comes with the terminal state."""
+    """An execution changed state at `t` (the runtime's clock). `request_id` is
+    the one its GoalRequest chose; `summary` (the executions.jsonl record)
+    comes with the terminal state."""
 
+    request_id: str
     execution_id: str
     task_id: str
     state: State
+    t: Ns
     summary: Json | None
 
     def to_json(self) -> Json:
         return {
             "type": "execution",
+            "request_id": self.request_id,
             "execution_id": self.execution_id,
             "task_id": self.task_id,
             "state": self.state,
+            "t": self.t,
             "summary": self.summary,
         }
+
+    @staticmethod
+    def from_json(value: Any) -> Update:
+        what = "execution update"
+        try:
+            state = State(_field(value, "state", str, what))
+        except ValueError as e:
+            raise ContractError(f"{what}: {e}") from e
+        return Update(
+            _field(value, "request_id", str, what),
+            _field(value, "execution_id", str, what),
+            _field(value, "task_id", str, what),
+            state,
+            _field(value, "t", int, what),
+            _field(value, "summary", (dict, NoneType), what),
+        )
 
 
 # Interfaces. Every implementation reports an `id` and a `version` where traces
@@ -598,8 +699,9 @@ class Update:
 class RuntimeApi(Protocol):
     """The runtime's public API, as applications and S2 see it."""
 
-    def submit(self, message: Message) -> str | None:
-        """Queue a message; a GoalRequest returns the id of the execution it creates."""
+    def submit(self, message: Message) -> None:
+        """Queue a message. The execution a GoalRequest creates is named in the
+        Updates that carry its request_id."""
 
     def poll(self) -> list[Update]:
         """Updates since the last poll, oldest first."""
