@@ -12,9 +12,9 @@ import sys
 import unittest
 from pathlib import Path
 
-from omarchy_runtime.contracts import LinkError, ns
+from omarchy_runtime.contracts import LinkError, State, Update, ns
 from omarchy_runtime.evaluate import scenario_result
-from omarchy_runtime.link import TcpTransport, address
+from omarchy_runtime.link import RemoteRuntime, TcpTransport, address
 from omarchy_runtime.scenario import run
 from omarchy_runtime.trace import validate_run
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
@@ -84,6 +84,34 @@ class TestTransport(unittest.TestCase):
         self.assertEqual(address("[::1]:7447"), ("::1", 7447))
         with self.assertRaises(LinkError):
             address("edge")
+
+
+class TestRemoteRuntime(unittest.TestCase):
+    def test_heartbeats_round_trips_and_leaving(self) -> None:
+        raw, other = socket.socketpair()
+        api = RemoteRuntime(TcpTransport(other), ns(0.1))
+        self.addCleanup(raw.close)
+        self.addCleanup(api.transport.close)
+        api.step(0)
+        api.step(ns(0.05))
+        robot = TcpTransport(raw)
+        first = frames(robot, 1)
+        self.assertEqual([(f["type"], f["seq"], f["rtt"], f["final"]) for f in first], [("heartbeat", 1, [], False)])
+        robot.send({"type": "echo", "seq": 1, "sent": 0, "t": 5})
+        robot.send(Update("r1", "x1", "t1", State.PENDING, 5, None).to_json())
+        sleep_until(monotonic_ns() + ns(0.01))
+        api.step(ns(0.1))  # handles the echo, then the next heartbeat carries its round trip
+        self.assertEqual([u.request_id for u in api.poll()], ["r1"])
+        self.assertEqual(frames(robot, 1)[0]["rtt"], [ns(0.1)])
+        api.leave(ns(0.15))
+        self.assertTrue(frames(robot, 1)[0]["final"])
+        api.step(ns(0.3))
+        sleep_until(monotonic_ns() + ns(0.01))
+        self.assertEqual(robot.receive(), [])  # nothing after the final heartbeat
+        robot.send({"type": "launch"})
+        sleep_until(monotonic_ns() + ns(0.01))
+        api.step(ns(0.4))
+        self.assertIn("unexpected frame", api.closed or "")
 
 
 class TestRemoteS2(unittest.TestCase):

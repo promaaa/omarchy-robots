@@ -255,6 +255,7 @@ class RemoteRuntime:
         self._measured: list[Ns] = []
         self._seq = 0
         self._next: Ns = 0
+        self._left = False
 
     def submit(self, message: Message) -> None:
         """Send at once. On a closed link the message is lost and `closed` says why."""
@@ -284,7 +285,7 @@ class RemoteRuntime:
                     self.errors.append(str(frame.get("reason")))
                 else:
                     raise ContractError(f"unexpected frame {kind!r} from the robot")
-            if now >= self._next:
+            if now >= self._next and not self._left:
                 self._beat(now, final=False)
                 self._next = now + self.heartbeat
         except (LinkError, ContractError) as e:
@@ -297,7 +298,8 @@ class RemoteRuntime:
         self._measured = []
 
     def leave(self, now: Ns) -> None:
-        """The final heartbeat: S2 is done and the robot may end the run."""
+        """The final heartbeat: S2 is done and the robot may end the run. No heartbeat follows."""
+        self._left = True
         if self.closed is None:
             try:
                 self._beat(now, final=True)
