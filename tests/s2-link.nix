@@ -77,7 +77,8 @@ in
 
     with subtest("S2 listens on the tunnel only"):
         edge.fail("omarchy-runtime s2 --listen 0.0.0.0:7447 --timeout 5 2>&1")
-        edge.succeed("(omarchy-runtime s2 --ttft 0.1 --timeout 300 > /tmp/s2.json 2> /tmp/s2.err; echo $? > /tmp/s2.rc) &")
+        # Detached: the subshell's own output closed too, so the driver does not wait for it.
+        edge.succeed("(omarchy-runtime s2 --ttft 0.1 --timeout 300 > /tmp/s2.json 2> /tmp/s2.err; echo $? > /tmp/s2.rc) > /dev/null 2>&1 &")
         edge.wait_until_succeeds("ss -ltn | grep -q '${s2Address}:7447'", timeout=120)
 
     with subtest("outside the tunnel, S2 is refused"):
@@ -86,7 +87,7 @@ in
         assert "the S2 link is enabled" in out, out
 
     with subtest("through the tunnel, a run succeeds and nothing crosses the LAN in the clear"):
-        robot.succeed("(tcpdump -i eth1 -n -l 'tcp port 7447' > /tmp/leak.txt 2> /tmp/leak.err &)")
+        robot.succeed("tcpdump -i eth1 -n -l 'tcp port 7447' > /tmp/leak.txt 2> /tmp/leak.err &")
         robot.wait_until_succeeds("grep -q 'listening on eth1' /tmp/leak.err", timeout=60)
         before = int(robot.succeed("wg show wg-s2 transfer | awk '{print $2 + $3}'"))
         out = robot.succeed("su - admin -c 'omarchy-runtime run nominal_a --clock wall --s2 ${s2Address}:7447' 2>&1")
