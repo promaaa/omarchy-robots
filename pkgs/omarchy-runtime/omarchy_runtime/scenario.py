@@ -1,7 +1,8 @@
 """One run of one scenario: the composition root.
 
 It builds the simulated world, S0, S1, the sensor, the runtime and S2 from
-the effective configuration, steps them on simulated time, and writes the run
+the effective configuration, steps them on simulated time (the default, and
+deterministic) or on the wall clock (soft real-time), and writes the run
 directory. The ground truth it returns is for the evaluation harness only;
 the runtime never sees it.
 """
@@ -20,12 +21,12 @@ from omarchy_runtime.contracts import SECOND, ConfigError, Goal, Json, Ns, Obser
 from omarchy_runtime.extensions import FILTERS, LATENCY, RECOVERY, VERIFIERS, describe
 from omarchy_runtime.runtime import Runtime
 from omarchy_runtime.s2 import ScriptedS2
-from omarchy_runtime.sched import Latest, Mailbox, Scheduler
+from omarchy_runtime.sched import Latest, Mailbox, Scheduler, WallScheduler
 from omarchy_runtime.sim.s0 import SimS0
 from omarchy_runtime.sim.s1 import ScriptedPickPlace, SimS1Host, Stall
 from omarchy_runtime.sim.sensor import Occlusion, Sensor
 from omarchy_runtime.sim.world import Trigger, World
-from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity
+from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity, where_measured
 from omarchy_runtime.wallclock import stamp
 
 TRIGGERS = ("start", "grasp", "release")
@@ -42,6 +43,8 @@ class RunResult:
     s0: SimS0
     completed: bool  # S2 finished its goals before the time limit
     end: Ns
+    clock: str  # "simulated" or "wall"
+    loop: Json | None  # the wall-clock scheduler's loop statistics, with their label
 
     def record(self, t0: Ns = 0, t1: Ns | None = None) -> dict[str, Any]:
         """S0's per-tick record between t0 and t1, both included."""
@@ -86,8 +89,15 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion]]:
     return slips, stalls, occlusions
 
 
-def run(name: str, run_dir: Path, *, record_s0: bool = False) -> RunResult:
+def run(name: str, run_dir: Path, *, record_s0: bool = False, clock: str = "simulated", s0_hz: int | None = None) -> RunResult:
+    """Run one scenario. `clock` is "simulated" or "wall"; `s0_hz` replaces S0's configured rate."""
+    if clock not in ("simulated", "wall"):
+        raise ConfigError(f"clock {clock!r} is not simulated or wall")
     cfg = config.effective(name)
+    if s0_hz is not None:
+        if s0_hz <= 0 or SECOND % s0_hz:
+            raise ConfigError(f"S0 rate {s0_hz} Hz: the period must be a whole number of nanoseconds")
+        cfg["world"]["rates_hz"]["s0"] = s0_hz
     digest = config.digest(cfg)
     s = cfg["scenario"]
     seed = config.get(s, "seed", int, "scenario")
@@ -121,7 +131,7 @@ def run(name: str, run_dir: Path, *, record_s0: bool = False) -> RunResult:
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
     os_build, os_note = os_identity()
-    sched = Scheduler(SECOND // rates["s0"])
+    sched = Scheduler(SECOND // rates["s0"]) if clock == "simulated" else WallScheduler()
     header = {
         "runtime": runtime_identity(),
         "os": os_build,
@@ -201,8 +211,11 @@ def run(name: str, run_dir: Path, *, record_s0: bool = False) -> RunResult:
     sched.add("harness", supervisor, harness)
     trace.event(0, "run.start", None, {"scenario": s["name"], "seed": seed, "goals": [g.to_json() for g in s2.goals]})
     completed = sched.run(lambda: s2.done and runtime.idle(), until=limit, check_every=supervisor)
-    runtime.close(sched.now, "task complete" if completed else "time limit")
-    result = RunResult(s["name"], run_dir, cfg, runtime.finished, truths, world, s0, completed, sched.now)
+    loop = None
+    if isinstance(sched, WallScheduler):
+        loop = {"label": f"soft real-time, Python, {where_measured()}", "components": sched.stats()}
+    runtime.close(sched.now, "task complete" if completed else "time limit", **({"loop": loop} if loop else {}))
+    result = RunResult(s["name"], run_dir, cfg, runtime.finished, truths, world, s0, completed, sched.now, sched.clock, loop)
     if record_s0:
         for summary in runtime.finished:
             timing = summary["timing"]

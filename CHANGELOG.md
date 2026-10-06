@@ -21,6 +21,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A wall-clock scheduler (`--clock wall`, `--s0-hz`): the same components,
+  stepped on the real clock with the real elapsed time, soft real-time in
+  Python. It records every component's loop intervals and step durations
+  (median, 99th percentile, maximum) and its overruns, and writes them into
+  `run.end`, labelled with where they were measured. Simulated time stays
+  the default and stays deterministic. Only `wallclock.py` reads the clock
+  or sleeps.
 - `from_json()` for every message of the API (`message_from_json`), for
   `Update` and for `BodySpec`, with a round-trip test.
 

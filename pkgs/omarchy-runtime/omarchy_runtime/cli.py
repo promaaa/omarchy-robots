@@ -50,7 +50,7 @@ def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
     for name in names:
         config.scenario_path(name)  # fail before running anything
     out = fresh(runs_dir(args), f"{prefix}-{stamp()}")
-    results = evaluate.evaluate(names, out, record_s0=args.record_s0)
+    results = evaluate.evaluate(names, out, record_s0=args.record_s0, clock=args.clock, s0_hz=args.s0_hz)
     if prefix == "demo":
         print(narrate(results))
         print()
@@ -124,6 +124,13 @@ def main(argv: list[str] | None = None) -> int:
     runs = argparse.ArgumentParser(add_help=False)
     runs.add_argument("--runs", help="where run directories go (default: $OMARCHY_RUNTIME_RUNS, else ./runs)")
     runs.add_argument("--record-s0", action="store_true", help="also write each execution's per-tick S0 record (s0_<id>.npz)")
+    runs.add_argument(
+        "--clock",
+        choices=["simulated", "wall"],
+        default="simulated",
+        help="simulated time (default, deterministic) or the wall clock (soft real-time, Python)",
+    )
+    runs.add_argument("--s0-hz", type=int, help="S0's rate, instead of the configured one")
     p = sub.add_parser("demo", parents=[runs], help=f"run {' and '.join(DEMO)}, and tell what happened")
     p.set_defaults(func=lambda a: cmd_eval(a, DEMO, "demo"))
     p = sub.add_parser("eval", parents=[runs], help="run scenarios (default: all) and print the results table")

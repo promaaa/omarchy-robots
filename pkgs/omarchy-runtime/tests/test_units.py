@@ -34,10 +34,11 @@ from omarchy_runtime.contracts import (
     ns,
 )
 from omarchy_runtime.runtime import Binding, Capability, Execution, resolve
-from omarchy_runtime.sched import Mailbox, Scheduler
+from omarchy_runtime.sched import Mailbox, Scheduler, WallScheduler, distribution
 from omarchy_runtime.sim.kinematics import Kinematics
 from omarchy_runtime.sim.s0 import SimS0
 from omarchy_runtime.sim.world import World
+from omarchy_runtime.wallclock import monotonic_ns, sleep_until
 from tests.helpers import ARM, ARM_CFG, GANTRY, IN_RACK, RACK_SPOT, SCENE, TABLE_SPOT, belief, observation
 
 MS = ns(0.001)
@@ -355,6 +356,36 @@ class TestScheduler(unittest.TestCase):
         self.assertEqual(seen, [("fast", 0), ("slow", 0), ("fast", MS), ("fast", 2 * MS), ("fast", 3 * MS), ("slow", 3 * MS)])
         with self.assertRaises(ConfigError):
             sched.add("odd", ns(0.0015), lambda t: None)
+
+    def test_wall_clock_steps_in_order_and_counts_overruns(self) -> None:
+        sched, seen = WallScheduler(), []
+
+        def slow(now: int) -> None:
+            seen.append(("b", now))
+            if len([n for n, _ in seen if n == "b"]) == 3:
+                sleep_until(monotonic_ns() + ns(0.006))  # blocks a for three of its periods
+
+        sched.add("a", ns(0.002), lambda now: seen.append(("a", now)))
+        sched.add("b", ns(0.010), slow)
+        self.assertFalse(sched.run(lambda: False, until=ns(0.1), check_every=ns(0.01)))
+        self.assertEqual(seen[:2], [("a", seen[0][1]), ("b", seen[1][1])])  # due together: first added first
+        times = [t for _, t in seen]
+        self.assertEqual(times, sorted(times))
+        self.assertGreater(sched.now, ns(0.1))
+        stats = sched.stats()
+        self.assertGreaterEqual(stats["a"]["overruns"], 1)
+        self.assertGreaterEqual(stats["a"]["skipped"], 2)
+        self.assertLessEqual(stats["a"]["steps"], 51 - stats["a"]["skipped"])  # missed releases are skipped, not caught up
+        self.assertEqual(stats["b"]["interval_ns"]["n"], stats["b"]["steps"] - 1)
+        self.assertGreaterEqual(stats["b"]["step_ns"]["max"], ns(0.006))
+        stop = WallScheduler()
+        stop.add("a", ns(0.002), lambda now: None)
+        self.assertTrue(stop.run(lambda: stop.now > ns(0.01), until=ns(1.0), check_every=ns(0.002)))
+        self.assertLess(stop.now, ns(0.5))
+
+    def test_distribution(self) -> None:
+        self.assertEqual(distribution([]), {"n": 0, "p50": None, "p99": None, "max": None})
+        self.assertEqual(distribution(list(range(1, 101))), {"n": 100, "p50": 50, "p99": 99, "max": 100})
 
     def test_mailbox_keeps_order(self) -> None:
         box: Mailbox[int] = Mailbox()

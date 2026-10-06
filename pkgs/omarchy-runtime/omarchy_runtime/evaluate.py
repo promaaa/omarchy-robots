@@ -6,7 +6,6 @@ wall-clock, labelled with where they were measured."""
 from __future__ import annotations
 
 import json
-import platform
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,9 +16,9 @@ import numpy as np
 from omarchy_runtime import __version__
 from omarchy_runtime.contracts import SECOND, Json, seconds
 from omarchy_runtime.scenario import RunResult, run
-from omarchy_runtime.trace import S0_MODES, TraceCheck, os_identity, validate_run
+from omarchy_runtime.trace import S0_MODES, TraceCheck, validate_run, where_measured
 
-TRACKING = S0_MODES.index("TRACKING")
+TRACKING, FALLBACK, HOLD = (S0_MODES.index(m) for m in ("TRACKING", "FALLBACK", "HOLD"))
 
 
 def agreement(verdict: str | None, truth: bool | None) -> str:
@@ -30,23 +29,17 @@ def agreement(verdict: str | None, truth: bool | None) -> str:
     return "yes" if (verdict == "SATISFIED") == truth else "NO"
 
 
-def where_measured() -> str:
-    build, _ = os_identity()
-    python = f"Python {platform.python_version()}"
-    if build is None:
-        return f"wall-clock on the development host ({platform.machine()}, {python}, no Omarchy Robots identity)"
-    board = build.get("robot", {}).get("board", "?")
-    place = "an Omarchy Robots VM" if board == "vm" else f"Omarchy Robots on board {board}"
-    return f"wall-clock in {place} ({build.get('version', '?')}, {python})"
-
-
 def _invariants(r: RunResult) -> list[str]:
     """Safety and data-plane invariants, from ground truth and S0's own record."""
     problems = []
     rec = r.record()
     tick = SECOND // r.cfg["world"]["rates_hz"]["s0"]
-    if len(rec["t"]) != r.s0.c["ticks"] or (len(rec["t"]) and np.any(np.diff(rec["t"]) != tick)):
-        problems.append("S0 skipped a tick or its record is incomplete")
+    if len(rec["t"]) != r.s0.c["ticks"]:
+        problems.append("S0's record is incomplete")
+    elif r.clock == "simulated" and np.any(np.diff(rec["t"]) != tick):
+        problems.append("S0 skipped a tick")
+    elif np.any(np.diff(rec["t"]) <= 0):
+        problems.append("S0's ticks do not go forward in time")
     if len(rec["mode"]) and (rec["mode"].min() < 0 or rec["mode"].max() > S0_MODES.index("HOLD")):
         problems.append("S0 ticked without a chunk, a fallback or HOLD")
     for t, what in r.violations()[:5]:
@@ -103,7 +96,10 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
             }
         )
     end = max((s["timing"]["ended"] for s in r.summaries), default=r.end)
-    modes = r.record(0, end)["mode"]
+    task = r.record(0, end)
+    modes = task["mode"]
+    # Time in each mode over the whole task, between executions too: tick t holds its mode until the next tick.
+    spans = np.diff(np.r_[task["t"], end]) if len(task["t"]) else np.zeros(0, dtype=np.int64)
     problems = _invariants(r) + _expected(r) + [f"trace: {e}" for e in check.errors]
     if not r.completed:
         problems.append("the time limit ended the run")
@@ -113,8 +109,12 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
         "body": r.cfg["body"]["id"],
         "run_dir": str(r.dir),
         "s2_latency_s": r.cfg["scenario"]["s2"]["latency_s"],
+        "clock": r.clock,
         "task_time_s": seconds(end),
         "idle_fraction": float(np.mean(modes != TRACKING)) if len(modes) else 0.0,
+        "task_fallback_s": seconds(int(spans[modes == FALLBACK].sum())),
+        "task_hold_s": seconds(int(spans[modes == HOLD].sum())),
+        "loop": r.loop,
         "violations": len(r.violations()),
         "starvation_events": sum(s["s0"]["starvation_events"] for s in r.summaries),
         "fallback_s": sum(row["fallback_s"] for row in rows),
@@ -126,10 +126,11 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
     }
 
 
-def evaluate(names: Sequence[str], out: Path, *, record_s0: bool = False) -> Json:
+def evaluate(names: Sequence[str], out: Path, *, record_s0: bool = False, **options: Any) -> Json:
+    """Run each scenario (options go to scenario.run) and write results.json."""
     scenarios = []
     for name in names:
-        r = run(name, out / name, record_s0=record_s0)
+        r = run(name, out / name, record_s0=record_s0, **options)
         result = scenario_result(r, validate_run(r.dir))
         (r.dir / "results.json").write_text(json.dumps(result, indent=2) + "\n")
         scenarios.append(result)
@@ -139,7 +140,7 @@ def evaluate(names: Sequence[str], out: Path, *, record_s0: bool = False) -> Jso
     walls: dict[str, list[int]] = {k: [row["wall"][k] for row in rows] for k in ("resolution_ns", "verification_ns", "trace_write_ns")}
     results = {
         "runtime": __version__,
-        "time": "durations are simulated time; nothing here is real-time",
+        "time": TIME[options.get("clock", "simulated")],
         "scenarios": scenarios,
         "verifier_vs_truth": {
             "pairs": [{"verdict": v, "truth": t, "count": n} for (v, t), n in sorted(pairs.items(), key=lambda p: (p[0][0], str(p[0][1])))],
@@ -175,6 +176,12 @@ def evaluate(names: Sequence[str], out: Path, *, record_s0: bool = False) -> Jso
     }
     (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     return results
+
+
+TIME = {
+    "simulated": "durations are simulated time; nothing here is real-time",
+    "wall": "durations are wall-clock time on the runtime's monotonic clock, soft real-time in Python; nothing here is real-time",
+}
 
 
 def _cell(value: Any) -> str:
@@ -229,7 +236,8 @@ def report(results: Json) -> str:
         "violations",
         "trace complete",
     ]
-    parts = ["Executions (simulated time; truth is the simulator's ground truth, never seen by the runtime)", table(header, rows)]
+    clock = "simulated time" if results["time"] == TIME["simulated"] else "wall-clock time, soft real-time"
+    parts = [f"Executions ({clock}; truth is the simulator's ground truth, never seen by the runtime)", table(header, rows)]
     v = results["verifier_vs_truth"]
     pairs = ", ".join(f"{p['verdict']} with truth {_cell(p['truth'])}: {p['count']}" for p in v["pairs"])
     parts.append(
@@ -249,8 +257,12 @@ def report(results: Json) -> str:
             ]
             for s in results["s2_latency"]
         ]
-        parts.append("\nS2 decision latency, two-cup task (simulated)")
+        parts.append(f"\nS2 decision latency, two-cup task ({clock})")
         parts.append(table(["S2 latency s", "outcomes", "task time s", "robot idle", "violations", "starvations"], lat))
+    for s in results["scenarios"]:
+        if s["loop"]:
+            parts.append(f"\nLoop intervals, {s['scenario']} ({s['loop']['label']})")
+            parts.append(loop_table(s["loop"]))
     o = results["overhead"]
     costs = ", ".join(f"{k} {c['mean']:.0f} us mean, {c['max']:.0f} us max" for k, c in o["per_execution_us"].items())
     parts.append(f"\nRuntime overhead per execution ({o['measured']}): {costs}.")
@@ -259,3 +271,23 @@ def report(results: Json) -> str:
         parts.append(f"FAILED {s['scenario']}: " + "; ".join(s["problems"]))
     parts.append(f"\n{len(results['scenarios']) - len(failed)} of {len(results['scenarios'])} scenarios as expected.")
     return "\n".join(parts)
+
+
+def _ms(value: int | None) -> str:
+    return "-" if value is None else f"{value / 1e6:.2f}"
+
+
+def loop_table(loop: Json) -> str:
+    rows = [
+        [
+            name,
+            _ms(c["period_ns"]),
+            c["steps"],
+            *(_ms(c["interval_ns"][k]) for k in ("p50", "p99", "max")),
+            c["overruns"],
+            *(_ms(c["step_ns"][k]) for k in ("p99", "max")),
+        ]
+        for name, c in loop["components"].items()
+    ]
+    header = ["component", "period ms", "steps", "interval p50 ms", "p99 ms", "max ms", "overruns", "step p99 ms", "step max ms"]
+    return table(header, rows)

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
@@ -83,6 +84,27 @@ def os_identity(path: Path = BUILD_JSON) -> tuple[Json | None, str]:
     return build, f"read from {path}"
 
 
+def virtualization() -> str:
+    """What systemd-detect-virt says ("kvm", "qemu" for emulation without KVM,
+    "none", ...), or "unknown" where it is not installed."""
+    try:
+        out = subprocess.run(["systemd-detect-virt"], capture_output=True, text=True, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return out.stdout.strip() or "unknown"
+
+
+def where_measured() -> str:
+    """Where a wall-clock number was measured, for its label."""
+    build, _ = os_identity()
+    machine = f"Python {platform.python_version()}, {os.cpu_count()} CPUs, virtualization {virtualization()}"
+    if build is None:
+        return f"wall-clock on a host without Omarchy Robots identity ({platform.machine()}, {machine})"
+    board = build.get("robot", {}).get("board", "?")
+    place = "an Omarchy Robots VM" if board == "vm" else f"Omarchy Robots on board {board}"
+    return f"wall-clock in {place} ({build.get('version', '?')}, {machine})"
+
+
 def runtime_identity() -> Json:
     """Version and source revision. Nix builds set OMARCHY_RUNTIME_REVISION
     ("<rev>" or "<rev>-dirty"); a source checkout asks git; otherwise null."""
@@ -136,8 +158,8 @@ class TraceWriter:
         self._executions.write(dumps(summary) + "\n")
         self._executions.flush()
 
-    def close(self, t: Ns, reason: str) -> None:
-        self.event(t, "run.end", None, {"reason": reason})
+    def close(self, t: Ns, payload: Json) -> None:
+        self.event(t, "run.end", None, payload)
         self._events.close()
         self._executions.close()
 
@@ -165,6 +187,7 @@ def _fields(record: Any, spec: dict[str, Any], where: str, errors: list[str]) ->
     return ok
 
 
+CLOCKS = ("simulated", "wall")
 NULL = type(None)
 HEADER = {
     "trace_schema": int,
@@ -290,8 +313,11 @@ def validate_run(run_dir: Path) -> TraceCheck:
     except (OSError, ValueError) as e:
         errors.append(f"run.json: {e}")
         return check
-    if _fields(header, HEADER, "run.json", errors) and header["trace_schema"] != TRACE_SCHEMA:
-        errors.append(f"run.json: trace_schema {header['trace_schema']}, this validator reads {TRACE_SCHEMA}")
+    if _fields(header, HEADER, "run.json", errors):
+        if header["trace_schema"] != TRACE_SCHEMA:
+            errors.append(f"run.json: trace_schema {header['trace_schema']}, this validator reads {TRACE_SCHEMA}")
+        if header["clock"] not in CLOCKS:
+            errors.append(f"run.json: clock {header['clock']!r} is not one of {', '.join(CLOCKS)}")
 
     seen: set[str] = set()
     ended = False
@@ -323,6 +349,10 @@ def validate_run(run_dir: Path) -> TraceCheck:
             seen.add(event["execution"])
         per_second[event["t"] // SECOND] += 1
         ended = event["type"] == "run.end"
+        if ended and isinstance(header, dict) and header.get("clock") == "wall":
+            loop = event["payload"].get("loop")
+            if not isinstance(loop, dict) or not isinstance(loop.get("label"), str) or not isinstance(loop.get("components"), dict):
+                errors.append(f"events.jsonl line {n + 1}: a wall-clock run ends without its loop statistics")
     check.events = len(lines)
     try:
         first = json.loads(lines[0]) if lines else {}

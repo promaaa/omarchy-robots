@@ -341,8 +341,9 @@ class Runtime:
         if ex is not None and ex.state is State.VERIFYING:
             self._verify(ex, now)
 
-    def close(self, now: Ns, reason: str) -> None:
-        self._trace.close(now, reason)
+    def close(self, now: Ns, reason: str, **extra: Json) -> None:
+        """End the trace: run.end with the reason and any `extra` (such as the loop statistics)."""
+        self._trace.close(now, {"reason": reason} | extra)
 
     def _event(self, now: Ns, kind: str, ex: Execution | None, payload: Json) -> None:
         self._trace.event(now, kind, ex.id if ex else None, payload)
