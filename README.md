@@ -193,28 +193,28 @@ keep the safety invariants and stay within the stated tolerance of the
 same task in one process on simulated time.
 
 <!-- s2-placement:begin -->
-S2 placement, two-cup task (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (9a39cd6d1762), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Task and HOLD times are wall-clock; simulated is the same task with S2 in one process on simulated time. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37403591975 (https://github.com/promaaa/omarchy-robots/actions/runs/37403591975), the full matrix alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
+S2 placement, two-cup task (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (a982155d9671), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Task and HOLD times are wall-clock; simulated is the same task with S2 in one process on simulated time. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37408153186 (https://github.com/promaaa/omarchy-robots/actions/runs/37408153186), the full matrix alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
 
 | profile | TTFT s | outcomes | violations | S0 starvations | fallback s | HOLD s | task s | simulated s | S2 RTT p50/p99/max ms | outages | S0 interval p99/max ms | S0 overruns |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 1.0/2.0/2.2 | none | 5.39/10.13 | 1 of 3734 |
-| local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 2.0/2.1/3.4 | none | 5.28/6.48 | 0 of 4138 |
-| local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 2.0/2.1/3.1 | none | 5.30/6.73 | 0 of 5714 |
-| lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 18.70 | 18.45 | 3.0/5.0/6.3 | none | 5.30/7.38 | 0 of 3760 |
-| lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 3.1/4.4/6.0 | none | 5.42/8.39 | 0 of 4136 |
-| lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.04 | 28.40 | 28.30 | 3.0/4.3/4.9 | none | 5.36/6.85 | 0 of 5697 |
-| wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.39 | 18.70 | 18.45 | 22.0/33.5/144.0 | none | 5.30/6.42 | 0 of 3823 |
-| wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.99 | 20.35 | 20.35 | 23.0/46.0/146.0 | none | 5.40/6.89 | 0 of 4083 |
-| wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 22.0/67.6/154.0 | none | 5.32/6.41 | 0 of 5733 |
-| wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 102.3/119.3/121.3 | none | 5.33/6.77 | 0 of 3760 |
-| wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.24 | 20.60 | 20.35 | 102.2/119.1/122.0 | none | 5.44/9.75 | 1 of 4159 |
-| wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.34 | 28.70 | 28.30 | 102.9/119.2/120.1 | none | 5.41/8.34 | 0 of 5774 |
-| degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.74 | 19.15 | 18.45 | 664.0/2087.1/2281.0 | short 1.1 s, short 1.2 s, short 0.7 s, short 0.7 s, short 0.7 s | 5.42/6.64 | 0 of 3955 |
-| degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.69 | 21.05 | 20.35 | 547.5/1235.8/1412.0 | short 0.7 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.9 s | 5.42/8.59 | 0 of 4508 |
-| degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.69 | 29.05 | 28.30 | 641.1/1310.6/1406.0 | short 0.6 s, short 0.6 s, short 0.8 s, short 0.8 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.5 s, short 0.6 s | 5.30/7.97 | 0 of 5923 |
-| outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.39 | 19.75 | 18.45 | 3.0/6180.2/6377.1 | long 6.5 s | 5.36/13.77 | 1 of 3972 |
-| outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 4.64 | 22.00 | 20.35 | 4.0/6382.0/6597.9 | long 6.4 s | 5.43/7.26 | 0 of 4418 |
-| outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.25 | 28.65 | 28.30 | 3.0/6180.6/6464.2 | long 6.5 s | 5.29/9.77 | 1 of 5760 |
+| local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.65 | 18.45 | 1.0/2.3/3.1 | none | 5.92/11.94 | 1 of 3755 |
+| local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.24 | 20.60 | 20.35 | 1.1/2.2/3.8 | none | 5.55/7.52 | 0 of 4134 |
+| local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 1.0/2.1/3.0 | none | 5.52/7.31 | 0 of 5717 |
+| lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 19.05 | 18.45 | 4.0/5.9/9.0 | none | 5.67/7.99 | 0 of 3822 |
+| lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 3.5/7.1/8.7 | none | 5.71/8.37 | 0 of 4147 |
+| lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 3.9/5.4/9.0 | none | 5.56/7.63 | 0 of 5715 |
+| wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 22.0/139.0/144.1 | none | 5.42/7.29 | 0 of 3732 |
+| wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.19 | 20.60 | 20.35 | 23.1/143.0/150.6 | none | 5.62/7.46 | 0 of 4138 |
+| wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 22.0/162.3/368.0 | none | 5.43/7.10 | 0 of 5712 |
+| wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.30 | 18.60 | 18.45 | 102.0/119.0/120.0 | none | 5.48/8.53 | 0 of 3754 |
+| wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.24 | 20.60 | 20.35 | 103.0/119.9/120.7 | none | 5.64/8.88 | 0 of 4158 |
+| wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.24 | 29.15 | 28.30 | 103.3/119.1/121.0 | none | 5.52/9.22 | 0 of 5876 |
+| degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.54 | 19.90 | 18.45 | 483.5/1914.1/2116.0 | short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s, short 1.1 s | 5.62/6.68 | 0 of 4171 |
+| degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.79 | 21.15 | 20.35 | 456.4/1064.8/1278.0 | short 0.6 s, short 0.6 s, short 0.6 s, short 0.6 s | 5.77/7.73 | 0 of 4400 |
+| degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.59 | 29.00 | 28.30 | 707.1/1595.0/1771.0 | short 0.7 s, short 0.8 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.8 s, short 0.9 s, short 0.6 s, short 0.6 s, short 0.7 s | 5.68/8.17 | 0 of 5907 |
+| outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.19 | 19.55 | 18.45 | 4.0/6392.1/6584.5 | long 6.5 s | 5.47/7.67 | 0 of 3934 |
+| outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.89 | 21.50 | 20.35 | 4.0/6369.8/6579.9 | long 6.4 s | 5.61/7.92 | 0 of 4317 |
+| outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.94 | 29.30 | 28.30 | 4.0/6417.6/6705.0 | long 6.5 s | 5.61/7.53 | 0 of 5876 |
 
 Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
 <!-- s2-placement:end -->
@@ -223,17 +223,17 @@ What this table says so far (2026-10-06, emulated network, VMs, soft
 real-time; one run per cell). Safety held in every cell: no limit violation
 in ground truth, no S0 starvation, S0 never without a chunk, a fallback or
 HOLD. The task time follows S2's time to first token, not the network:
-about 18.6 s, 20.5 s and 28.5 s for 0.1 s, 1 s and 5 s, because the robot
-waits in HOLD while S2 decides. Against the same task in one process on simulated
-time, a round trip of 100 ms (wan) adds 0.15 to 0.4 s, and the degraded
-link (about 400 ms, 5 % loss) 0.7 to 0.75 s, although TCP retransmission
-there makes the supervisor record 5 to 11 short outages per run. A 5 s
-outage during an execution is recorded as one long outage of about 6.5 s
-(TCP's retransmission backoff adds the rest); the execution continues, and
-the task takes 0.35 to 1.65 s longer. S2 decides four times (two goal
-requests, two fallback installs), only the requests make the robot wait,
-and S1 never stalls, so the fallback is never used: this measures where S2
-should live for latency, not for recovery.
+about 18.6 s, 20.6 s and 28.5 s for 0.1 s, 1 s and 5 s, because the robot
+waits in HOLD while S2 decides. Against the same task in one process on
+simulated time, local, lan, wifi and wan (up to about 100 ms) take 0.15 to
+0.85 s longer, and the degraded link (about 400 ms, 5 % loss) 0.7 to
+1.45 s, although TCP retransmission there makes the supervisor record 4 to
+12 short outages per run. A 5 s outage during an execution is recorded as
+one long outage of 6.4 to 6.5 s (TCP's retransmission backoff adds the
+rest); the execution continues, and the task takes 1.0 to 1.15 s longer.
+S2 decides four times (two goal requests, two fallback installs), only the
+requests make the robot wait, and S1 never stalls, so the fallback is never
+used: this measures where S2 should live for latency, not for recovery.
 
 The manual's [Runtime chapter](https://promaaa.github.io/omarchy-robots/runtime/)
 has the concepts, the trace format and the extension points for
@@ -298,9 +298,9 @@ On the wall clock (soft real-time, Python, 2026-10-06), S0 at 1 kHz on the
 development host (no VM) overran in 40 of 18 760 steps, interval p99
 1.57 ms; in a KVM VM on a GitHub runner (2 CPUs, two VMs of 2 vCPUs, the
 full S2 placement matrix) it overran in 6 to 20 % of its steps, interval
-p99 2.9 to 7.1 ms, max 37 ms, so the wall clock runs S0 at 200 Hz: there it
-overran at most once per cell (of 3 700 to 5 900 steps), interval p99
-5.3 to 5.4 ms, max 13.8 ms. Under QEMU without KVM on the development host,
+p99 2.9 to 7.1 ms, max 37 ms, so the wall clock runs S0 at 200 Hz: in three
+full runs there it overran at most twice per cell (of 3 700 to 6 200 steps),
+interval p99 5.3 to 6.3 ms, max 13.8 ms. Under QEMU without KVM on the development host,
 S0 at 1 kHz overran in a quarter to a half of its steps, and
 `vm-s2-placement` (3 profiles x 2 TTFTs) took 6 min; in CI with KVM the
 full matrix (18 cells) builds in 10 min. Heartbeat round trips (S2's clock, the network both ways plus

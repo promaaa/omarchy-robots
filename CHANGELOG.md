@@ -44,7 +44,7 @@ is real-time.
   (median, 99th percentile, maximum) and its overruns, and writes them into
   `run.end`, labelled with where they were measured. On the wall clock S0
   runs at 200 Hz (`[wall_rates_hz]` in `world.toml`): at 1 kHz, Python
-  overran in 6 to 20 % of S0's steps in a KVM VM; at 200 Hz, at most once
+  overran in 6 to 20 % of S0's steps in a KVM VM; at 200 Hz, at most twice
   per run. Simulated time stays the default (S0 at 1 kHz) and stays
   deterministic. Only `wallclock.py` reads the clock or sleeps.
 - S2 in another process, maybe on another machine: `omarchy-runtime s2`

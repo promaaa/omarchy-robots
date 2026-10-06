@@ -42,7 +42,7 @@ s2 = 10
 
 # On the wall clock (--clock wall), these replace the rates above. Python on a
 # general-purpose OS did not keep S0 at 1 kHz in a KVM VM (overruns in 6 to 20 %
-# of its steps); at 200 Hz it overran at most once per run (README). `link`, the
+# of its steps); at 200 Hz it overran at most twice per run (README). `link`, the
 # robot's end of the link to an S2 process, is polled at 1 kHz: an echo waits at
 # most 1 ms.
 [wall_rates_hz]
