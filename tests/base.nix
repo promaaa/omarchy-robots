@@ -8,7 +8,7 @@
   version,
 }:
 let
-  keys = import "${pkgs.path}/nixos/tests/ssh-keys.nix" pkgs;
+  keys = import (pkgs.path + "/nixos/tests/ssh-keys.nix") pkgs;
   expected = builtins.toJSON {
     target = "vm";
     inherit version;

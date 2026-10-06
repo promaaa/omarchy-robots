@@ -11,7 +11,7 @@
 }:
 let
   # Lets the test driver run commands in the installer and the installed system.
-  instrumentation = "${pkgs.path}/nixos/modules/testing/test-instrumentation.nix";
+  instrumentation = pkgs.path + "/nixos/modules/testing/test-instrumentation.nix";
   target = robot board [
     { omarchy.robot.board = lib.mkForce board; }
     instrumentation
@@ -26,7 +26,7 @@ let
     (lib.nixosSystem { modules = installerModules target ++ [ instrumentation ]; })
     .config.system.build.isoImage;
   qemu =
-    (import "${pkgs.path}/nixos/lib/qemu-common.nix" {
+    (import (pkgs.path + "/nixos/lib/qemu-common.nix") {
       inherit lib;
       inherit (pkgs) stdenv;
     }).qemuBinary

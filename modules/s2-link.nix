@@ -102,6 +102,10 @@ in
     ];
     environment.systemPackages = [ pkgs.wireguard-tools ];
     networking.firewall.allowedUDPPorts = [ cfg.listenPort ];
+    # This service configures the tunnel's address. dhcpcd (a plain NixOS
+    # S2 machine) would otherwise take the new interface and replace the
+    # point-to-point address, dropping the route to the peer.
+    networking.dhcpcd.denyInterfaces = [ cfg.interface ];
     networking.firewall.interfaces.${cfg.interface}.allowedTCPPorts = lib.mkIf (cfg.role == "s2") [
       cfg.port
     ];
