@@ -383,9 +383,9 @@ def run(
     if isinstance(sched, WallScheduler):
         loop = {"label": f"soft real-time, Python, {where_measured()}", "components": sched.stats()}
     s2_link = runtime.s2_link(sched.now)
-    runtime.close(sched.now, "task complete" if completed else "time limit", **({"loop": loop} if loop else {}))
     if robot_link is not None:
-        robot_link.close(sched.now)
+        robot_link.close(sched.now)  # while the trace is open: its last events go in
+    runtime.close(sched.now, "task complete" if completed else "time limit", **({"loop": loop} if loop else {}))
     result = RunResult(
         s["name"],
         run_dir,

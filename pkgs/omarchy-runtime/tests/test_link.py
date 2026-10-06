@@ -47,6 +47,8 @@ class Proxy:
         self.target = target
         self.down_until = 0
         self.open: list[socket.socket] = []
+        self.held: list[socket.socket] = []
+        self.blackhole = False
         self.lock = threading.Lock()
         threading.Thread(target=self._accept, daemon=True).start()
 
@@ -57,7 +59,10 @@ class Proxy:
             except OSError:
                 return
             if monotonic_ns() < self.down_until:
-                robot.close()
+                if self.blackhole:
+                    self.held.append(robot)  # accepted, never answered
+                else:
+                    robot.close()
                 continue
             s2 = socket.create_connection(("127.0.0.1", self.target))
             with self.lock:
@@ -68,14 +73,21 @@ class Proxy:
     def _pump(self, a: socket.socket, b: socket.socket) -> None:
         try:
             while data := a.recv(65536):
+                if monotonic_ns() < self.down_until and self.blackhole:
+                    continue  # dropped: the connection stays open and silent
                 b.sendall(data)
         except OSError:
             pass  # the other pump, or cut(), closed the pair
         for sock in (a, b):
             sock.close()
 
-    def cut(self, seconds: float) -> None:
+    def cut(self, seconds: float, blackhole: bool = False) -> None:
+        """Down for `seconds`: refuse (close every connection) or, as a
+        blackhole, keep connections open and drop everything on them."""
+        self.blackhole = blackhole
         self.down_until = monotonic_ns() + ns(seconds)
+        if blackhole:
+            return
         with self.lock:
             for sock in self.open:
                 try:

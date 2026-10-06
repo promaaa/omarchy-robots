@@ -141,6 +141,8 @@ in
         s2_node.wait_until_succeeds(f"test -s /tmp/s2/{name}.json.rc", timeout=120)
         shape(None)
         print(robot.succeed(f"cat /tmp/robot-{name}.log /tmp/robot-{name}.log.err"))
+        if profile in OUTAGES:  # how the link went down and came back
+            print(robot.succeed(f"grep -h '\"type\":\"s2.link\"' {RUNS}/{name}/run-*/s2_placement/events.jsonl || true"))
         print(s2_node.succeed(f"cat /tmp/s2/{name}.json.err; tail -c 1500 /tmp/s2/{name}.json"))
         run_dir = robot.succeed(f"ls -d {RUNS}/{name}/run-*/s2_placement").strip()
         with subtest(f"{name}: the trace validates and carries this robot's identity"):

@@ -443,7 +443,9 @@ class RobotLink:
         if not isinstance(result, TcpTransport):
             if result is None:
                 self._dialer.abandon()
+                result = f"no connection within {self.policy.attempt / 1e9:.1f} s"
             self._dialer = None
+            self.trace.event(now, "s2.link", None, {"state": "attempt failed", "reason": result, "attempt": self._attempts})
             self._next, self._backoff = now + self._backoff, min(2 * self._backoff, self.policy.backoff_max)
             return
         self._dialer = None
