@@ -1,4 +1,4 @@
-"""Trace schema 2: what validate-trace accepts and what it refuses, and P8
+"""Trace schema 3: what validate-trace accepts and what it refuses, and P8
 (the same scenario and seed give the same trace, wall-clock fields aside)."""
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class TestValidate(unittest.TestCase):
 
     def test_header_names_extensions_and_identity(self) -> None:
         header = json.loads((scenario("nominal_a").dir / "run.json").read_text())
-        self.assertEqual(header["trace_schema"], 2)
+        self.assertEqual(header["trace_schema"], 3)
         self.assertEqual(header["extensions"]["filter"], {"id": "identity", "version": "1"})
         self.assertEqual(header["extensions"]["verifiers"]["in"], {"id": "geometric", "version": "1"})
         self.assertEqual(header["extensions"]["recovery"]["id"], "retry_once")

@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Changed
+
+- Contract change, bounded S0 steps: S0 never moves a dimension more in one
+  tick than its velocity limit times its nominal tick period, whatever the
+  real interval since the last tick. A tick later than a threshold (1.5
+  periods, `[s0] late_after_periods` in `world.toml`) is a late tick and
+  never produces a catch-up jump: S0 continues from its current state. Before,
+  a late tick on the wall clock moved up to the velocity limit times the real
+  interval in one step. `S0Counters` gains `late_ticks`, `max_interval_ns`
+  and `max_step` (the largest step as a fraction of the bound); the runtime
+  records each late tick (`s0.late`); evaluation checks the bound on every
+  tick. Every S0 implementation, a hardware one included, keeps this.
+- Trace schema 3: S0's counters gain `late_ticks`, `max_interval_ns` and
+  `max_step`; a new event type `s0.late`.
+
 ## [0.0.2] - 2026-10-06
 
 ### Part 2 (2026-10-06)

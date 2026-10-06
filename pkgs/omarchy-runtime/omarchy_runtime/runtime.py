@@ -400,8 +400,12 @@ class Runtime:
             del self._recent[next(iter(self._recent))]
 
     def _sample(self, now: Ns) -> None:
+        late = self._status.counters.late_ticks if self._status is not None else 0
         status = self._status = self._s0.status()
         ex = self._active
+        if status.counters.late_ticks > late:
+            c = status.counters
+            self._event(now, "s0.late", ex, {"late_ticks": c.late_ticks, "max_interval_ns": c.max_interval_ns, "s0_t": status.t})
         if status.mode != self._mode:
             self._event(now, "s0.mode", ex, {"from": self._mode, "to": status.mode, "s0_t": status.t})
             self._mode = status.mode

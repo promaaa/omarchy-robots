@@ -454,7 +454,11 @@ class ChunkMeta:
 @dataclass(frozen=True)
 class S0Counters:
     """Cumulative since S0 started. A starvation event is S0 leaving TRACKING
-    because its chunk expired with no successor."""
+    because its chunk expired with no successor. A late tick is a tick that
+    came longer than S0's late threshold after the one before; `max_interval_ns`
+    is the longest real interval between two ticks, and `max_step` the largest
+    step S0 commanded, as a fraction of its bound (velocity limit times the
+    nominal tick period, per dimension): never above 1."""
 
     ticks: int = 0
     starvation_events: int = 0
@@ -463,9 +467,12 @@ class S0Counters:
     fallback_ns: Ns = 0
     hold_ns: Ns = 0
     max_tracking_error: float = 0.0
+    late_ticks: int = 0
+    max_interval_ns: Ns = 0
+    max_step: float = 0.0
 
     def since(self, start: S0Counters) -> S0Counters:
-        """Counts accumulated after `start` (max_tracking_error is the running maximum)."""
+        """Counts accumulated after `start` (the maxima are running maxima)."""
         return S0Counters(
             self.ticks - start.ticks,
             self.starvation_events - start.starvation_events,
@@ -474,6 +481,9 @@ class S0Counters:
             self.fallback_ns - start.fallback_ns,
             self.hold_ns - start.hold_ns,
             self.max_tracking_error,
+            self.late_ticks - start.late_ticks,
+            self.max_interval_ns,
+            self.max_step,
         )
 
     def to_json(self) -> Json:
@@ -485,6 +495,9 @@ class S0Counters:
             "fallback_ns": self.fallback_ns,
             "hold_ns": self.hold_ns,
             "max_tracking_error": self.max_tracking_error,
+            "late_ticks": self.late_ticks,
+            "max_interval_ns": self.max_interval_ns,
+            "max_step": self.max_step,
         }
 
 
@@ -791,6 +804,15 @@ class S0(Protocol):
     At every tick S0 executes a valid chunk, else a valid installed fallback,
     else its built-in HOLD; it never waits for a slower layer, and it enforces
     the body's position, velocity and workspace limits itself.
+
+    Bounded steps, a safety contract for every implementation, hardware
+    included: S0 never moves a dimension more in one tick than its velocity
+    limit times S0's nominal tick period, whatever the real interval since the
+    last tick. A late tick (later than a threshold) never produces a catch-up
+    jump: S0 continues from its current state at no more than that bound, and
+    its target, if the plan moved on meanwhile, is reached later. S0 counts
+    late ticks and reports the longest interval and the largest step
+    (S0Counters).
     """
 
     def submit_chunk(self, chunk: ActionChunk, now: Ns) -> None:

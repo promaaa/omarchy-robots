@@ -157,6 +157,22 @@ class TestS0(unittest.TestCase):
         self.assertGreater(self.s0.status().counters.limit_clamps, 0)
         self.assertEqual(self.world.violations, [])
 
+    def test_a_late_tick_never_catches_up(self) -> None:
+        # A 300 ms stall: S0 moves at most velocity limit x nominal period (1 ms), not 300 ms worth.
+        x, z, g = self.home
+        self.s0.submit_chunk(chunk(1, 0.0, [[x + 0.3, z, g]], 2.0), 0)
+        self.run_until(0.01)
+        before = float(self.s0.pos[0])
+        self.s0.tick(ns(0.31))
+        self.assertAlmostEqual(float(self.s0.pos[0]) - before, 0.5 * 0.001, places=12)  # 0.5 m/s on x, one nominal tick
+        c = self.s0.status().counters
+        self.assertEqual((c.late_ticks, c.max_interval_ns), (1, ns(0.3)))
+        self.assertLessEqual(c.max_step, 1.0 + 1e-9)
+        self.assertGreater(c.max_step, 0.99)
+        self.s0.tick(ns(0.311))
+        self.assertEqual(self.s0.status().counters.late_ticks, 1)  # back on time
+        self.assertEqual(self.world.violations, [])
+
     def test_arm_stays_in_its_workspace(self) -> None:
         world = World(SCENE, {}, ARM)
         s0 = SimS0(ARM, world, capacity=10_000)

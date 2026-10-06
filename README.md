@@ -129,7 +129,9 @@ S2 installs a fallback ahead of time through the runtime. S0 uses it when
 chunks stop.
 
 S0 never waits: at every tick (1 kHz, simulated) it runs a valid chunk, else
-the fallback S2 installed, else HOLD, and it enforces the body's limits.
+the fallback S2 installed, else HOLD, and it enforces the body's limits. Its
+steps are bounded: never more than the velocity limit times its nominal tick
+period, so a late tick never catches up with a jump.
 
 ```sh
 nix run .#omarchy-runtime -- demo    # nominal_a, then slip_retry, told step by step

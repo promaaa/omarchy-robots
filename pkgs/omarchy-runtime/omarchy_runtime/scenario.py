@@ -181,7 +181,9 @@ def run(
     run_id = f"{int(np.random.default_rng([seed, 1]).integers(1 << 32)):08x}"
 
     world = World(scene, {k: v["x"] for k, v in cfg["world"]["objects"].items()}, body, slips)
-    s0 = SimS0(body, world, capacity=limit * rates["s0"] // SECOND + 1)
+    period = SECOND // rates["s0"]
+    late = config.get(cfg["world"]["s0"], "late_after_periods", float, "world.toml s0")
+    s0 = SimS0(body, world, capacity=limit * rates["s0"] // SECOND + 1, nominal=period, late_after=round(late * period))
     sensor = Sensor(
         world,
         np.random.default_rng([seed, 2]),

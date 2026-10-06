@@ -3,8 +3,10 @@
 At every tick it executes the active chunk while now <= valid_until, else an
 installed fallback inside its validity window, else HOLD (keep the position,
 gripper included). It then enforces the body's limits itself: position
-limits, then velocity limits, then the gripper's workspace. Not real-time:
-simulated time, in Python.
+limits, then velocity limits, then the gripper's workspace. A step is never
+larger than the velocity limit times the nominal tick period: after a late
+tick S0 continues from where it is, at that bound, without catching up. Not
+real-time: simulated time, or the wall clock, in Python.
 """
 
 from __future__ import annotations
@@ -32,7 +34,12 @@ CODES = {S0Mode(m): n for n, m in enumerate(S0_MODES)}
 
 
 class SimS0:
-    def __init__(self, body: BodySpec, world: World, capacity: int) -> None:
+    def __init__(self, body: BodySpec, world: World, capacity: int, nominal: Ns = 1_000_000, late_after: Ns | None = None) -> None:
+        """`nominal` is S0's tick period; a tick more than `late_after` (1.5
+        periods by default) after the one before is a late tick."""
+        self.nominal = nominal
+        self.late_after = late_after if late_after is not None else nominal * 3 // 2
+        self.bound = np.array(body.max_velocity) * seconds(nominal)  # the largest step per tick
         self.body = body
         self.world = world
         self.kin = Kinematics(body)
@@ -48,8 +55,18 @@ class SimS0:
         self.engaged: tuple[Ns, np.ndarray] | None = None  # when the fallback started, and from where
         self.t: Ns = 0
         self._last: Ns | None = None
-        self.c = {"ticks": 0, "starvation_events": 0, "limit_clamps": 0, "rejected_chunks": 0, "fallback_ns": 0, "hold_ns": 0}
+        self.c = {
+            "ticks": 0,
+            "starvation_events": 0,
+            "limit_clamps": 0,
+            "rejected_chunks": 0,
+            "fallback_ns": 0,
+            "hold_ns": 0,
+            "late_ticks": 0,
+        }
         self.max_error = 0.0
+        self.max_interval: Ns = 0
+        self.max_step = 0.0
         # The per-tick record: preallocated, written to disk once at the end of a run.
         d = len(body.dims)
         self.record_t = np.zeros(capacity, dtype=np.int64)
@@ -88,7 +105,7 @@ class SimS0:
         self.chunk, self.fallback, self.engaged = None, None, None
 
     def status(self) -> S0Status:
-        counters = S0Counters(max_tracking_error=self.max_error, **self.c)
+        counters = S0Counters(max_tracking_error=self.max_error, max_interval_ns=self.max_interval, max_step=self.max_step, **self.c)
         active = self.chunk.seq if self.mode is S0Mode.TRACKING and self.chunk is not None else None
         position = tuple(float(v) for v in self.pos)
         return S0Status(self.t, self.mode, active, position, self.meta, self.fallback is not None, counters)
@@ -121,8 +138,12 @@ class SimS0:
 
     def tick(self, now: Ns) -> None:
         dt = now - self._last if self._last is not None else 0
+        if dt > self.late_after:
+            self.c["late_ticks"] += 1
+        self.max_interval = max(self.max_interval, dt)
         mode, desired = self._desired(now)
-        step = self.vmax * seconds(dt)  # nothing moves in no time: the first tick holds
+        # Bounded: never more than the nominal period's worth, so a late tick never catches up.
+        step = self.vmax * seconds(min(dt, self.nominal))  # nothing moves in no time: the first tick holds
         command = np.clip(np.clip(desired, self.lower, self.upper), self.pos - step, self.pos + step)
         x, z = self.kin.ee([float(command[i]) for i in self.joints])
         if not self.body.reaches(x, z):
@@ -131,6 +152,8 @@ class SimS0:
             self.c["limit_clamps"] += 1
         if mode is S0Mode.TRACKING:
             self.max_error = max(self.max_error, float(np.max(np.abs(command - desired))))
+        moving = self.bound > 0
+        self.max_step = max(self.max_step, float(np.max(np.abs(command - self.pos)[moving] / self.bound[moving], initial=0.0)))
         if self.mode is S0Mode.FALLBACK:
             self.c["fallback_ns"] += dt
         elif self.mode is S0Mode.HOLD:

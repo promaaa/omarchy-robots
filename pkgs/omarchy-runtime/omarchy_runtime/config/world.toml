@@ -33,6 +33,9 @@ source = "sim.camera"
 noise_m = 0.003  # standard deviation of each coordinate
 confidence = 0.95
 
+[s0]  # the simulated S0
+late_after_periods = 1.5  # a tick later than this many nominal periods after the one before is a late tick
+
 [rates_hz]  # simulated rates
 s0 = 1000
 s1 = 20
