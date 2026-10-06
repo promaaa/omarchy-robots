@@ -7,7 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Changed
+## [0.0.2] - 2026-10-06
+
+### Part 3 (2026-10-06)
+
+Milestone R3, part A: hardening for hardware. Bounded S0 steps and late
+ticks; deterministic timing faults with regressions for the two S1 bugs of
+v0.0.2 part 2; reconnection to S2 after an outage, with idempotent requests; the S2
+link over WireGuard (`omarchy.robot.s2Link`); CI as parallel jobs. Tested in
+simulation and in VMs: not hardware-tested, and nothing is real-time.
+
+#### Changed
 
 - Contract change, bounded S0 steps: S0 never moves a dimension more in one
   tick than its velocity limit times its nominal tick period, whatever the
@@ -31,7 +41,7 @@ All notable changes to this project are documented here. The format follows
 - The simulated S1's inference latency is drawn for each chunk (`[s1]
   latency_spread`, lognormal) and chunks reach S0 in the order they arrive.
 
-### Changed (CI)
+#### Changed (CI)
 
 - CI runs `nix flake check` as parallel jobs: a first job lists every check
   of the flake, and a matrix builds one VM test per job, every board's
@@ -39,7 +49,7 @@ All notable changes to this project are documented here. The format follows
   images) in one, and the rest in one. No check is removed; a new check is
   always included. `check=false` still dispatches only the chosen jobs.
 
-### Added
+#### Added
 
 - `omarchy.robot.s2Link`: the link to S2 over a WireGuard tunnel declared in
   `robot.nix` (`enable`, `address`, `listenPort`, `privateKeyFile`, `port`,
@@ -72,7 +82,6 @@ All notable changes to this project are documented here. The format follows
   (`tests/test_timing.py`); `timing_s0_stall` and `timing_jitter` exercise
   late ticks and noisy timing.
 
-## [0.0.2] - 2026-10-06
 
 ### Part 2 (2026-10-06)
 
