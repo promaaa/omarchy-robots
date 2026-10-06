@@ -115,6 +115,8 @@ class TcpTransport:
         if sock.family in (socket.AF_INET, socket.AF_INET6):
             _tune(sock)
         self._sock = sock
+        self.family = sock.family
+        self.peer: Any = sock.getpeername()  # the address this connection reached
         self._in = bytearray()
         self._out = bytearray()
         self._frames: deque[Json] = deque()
@@ -370,8 +372,9 @@ class RobotLink:
         self.policy = reconnect
         self.bind = bind
         self.robot_hello = robot_hello
-        info = socket.getaddrinfo(where[0], where[1], type=socket.SOCK_STREAM)[0]
-        self.family, self.sockaddr = info[0], info[4]
+        # Connect again to the address the first connection reached: a name may
+        # resolve first to an address S2 does not listen on (IPv6 before IPv4).
+        self.family, self.sockaddr = transport.family, transport.peer
         self.where = f"{where[0]}:{where[1]}"
         self.out = Outbox()
         self.inbox = Inbox()

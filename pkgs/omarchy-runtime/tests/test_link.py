@@ -16,12 +16,13 @@ from pathlib import Path
 from omarchy_runtime import placement
 from omarchy_runtime.contracts import ConfigError, ContractError, GoalRequest, LinkError, State, Update, ns
 from omarchy_runtime.evaluate import scenario_result
-from omarchy_runtime.link import Inbox, Listener, Outbox, RemoteRuntime, TcpTransport, address, through_tunnel
+from omarchy_runtime.link import Inbox, Listener, Outbox, Reconnect, RemoteRuntime, RobotLink, TcpTransport, address, through_tunnel
 from omarchy_runtime.link import tunnel as link_tunnel
 from omarchy_runtime.scenario import run
-from omarchy_runtime.trace import validate_run
+from omarchy_runtime.trace import TraceWriter, validate_run
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
 from tests.helpers import IN_RACK, scenario, tmpdir
+from tests.test_runtime import Rig
 
 HERE = Path(__file__).parent.parent
 
@@ -189,6 +190,21 @@ class TestNumbering(unittest.TestCase):
             inbox.accept({"n": 5})  # 4 is missing
         with self.assertRaises(ContractError):
             inbox.accept({"type": "request"})
+
+
+class TestRobotLink(unittest.TestCase):
+    def test_connects_again_to_the_address_the_first_connection_reached(self) -> None:
+        # Found by vm-s2-placement: "edge" resolved to IPv6 first, S2 listened on IPv4
+        # only, and every reconnection to the first resolved address was refused.
+        listener = Listener("127.0.0.1", 0)
+        self.addCleanup(listener.close)
+        port = listener._server.getsockname()[1]
+        first = TcpTransport(socket.create_connection(("127.0.0.1", port)))
+        self.addCleanup(first.close)
+        trace = TraceWriter(tmpdir() / "run", {})
+        self.addCleanup(trace.close, 0, {"reason": "test"})
+        robot = RobotLink(first, ("::1", port), {}, Rig().runtime, trace, Reconnect(ns(3), ns(0.25), ns(2), ns(1)))
+        self.assertEqual((robot.family, robot.sockaddr), (socket.AF_INET, ("127.0.0.1", port)))
 
 
 class TestRemoteRuntime(unittest.TestCase):
