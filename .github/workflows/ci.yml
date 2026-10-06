@@ -9,6 +9,10 @@ on:
         description: Also build the orin-agx-devkit system on an arm64 runner (hours)
         type: boolean
         default: false
+      placement:
+        description: Also run the S2 placement experiment, full matrix (two VMs, KVM, about 20 min)
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -39,6 +43,35 @@ jobs:
           for image in $(nix eval --json .#packages.aarch64-linux --apply builtins.attrNames | jq -r '.[]'); do
             echo "$image: $(nix eval --raw ".#packages.aarch64-linux.$image.drvPath")"
           done
+
+  # The S2 placement experiment, every network profile and S2 time to first
+  # token, alone on its runner so that no other VM test shares its CPUs. Its
+  # results (results.json, table.txt, table.md, traces) are an artifact; the
+  # README and manual tables are regenerated from it with
+  # `omarchy-runtime placement-docs`.
+  s2-placement:
+    name: S2 placement experiment, full matrix (x86_64, KVM)
+    if: github.event_name == 'workflow_dispatch' && inputs.placement
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Machine
+        run: |
+          echo "CPUs: $(nproc)"; free -h; ls -l /dev/kvm || true
+      - uses: cachix/install-nix-action@v31
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-placement-${{ hashFiles('flake.lock', '**/*.nix', 'pkgs/**') }}
+          restore-prefixes-first-match: nix-check-
+          save: false
+      - run: nix build -L .#s2-placement -o s2-placement
+      - run: cat s2-placement/placement/table.txt
+      - run: cp -rL s2-placement s2-placement-results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s2-placement-${{ github.sha }}
+          path: s2-placement-results
 
   jetson:
     name: build orin-agx-devkit (aarch64)
