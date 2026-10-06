@@ -8,6 +8,7 @@ be wrong, as a learned one's can.
 
 from __future__ import annotations
 
+import dataclasses
 import heapq
 import logging
 import math
@@ -15,12 +16,17 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from omarchy_runtime.belief import free_spots, takes_spot
 from omarchy_runtime.contracts import (
     ActionChunk,
     BodySpec,
+    ChunkCorrector,
     ChunkRejected,
     Claim,
+    ContractError,
     Goal,
+    InferenceContext,
+    InferenceTrigger,
     Json,
     Ns,
     Observation,
@@ -28,6 +34,7 @@ from omarchy_runtime.contracts import (
     S1Policy,
     ns,
 )
+from omarchy_runtime.extensions import NoCorrection, Periodic
 from omarchy_runtime.sched import Latest
 from omarchy_runtime.sim.kinematics import Kinematics
 from omarchy_runtime.sim.s0 import SimS0
@@ -38,8 +45,11 @@ GRIP_RATE = 2.0  # gripper travel per second
 HORIZON = 10  # rows per chunk
 DT = ns(0.05)  # between rows
 REACHED = (0.003, 0.02)  # distance (m) and gripper tolerance at the last waypoint
+HISTORY = ns(0.5)  # how much of S0's history a trigger sees
 REPLAN = 0.03  # m (or gripper travel) off the plan: plan again from where the body is. Above
 # SPEED x inference latency, the lag at the start of every plan.
+MOVED = 0.015  # m: the target is seen this far from where the plan grasps it: plan the grasp again
+HELD = 0.03  # m: an object this close to a closed gripper is held already
 OPEN, CLOSED = 1.0, 0.0
 
 log = logging.getLogger(__name__)
@@ -54,6 +64,14 @@ class ScriptedPickPlace:
     chunks agree; when proprioception shows the body off the plan at the time
     it was observed (after a stall or a fallback), it plans the remaining
     waypoints again from there.
+
+    It watches its target, simply and explicitly, in every observation it
+    receives: before the grasp, the target seen more than MOVED from where
+    the plan grasps it means the scene changed, and S1 plans the grasp again
+    there, without S2. Before it places, another object seen in its place
+    spot is a precondition it cannot meet: it reports GAVE_UP ("blocked")
+    for S2 to choose another spot. S2 names a spot with conditioning
+    {"place_x": x}; a body already holding the object goes straight to it.
     """
 
     def __init__(self, implementation: str) -> None:
@@ -62,6 +80,8 @@ class ScriptedPickPlace:
         self._waypoints: list[Point] = []
         self._plan: list[tuple[Ns, Ns, Point, Point, int]] = []  # start, end, from, to, waypoint index
         self._seq = 0
+        self._picking = True  # the waypoints start with the pick
+        self.replans: list[tuple[Ns, str]] = []  # when S1 changed its plan for the scene, and why
 
     def start(self, goal: Goal, belief: Json, body: BodySpec, conditioning: Mapping[str, Any]) -> None:
         obj, container = goal.args
@@ -69,32 +89,49 @@ class ScriptedPickPlace:
         estimate = entities[obj]["estimate"]
         if estimate is None:
             raise ValueError(f"no estimate of {obj} in the belief")
+        self._obj, self._width = obj, entities[obj]["geometry"]["width"]
         height = entities[obj]["geometry"]["height"]
-        width = entities[obj]["geometry"]["width"]
-        region = entities[container]["geometry"]
+        self._region = region = entities[container]["geometry"]
         self._body, self._kin = body, Kinematics(body)
         self._gripper = body.dims.index("gripper")
         x0, x1, z0, z1 = body.workspace
-        transit = z1 - 0.10
-        grasp = max(estimate["z"], z0 + 0.002)
-        # The first spot in the container, left to right, that the belief shows free.
+        self._transit, self._floor = z1 - 0.10, z0 + 0.002
+        # S2's spot, else the first spot in the container, left to right, that the belief shows free.
         others = [e["estimate"] for n, e in entities.items() if n != obj and e["kind"] == "object" and e["estimate"]]
-        spots = [region["x0"] + width / 2 + 0.01 + k * (width + 0.01) for k in range(8)]
-        spots = [x for x in spots if x <= region["x1"] - width / 2 - 0.01] or [(region["x0"] + region["x1"]) / 2]
-        free = [x for x in spots if all(abs(x - o["x"]) > width + 0.005 or not region["z0"] <= o["z"] <= region["z1"] for o in others)]
-        place_x = (free or spots)[0]
-        place_z = max(region["z0"] + height / 2 + 0.01, z0 + 0.002)  # released 1 cm above the bottom
-        ox = estimate["x"]
-        self._waypoints = [
-            (ox, transit, OPEN),
-            (ox, grasp, OPEN),
-            (ox, grasp, CLOSED),
-            (ox, transit, CLOSED),
-            (place_x, transit, CLOSED),
-            (place_x, place_z, CLOSED),
-            (place_x, place_z, OPEN),
-            (place_x, transit, OPEN),
-        ]
+        place_x = float(conditioning["place_x"]) if "place_x" in conditioning else free_spots(region, self._width, others)[0]
+        self._place = (place_x, max(region["z0"] + height / 2 + 0.01, self._floor))  # released 1 cm above the bottom
+        robot = belief.get("robot")
+        held = False
+        if robot is not None:
+            closed = robot["position"][robot["dims"].index("gripper")] < 0.5
+            held = closed and math.hypot(estimate["x"] - robot["ee"][0], estimate["z"] - robot["ee"][1]) <= HELD
+        self._picking = not held
+        self._waypoints = self._route(estimate["x"], estimate["z"])
+
+    def _route(self, ox: float, oz: float) -> list[Point]:
+        """The waypoints: pick at (ox, oz) unless the object is held, then place."""
+        transit, (px, pz) = self._transit, self._place
+        grasp = max(oz, self._floor)
+        pick = [(ox, transit, OPEN), (ox, grasp, OPEN), (ox, grasp, CLOSED), (ox, transit, CLOSED)] if self._picking else []
+        return [*pick, (px, transit, CLOSED), (px, pz, CLOSED), (px, pz, OPEN), (px, transit, OPEN)]
+
+    def _watch(self, observation: Observation, index: int, here: Point, seen: Ns) -> None:
+        """The scene against the plan: the target moved before the grasp
+        (plan again), or the place spot is taken before the release (give up)."""
+        seen_now = {d.entity: d for d in observation.detections}
+        target = seen_now.get(self._obj)
+        if self._picking and index <= 1 and target is not None and abs(target.x - self._waypoints[0][0]) > MOVED:
+            self.replans.append((seen, f"{self._obj} moved to x = {target.x:.3f}"))
+            self._waypoints = self._route(target.x, target.z)
+            self._replan(seen, here, 0)
+            return
+        place = len(self._waypoints) - 4  # the first waypoint of the placing part
+        px, r = self._place[0], self._region
+        if place <= index <= place + 1:
+            for d in observation.detections:
+                if d.entity != self._obj and takes_spot(px, self._width, r, d.x, d.z):
+                    self._report = Report(Claim.GAVE_UP, f"blocked: {d.entity} at ({d.x:.3f}, {d.z:.3f}) in the place spot x = {px:.3f}")
+                    return
 
     def _judged_at(self, observation: Observation, now: Ns) -> Ns:
         """The time at which S1 compares an observation with its plan: when it
@@ -137,6 +174,9 @@ class ScriptedPickPlace:
         planned, index = self._at(seen)
         if max(abs(planned[0] - here[0]), abs(planned[1] - here[1]), abs(planned[2] - here[2])) > REPLAN:
             self._replan(seen, here, min(index, len(self._waypoints) - 1))
+        self._watch(observation, self._at(seen)[1], here, seen)
+        if self._report is not None:
+            return None
         planned, index = self._at(now)
         if index == len(self._waypoints):
             last = self._waypoints[-1]
@@ -155,7 +195,9 @@ class ScriptedPickPlace:
             rows.append(joints[: self._gripper] + [g] + joints[self._gripper :])
         self._seq += 1
         b = self._body
-        return ActionChunk.make(self._seq, b.action_space, b.dims, now, DT, rows, now + (HORIZON - 1) * DT, self.source)
+        return ActionChunk.make(
+            self._seq, b.action_space, b.dims, now, DT, rows, now + (HORIZON - 1) * DT, self.source, observed_at=observation.t
+        )
 
     def report(self) -> Report | None:
         return self._report
@@ -169,22 +211,39 @@ class Stall:
 
 
 class SimS1Host:
-    """Steps the attached policy at the S1 rate, holds each chunk for the
-    simulated inference latency (a chunk computed at t reaches S0 at t +
-    latency, the latency drawn for each chunk), and hands it straight to S0,
-    in the order the chunks arrive. Never through the runtime."""
+    """Asks its InferenceTrigger at the S1 rate whether the attached policy
+    infers now, holds each chunk for the simulated inference latency (a
+    chunk computed at t reaches S0 at t + latency, the latency drawn for
+    each chunk), passes it through its ChunkCorrector, and hands it straight
+    to S0, in the order the chunks arrive. Never through the runtime. A
+    policy, trigger or corrector that raises, or a corrector that changes a
+    chunk's identity, fails the execution, never S0."""
 
     def __init__(
-        self, s0: SimS0, observations: Latest[Observation], latency: Callable[[], Ns], stalls: Sequence[Stall], world: World
+        self,
+        s0: SimS0,
+        observations: Latest[Observation],
+        latency: Callable[[], Ns],
+        stalls: Sequence[Stall],
+        world: World,
+        *,
+        period: Ns,
+        corrector: ChunkCorrector | None = None,
+        trigger: InferenceTrigger | None = None,
     ) -> None:
         self.s0 = s0
         self.observations = observations
         self.latency = latency
         self.stalls = stalls
         self.world = world
+        self.period = period
+        self.corrector: ChunkCorrector = corrector or NoCorrection()
+        self.trigger: InferenceTrigger = trigger or Periodic()
         self.policy: S1Policy | None = None
         self.failure: str | None = None
-        self._in_flight: list[tuple[Ns, int, ActionChunk]] = []  # a heap: arrival time, then sequence
+        self.inferences = 0
+        self._measured: Ns = 0  # the last inference latency
+        self._in_flight: list[tuple[Ns, int, Ns, ActionChunk]] = []  # a heap: arrival, sequence, inference start, chunk
 
     def attach(self, policy: S1Policy) -> None:
         self.policy, self.failure = policy, None
@@ -201,16 +260,34 @@ class SimS1Host:
         if self.policy is None or self.failure or any(s.when.active(self.world, now) for s in self.stalls):
             return
         try:
+            context = InferenceContext(
+                now, self.s0.status(), self.s0.history(now - HISTORY), len(self._in_flight), self._measured, self.period
+            )
+            if not self.trigger.due(context):
+                return
+            self.inferences += 1
             chunk = self.policy.step(now, self.observations.get())
-        except Exception as e:  # noqa: BLE001 - a crashing policy fails its execution, never S0
+        except Exception as e:  # noqa: BLE001 - a crashing policy or trigger fails its execution, never S0
             self.failure = f"{type(e).__name__}: {e}"
             return
         if chunk is not None:
-            heapq.heappush(self._in_flight, (now + self.latency(), chunk.seq, chunk))
+            heapq.heappush(self._in_flight, (now + self.latency(), chunk.seq, now, chunk))
 
     def deliver(self, now: Ns) -> None:
         while self._in_flight and self._in_flight[0][0] <= now:
-            _, _, chunk = heapq.heappop(self._in_flight)
+            _, _, started, chunk = heapq.heappop(self._in_flight)
+            self._measured = now - started
+            chunk = dataclasses.replace(chunk, inference_ns=self._measured)
+            try:
+                corrected = self.corrector.correct(chunk, self.s0.history(chunk.observed_at), self.s0.status(), now)
+                same = (corrected.seq, corrected.source, corrected.action_space, corrected.observed_at)
+                if same != (chunk.seq, chunk.source, chunk.action_space, chunk.observed_at):
+                    raise ContractError(f"the corrector changed chunk {chunk.seq}'s identity")
+            except Exception as e:  # noqa: BLE001 - a failing corrector fails its execution, never S0
+                self.failure = f"corrector {self.corrector.id}: {type(e).__name__}: {e}"
+                self._in_flight = []
+                return
+            chunk = corrected
             try:
                 self.s0.submit_chunk(chunk, now)
             except ChunkRejected as e:

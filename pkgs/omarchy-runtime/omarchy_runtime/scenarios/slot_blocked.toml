@@ -1,0 +1,39 @@
+description = """As the arm carries the cup to the rack, a dish appears in the spot it is going
+to place it. S1 gives up (blocked); the runtime engages the fallback S2
+installed (the safe pose, gripper closed, held 3 s); S2 chooses another spot
+and requests the goal again, and S1 places the cup there. Measured: recovery
+time, from the block to the new goal executing; time in fallback; whether
+the fallback expired before S2 answered."""
+seed = 32
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+fallback = true
+fallback_lasts_s = 3.0
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[extensions]
+recovery = "retry_elsewhere"
+
+[[faults]]
+kind = "appear"
+entity = "dish_1"
+after = "grasp"
+delay_s = 2.5
+x = 0.27
+
+[[expect]]
+outcome = "FAILED"
+category = "IMPLEMENTATION_ERROR"
+claim = "GAVE_UP"
+truth = false
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

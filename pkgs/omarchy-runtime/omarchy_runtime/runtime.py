@@ -528,18 +528,20 @@ class Runtime:
         ex.policy = policy
         self._s1.attach(policy)
 
-    def _stop_running(self, ex: Execution, now: Ns) -> None:
-        """S1 stops producing, and S0 holds: what is left of the execution's
-        chunk is not executed, and its fallback is dropped."""
+    def _stop_running(self, ex: Execution, now: Ns, fallback: bool = False) -> None:
+        """S1 stops producing: what is left of the execution's chunk is not
+        executed. A failed execution engages the fallback S2 installed (S0
+        waits under it for S2's decision); otherwise the fallback is dropped
+        and S0 holds."""
         self._s1.detach()
-        self._s0.hold()
-        self._event(now, "s0.hold", ex, {"reason": f"execution {ex.id} stopped running"})
+        self._s0.hold(fallback)
+        self._event(now, "s0.hold", ex, {"reason": f"execution {ex.id} stopped running", "fallback": fallback})
         assert self._status is not None and ex.counters_start is not None
         ex.counters = self._status.counters.since(ex.counters_start)
 
     def _fail(self, ex: Execution, now: Ns, category: Category, reason: str) -> None:
         if ex.state is State.RUNNING:
-            self._stop_running(ex, now)
+            self._stop_running(ex, now, fallback=True)
         self._event(now, "error", ex, {"category": category, "reason": reason})
         self._set(ex, State.FAILED, now, category, reason)
 

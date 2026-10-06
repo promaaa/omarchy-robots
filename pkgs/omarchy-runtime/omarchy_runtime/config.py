@@ -17,7 +17,7 @@ from omarchy_runtime.runtime import Binding, Capability, Params
 HERE = Path(__file__).parent
 CONFIG = HERE / "config"
 SCENARIOS = HERE / "scenarios"
-OVERRIDABLE = ("runtime", "verification", "extensions", "s2_link")  # scenario tables merged into runtime.toml
+OVERRIDABLE = ("runtime", "verification", "extensions", "s2_link", "s1_host")  # scenario tables merged into runtime.toml
 
 
 def load(path: Path) -> Json:
@@ -38,6 +38,11 @@ def scenario_path(name: str) -> Path:
     if name not in scenario_names():
         raise ConfigError(f"no scenario {name!r}; there are {', '.join(scenario_names())}")
     return SCENARIOS / f"{name}.toml"
+
+
+def merge(base: Json, over: Json) -> Json:
+    """`base` with `over` merged in, table by table."""
+    return _merge(base, over)
 
 
 def _merge(base: Json, over: Json) -> Json:

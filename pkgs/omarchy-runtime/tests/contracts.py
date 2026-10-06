@@ -13,23 +13,33 @@ The default implementations run them in test_extensions.py.
 from __future__ import annotations
 
 import json
+import time
 import unittest
 from typing import Any
 
 import numpy as np
 
 from omarchy_runtime.contracts import (
+    ActionChunk,
+    ChunkCorrector,
+    ChunkMeta,
     GiveUp,
     Goal,
+    InferenceContext,
+    InferenceTrigger,
     LatencyModel,
     ObservationFilter,
     RecoveryPolicy,
     Retry,
+    S0Counters,
+    S0History,
+    S0Mode,
+    S0Status,
     VerdictKind,
     Verifier,
     ns,
 )
-from tests.helpers import IN_RACK, RACK_SPOT, TABLE_SPOT, belief, observation, scenario
+from tests.helpers import GANTRY, IN_RACK, RACK_SPOT, TABLE_SPOT, belief, observation, scenario
 
 
 def _named(test: unittest.TestCase, extension: Any) -> None:
@@ -149,3 +159,90 @@ class LatencyContract:
         b = [self.make().sample(np.random.default_rng(7)) for _ in range(5)]
         self.assertEqual(a, b)
         self.assertTrue(all(isinstance(d, int) and d >= 0 for d in a))
+
+
+MS = 1_000_000
+
+
+def s0_state(t: int, position: tuple[float, ...], chunk: ChunkMeta | None, mode: S0Mode = S0Mode.TRACKING) -> S0Status:
+    return S0Status(t, mode, chunk.seq if chunk else None, position, chunk, False, S0Counters())
+
+
+def s0_history(t0: int, t1: int, command: list[float], desired: list[float]) -> S0History:
+    t = np.arange(t0, t1 + 1, MS, dtype=np.int64)
+    return S0History(t, np.tile(command, (len(t), 1)), np.tile(desired, (len(t), 1)))
+
+
+def gantry_chunk(seq: int, t_start: int, rows: list[list[float]], observed_at: int) -> ActionChunk:
+    return ActionChunk.make(
+        seq, GANTRY.action_space, GANTRY.dims, t_start, 50 * MS, rows, t_start + 450 * MS, "s1", observed_at=observed_at
+    )
+
+
+def _fast(test: unittest.TestCase, call: Any) -> None:
+    start = time.perf_counter()
+    for _ in range(100):
+        call()
+    test.assertLess((time.perf_counter() - start) / 100, 0.0005, "slower than its 0.5 ms budget")
+
+
+class CorrectorContract:
+    """Applied when a chunk is handed to S0: returns a chunk of the same
+    identity (seq, source, action space, observation time), finite and
+    valid now, within its time budget, without changing its inputs."""
+
+    def make(self) -> ChunkCorrector:
+        raise NotImplementedError
+
+    def case(self) -> tuple[ActionChunk, S0History, S0Status, int]:
+        here = list(GANTRY.home)
+        rows = [[here[0] + 0.01 * k, here[1], here[2]] for k in range(10)]
+        chunk = gantry_chunk(7, 1000 * MS, rows, observed_at=990 * MS)
+        now = 1200 * MS  # the chunk is 200 ms old when it reaches S0
+        meta = ChunkMeta(6, "s1", 900 * MS, 50 * MS, 10, 1350 * MS, 950 * MS)
+        return chunk, s0_history(990 * MS, now, here, here), s0_state(now, tuple(here), meta), now
+
+    def test_named(self: Any) -> None:
+        _named(self, self.make())
+
+    def test_keeps_identity_and_is_valid_now(self: Any) -> None:
+        chunk, history, state, now = self.case()
+        before = chunk.actions.copy()
+        out = self.make().correct(chunk, history, state, now)
+        self.assertIsInstance(out, ActionChunk)
+        same = ("seq", "source", "action_space", "dims", "observed_at")
+        self.assertEqual([getattr(out, k) for k in same], [getattr(chunk, k) for k in same])
+        self.assertTrue(np.all(np.isfinite(out.actions)))
+        self.assertGreaterEqual(out.valid_until, now)
+        self.assertTrue(np.array_equal(chunk.actions, before), "the corrector changed its input")
+
+    def test_within_its_time_budget(self: Any) -> None:
+        corrector, (chunk, history, state, now) = self.make(), self.case()
+        _fast(self, lambda: corrector.correct(chunk, history, state, now))
+
+
+class TriggerContract:
+    """Asked at S1's rate: answers the same way for the same context, within
+    its time budget, and asks for an inference whenever S0 has no chunk
+    and none is on its way."""
+
+    def make(self) -> InferenceTrigger:
+        raise NotImplementedError
+
+    def context(self, mode: S0Mode = S0Mode.TRACKING, in_flight: int = 0) -> InferenceContext:
+        here = tuple(GANTRY.home)
+        meta = ChunkMeta(6, "s1", 900 * MS, 50 * MS, 10, 1350 * MS, 950 * MS) if mode is S0Mode.TRACKING else None
+        h = s0_history(500 * MS, 1000 * MS, list(here), list(here))
+        return InferenceContext(1000 * MS, s0_state(1000 * MS, here, meta, mode), h, in_flight, 50 * MS, 50 * MS)
+
+    def test_named(self: Any) -> None:
+        _named(self, self.make())
+
+    def test_infers_when_s0_has_nothing_coming(self: Any) -> None:
+        self.assertTrue(self.make().due(self.context(S0Mode.HOLD)))
+
+    def test_deterministic_and_within_its_time_budget(self: Any) -> None:
+        trigger, context = self.make(), self.context()
+        self.assertEqual(trigger.due(context), trigger.due(context))
+        self.assertIsInstance(trigger.due(context), bool)
+        _fast(self, lambda: trigger.due(context))

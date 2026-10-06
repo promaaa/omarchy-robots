@@ -65,6 +65,25 @@ class Scene:
     objects: Mapping[str, ObjectSpec]
 
 
+def takes_spot(spot: float, width: float, region: Json, x: float, z: float) -> bool:
+    """Whether an object seen at (x, z) takes a spot of a container for an
+    object `width` wide: inside the container, closer to the spot than the
+    width less 2 cm. Spots are a width and 1 cm apart, so a neighbour may
+    stand up to 3 cm off its own spot (a release on the wall clock is
+    millimetres off) without taking the next one."""
+    return abs(spot - x) < width - 0.02 and region["z0"] <= z <= region["z1"]
+
+
+def free_spots(region: Json, width: float, others: list[Json]) -> list[float]:
+    """Spots in a container (x, left to right) for an object `width` wide,
+    that no estimate in `others` (x, z) takes; every spot if all are taken.
+    `region` is the container's geometry as a belief snapshot gives it."""
+    spots = [region["x0"] + width / 2 + 0.01 + k * (width + 0.01) for k in range(8)]
+    spots = [x for x in spots if x <= region["x1"] - width / 2 - 0.01] or [(region["x0"] + region["x1"]) / 2]
+    free = [s for s in spots if not any(takes_spot(s, width, region, o["x"], o["z"]) for o in others)]
+    return free or spots
+
+
 @dataclass(frozen=True)
 class Estimate:
     x: float

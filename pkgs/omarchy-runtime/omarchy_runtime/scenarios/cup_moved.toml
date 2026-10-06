@@ -1,0 +1,28 @@
+description = """A human moves the cup 6 cm while the arm approaches it. S1 sees its target
+away from where its plan grasps it and plans the grasp again from fresh
+observations, without S2: a local reaction. Measured: the reaction time,
+from the move to S0 executing the first chunk computed from an observation
+taken after it."""
+seed = 31
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+fallback = true
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "move"
+entity = "cup_1"
+after = "start"
+delay_s = 1.2
+x = 0.06
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

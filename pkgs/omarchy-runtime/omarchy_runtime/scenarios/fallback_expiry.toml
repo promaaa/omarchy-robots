@@ -1,0 +1,36 @@
+description = """slot_blocked with a slow S2 (2 s per decision) and a fallback that lasts
+1.5 s: the fallback expires before S2 answers, S0 returns to HOLD with the
+cup still held, and the trace shows it. S2's new goal then starts from HOLD."""
+seed = 33
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 2.0
+fallback = true
+fallback_lasts_s = 1.5
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[extensions]
+recovery = "retry_elsewhere"
+
+[[faults]]
+kind = "appear"
+entity = "dish_1"
+after = "grasp"
+delay_s = 2.5
+x = 0.27
+
+[[expect]]
+outcome = "FAILED"
+category = "IMPLEMENTATION_ERROR"
+claim = "GAVE_UP"
+truth = false
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

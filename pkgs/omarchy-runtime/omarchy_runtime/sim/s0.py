@@ -22,6 +22,7 @@ from omarchy_runtime.contracts import (
     Ns,
     Rejection,
     S0Counters,
+    S0History,
     S0Mode,
     S0Status,
     seconds,
@@ -34,9 +35,18 @@ CODES = {S0Mode(m): n for n, m in enumerate(S0_MODES)}
 
 
 class SimS0:
-    def __init__(self, body: BodySpec, world: World, capacity: int, nominal: Ns = 1_000_000, late_after: Ns | None = None) -> None:
+    def __init__(
+        self,
+        body: BodySpec,
+        world: World,
+        capacity: int,
+        nominal: Ns = 1_000_000,
+        late_after: Ns | None = None,
+        history: Ns = 2_000_000_000,
+    ) -> None:
         """`nominal` is S0's tick period; a tick more than `late_after` (1.5
-        periods by default) after the one before is a late tick."""
+        periods by default) after the one before is a late tick. The last
+        `history` of ticks stay readable (history())."""
         self.nominal = nominal
         self.late_after = late_after if late_after is not None else nominal * 3 // 2
         self.bound = np.array(body.max_velocity) * seconds(nominal)  # the largest step per tick
@@ -63,6 +73,7 @@ class SimS0:
             "fallback_ns": 0,
             "hold_ns": 0,
             "late_ticks": 0,
+            "fallback_expiries": 0,
         }
         self.max_error = 0.0
         self.max_interval: Ns = 0
@@ -75,6 +86,13 @@ class SimS0:
         self.record_desired = np.zeros((capacity, d))
         self.record_seq = np.full(capacity, -1, dtype=np.int64)  # the chunk tracked, -1 when not tracking
         self.record_valid_until = np.full(capacity, -1, dtype=np.int64)
+        self.record_observed = np.full(capacity, -1, dtype=np.int64)  # the tracked chunk's observation time
+        # The robot-side history: a ring buffer of the last ticks.
+        n = max(2, history // nominal)
+        self._h_t = np.zeros(n, dtype=np.int64)
+        self._h_command = np.zeros((n, d))
+        self._h_desired = np.zeros((n, d))
+        self._h_count = 0
 
     def _check(self, action_space: str, dims: tuple[str, ...]) -> None:
         if action_space != self.body.action_space or dims != self.body.dims:
@@ -93,7 +111,9 @@ class SimS0:
             self.c["rejected_chunks"] += 1
             raise ChunkRejected(Rejection.STALE, f"chunk {chunk.seq} while chunk {active.seq} of {active.source} is active")
         self.chunk = chunk
-        self.meta = ChunkMeta(chunk.seq, chunk.source, chunk.t_start, chunk.dt, chunk.horizon, chunk.valid_until, now)
+        self.meta = ChunkMeta(
+            chunk.seq, chunk.source, chunk.t_start, chunk.dt, chunk.horizon, chunk.valid_until, now, chunk.observed_at, chunk.inference_ns
+        )
 
     def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
         self._check(spec.action_space, spec.dims)
@@ -101,8 +121,16 @@ class SimS0:
             raise ChunkRejected(Rejection.EXPIRED, f"fallback valid until {spec.valid_until} ns, now {now} ns")
         self.fallback, self.engaged = spec, None
 
-    def hold(self) -> None:
-        self.chunk, self.fallback, self.engaged = None, None, None
+    def hold(self, fallback: bool = False) -> None:
+        self.chunk, self.engaged = None, None
+        if not fallback:
+            self.fallback = None
+
+    def history(self, since: Ns) -> S0History:
+        n, size = self._h_count, len(self._h_t)
+        order = np.arange(max(0, n - size), n) % size
+        keep = order[self._h_t[order] >= since]
+        return S0History(self._h_t[keep].copy(), self._h_command[keep].copy(), self._h_desired[keep].copy())
 
     def status(self) -> S0Status:
         counters = S0Counters(max_tracking_error=self.max_error, max_interval_ns=self.max_interval, max_step=self.max_step, **self.c)
@@ -133,7 +161,10 @@ class SimS0:
                 i = min(int(f), rows - 1)
                 start = p0 if i == 0 else fb.actions[i - 1]
                 return S0Mode.FALLBACK, start + (fb.actions[i] - start) * (f - i)
+            if now - te <= fb.lasts:
+                return S0Mode.FALLBACK, fb.actions[-1]  # holding its last row
             self.fallback, self.engaged = None, None
+            self.c["fallback_expiries"] += 1
         return S0Mode.HOLD, self.pos
 
     def tick(self, now: Ns) -> None:
@@ -170,4 +201,8 @@ class SimS0:
             if mode is S0Mode.TRACKING and self.chunk is not None:
                 self.record_seq[n] = self.chunk.seq
                 self.record_valid_until[n] = self.chunk.valid_until
+                self.record_observed[n] = self.chunk.observed_at
+        h = self._h_count % len(self._h_t)
+        self._h_t[h], self._h_command[h], self._h_desired[h] = now, command, desired
+        self._h_count += 1
         self.c["ticks"] = n + 1

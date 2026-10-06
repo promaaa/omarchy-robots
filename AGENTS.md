@@ -104,6 +104,43 @@ there when their handles are known.
 to a contract changes every implementation: say so in the commit and the
 CHANGELOG.
 
+## Asynchronous inference: a ChunkCorrector or an InferenceTrigger
+
+The seam for asynchronous VLA inference (chunk post-correction, re-inference
+triggering). Both run on the robot side, in S1's host, never in the runtime.
+
+- A **ChunkCorrector** (`contracts.ChunkCorrector.correct(chunk, history,
+  state, now)`) is applied when a new chunk is handed to S0 and returns the
+  chunk S0 executes. It receives the chunk (with `observed_at`, when its
+  observation was taken, and `inference_ns`, how long its inference took),
+  `history` (an `S0History`: S0's ticks since `observed_at`, the commanded
+  and desired positions as arrays) and S0's current `S0Status`.
+- An **InferenceTrigger** (`contracts.InferenceTrigger.due(context)`) is
+  asked at S1's rate whether S1 infers now. `context` (`InferenceContext`)
+  holds S0's status, its last 0.5 s of history, the inferences on their
+  way, the last measured inference latency and S1's period.
+- Timing budget: each call returns within about 0.5 ms (the contract tests
+  measure it). A corrector runs in S0's loop.
+- They must not block, must not read ground truth (the simulator, `sim/`,
+  the harness), and must not call S0: they receive data and return data. A
+  corrector keeps the chunk's seq, source, action space and observation
+  time; a trigger must ask for an inference when S0 has no chunk and none
+  is on its way. One that raises fails the execution, never S0.
+- Baselines in `extensions.py`: correctors `none` and `blend` (a naive
+  linear blend, a stand-in for smoothing methods such as Real-Time
+  Chunking), triggers `periodic` and `mismatch`, in the registries
+  `CORRECTORS` and `INFERENCE_TRIGGERS`. `runtime.toml` chooses them by id
+  (`corrector`, `trigger` in `[extensions]`); each factory takes the
+  `[s1_host]` table, the place for a new one's parameters.
+- Tests: mix `CorrectorContract` or `TriggerContract` from
+  `tests/contracts.py` into a test case, as `tests/test_extensions.py` does.
+  Then `omarchy-runtime inference-matrix` runs S1's inference delay (50,
+  150, 300 ms) x corrector x trigger on nominal_a and cup_moved in
+  simulated time and prints success, starvations, inferences, the
+  discontinuity at chunk switches, reaction and freeze time, for every
+  registered corrector and trigger: a new one joins the matrix once it is
+  in its registry. A baseline, not a claim about which method is best.
+
 ## Testing
 
 - Each scenario file states the expected outcome of each execution;

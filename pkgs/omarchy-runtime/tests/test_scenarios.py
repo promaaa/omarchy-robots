@@ -79,7 +79,10 @@ class TestEveryScenario(unittest.TestCase):
                 self.assertTrue(np.all(np.diff(samples) >= SECOND // 20), "S0 status sampled faster than the supervisor")
                 for e in stream:
                     if e["type"] == "chunk":
-                        self.assertEqual(set(e["payload"]), {"seq", "source", "t_start", "dt", "horizon", "valid_until", "received"})
+                        self.assertEqual(
+                            set(e["payload"]),
+                            {"seq", "source", "t_start", "dt", "horizon", "valid_until", "received", "observed_at", "inference_ns"},
+                        )
 
 
 class TestProperties(unittest.TestCase):

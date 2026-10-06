@@ -32,6 +32,7 @@ from omarchy_runtime.contracts import (
     Rejection,
     Report,
     S0Counters,
+    S0History,
     S0Mode,
     S0Status,
     S1Policy,
@@ -67,11 +68,14 @@ class FakeS0:
             raise ChunkRejected(Rejection.EXPIRED, "expired")
         self.installed.append(spec)
 
-    def hold(self) -> None:
+    def hold(self, fallback: bool = False) -> None:
         self.cleared += 1
 
     def status(self) -> S0Status:
         return S0Status(self.t, self.mode, None, tuple(GANTRY.home), self.meta, bool(self.installed), S0Counters())
+
+    def history(self, since: Ns) -> S0History:
+        raise AssertionError("the runtime never reads S0's history")
 
 
 class FakeHost:

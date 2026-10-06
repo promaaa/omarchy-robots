@@ -15,6 +15,7 @@ import numpy as np
 
 from omarchy_runtime import __version__
 from omarchy_runtime.contracts import SECOND, Json, seconds
+from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
 from omarchy_runtime.scenario import RunResult, run
 from omarchy_runtime.trace import S0_MODES, TraceCheck, validate_run, where_measured
 
@@ -70,6 +71,81 @@ def _expected(r: RunResult) -> list[str]:
     return problems
 
 
+def dynamics(r: RunResult) -> Json:
+    """How the robot met a changing scene, from ground truth, the observation
+    log and S0's per-tick record (seconds, on the run's clock):
+    - reaction: from a scene change (a move) to S0 executing the first chunk
+      computed from an observation taken after it; freeze: from the first
+      such observation reaching S1 to that tick (S0 executing a plan the
+      belief already contradicts);
+    - recovery, for each failed execution its retry follows: from the
+      failure to the retry running, the time S0 spent in the fallback
+      meanwhile, whether the fallback engaged, and whether it expired (S0
+      went from FALLBACK to HOLD) before the retry's first chunk;
+    - discontinuity at chunk switches: the largest jump of S0's desired
+      position, and of its desired velocity, where one chunk takes over
+      from another (action-space units, and per second)."""
+    rec = r.record()
+    t, mode, seq, seen, desired = rec["t"], rec["mode"], rec["seq"], rec["observed_at"], rec["desired"]
+    out: Json = {
+        "scene_changes": [],
+        "reaction_s": None,
+        "freeze_s": None,
+        "recovery": [],
+        "discontinuity": None,
+        "inferences": r.inferences,
+    }
+    for when, kind, detail in r.world.events:
+        if kind in ("move", "appear"):
+            out["scene_changes"].append({"t_s": seconds(when), "kind": kind, "detail": detail})
+    moves = [when for when, kind, _ in r.world.events if kind == "move"]
+    if moves:
+        tc = moves[0]
+        # Strictly after: an observation in the move's own tick was taken before it (the sensor steps first).
+        reacted = np.flatnonzero((t > tc) & (seen > tc) & (mode == TRACKING))
+        if len(reacted):
+            tr = int(t[reacted[0]])
+            out["reaction_s"] = seconds(tr - tc)
+            delivered = [d for taken, d in r.observations if taken > tc]
+            out["freeze_s"] = seconds(tr - delivered[0]) if delivered else None
+    by_id = {s["execution_id"]: s for s in r.summaries}
+    for s in r.summaries:
+        failed = by_id.get(s["retry_of"] or "")
+        if failed is None or failed["outcome"] != "FAILED" or s["timing"]["started"] is None:
+            continue
+        t0, t1 = failed["timing"]["ended"], s["timing"]["started"]
+        after = np.flatnonzero((t > t1) & (mode == TRACKING))
+        t2 = int(t[after[0]]) if len(after) else t1
+        window = (t >= t0) & (t <= t2)
+        modes, spans = mode[window], np.diff(np.r_[t[window], t2])
+        was_fallback = np.flatnonzero(modes == FALLBACK)
+        expired = bool(len(was_fallback)) and bool(np.any(modes[was_fallback[0] :] == HOLD))
+        out["recovery"].append(
+            {
+                "failed": failed["execution_id"],
+                "retry": s["execution_id"],
+                "reason": failed["reason"],
+                "recovery_s": seconds(t1 - t0),
+                "fallback_engaged": bool(len(was_fallback)),
+                "fallback_s": seconds(int(spans[modes == FALLBACK].sum())),
+                "fallback_expired": expired,
+            }
+        )
+    switch = np.flatnonzero((seq[1:] != seq[:-1]) & (mode[1:] == TRACKING) & (mode[:-1] == TRACKING)) + 1
+    switch = switch[(switch >= 2) & (switch < len(t) - 1)]
+    if len(switch):
+        jumps = np.abs(desired[switch] - desired[switch - 1]).max(axis=1)
+        dt = np.diff(t).astype(float) / 1e9
+        v_after = (desired[switch + 1] - desired[switch]) / dt[switch, None]
+        v_before = (desired[switch - 1] - desired[switch - 2]) / dt[switch - 2, None]
+        out["discontinuity"] = {
+            "switches": len(switch),
+            "position": float(jumps.max()),
+            "velocity": float(np.abs(v_after - v_before).max()),
+        }
+    return out
+
+
 def scenario_result(r: RunResult, check: TraceCheck) -> Json:
     traced = {s["execution_id"] for s in check.executions}
     rows = []
@@ -121,6 +197,7 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
         "task_fallback_s": seconds(int(spans[modes == FALLBACK].sum())),
         "task_hold_s": seconds(int(spans[modes == HOLD].sum())),
         "loop": r.loop,
+        "dynamics": dynamics(r),
         "violations": len(r.violations()),
         "starvation_events": sum(s["s0"]["starvation_events"] for s in r.summaries),
         "fallback_s": sum(row["fallback_s"] for row in rows),
@@ -207,6 +284,11 @@ def table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     out = [line, "  ".join("-" * w for w in widths)]
     out += ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)) for r in cells]
     return "\n".join(out)
+
+
+def md_table(header: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:
+    body = [[_cell(v) for v in row] for row in rows]
+    return ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)] + ["| " + " | ".join(r) + " |" for r in body]
 
 
 def report(results: Json) -> str:
@@ -306,3 +388,90 @@ def loop_table(loop: Json) -> str:
     ]
     header = ["component", "period ms", "steps", "interval p50 ms", "p99 ms", "max ms", "overruns", "step p99 ms", "step max ms"]
     return table(header, rows)
+
+
+INFERENCE_SCENARIOS = ("nominal_a", "cup_moved")
+INFERENCE_DELAYS = (0.05, 0.15, 0.3)  # S1's inference latency, s
+INFERENCE_LABEL = "simulated time; a baseline for asynchronous inference, not a claim about which method is best"
+
+
+def inference_matrix(out: Path) -> Json:
+    """S1's inference delay x chunk corrector x inference trigger (every one
+    registered in extensions.py), on nominal_a and cup_moved, in simulated
+    time: success, task time, S0 starvations, inferences, the discontinuity
+    at chunk switches, and reaction and freeze after the scene change."""
+    cells = []
+    for name in INFERENCE_SCENARIOS:
+        for delay in INFERENCE_DELAYS:
+            for corrector in CORRECTORS:  # every registered one: a new corrector or trigger joins the matrix
+                for trigger in INFERENCE_TRIGGERS:
+                    over = {
+                        "scenario": {"s1": {"latency_s": delay}},
+                        "runtime": {"extensions": {"corrector": corrector, "trigger": trigger}},
+                    }
+                    r = run(name, out / f"{name}-{delay}-{corrector}-{trigger}", overrides=over)
+                    res = scenario_result(r, validate_run(r.dir))
+                    d = res["dynamics"]
+                    cells.append(
+                        {
+                            "scenario": name,
+                            "inference_s": delay,
+                            "corrector": corrector,
+                            "trigger": trigger,
+                            "outcomes": [s["outcome"] for s in r.summaries],
+                            "passed": res["passed"],
+                            "problems": res["problems"],
+                            "violations": res["violations"],
+                            "task_time_s": res["task_time_s"],
+                            "starvation_events": res["starvation_events"],
+                            "inferences": d["inferences"],
+                            "discontinuity": d["discontinuity"],
+                            "reaction_s": d["reaction_s"],
+                            "freeze_s": d["freeze_s"],
+                        }
+                    )
+    results = {"label": INFERENCE_LABEL, "cells": cells}
+    (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+    return results
+
+
+INFERENCE_LEGEND = (
+    "jump: the largest jump of S0's desired position at a chunk switch (rad for the arm's joints); "
+    "velocity jump: of its desired velocity. reaction: from the cup's move to S0 executing a chunk computed "
+    "after it; freeze: from the first observation after the move reaching S1 to that tick."
+)
+
+
+def inference_rows(results: Json) -> tuple[list[str], list[list[Any]]]:
+    rows = []
+    for c in results["cells"]:
+        d = c["discontinuity"] or {}
+        rows.append(
+            [
+                c["scenario"],
+                c["inference_s"],
+                c["corrector"],
+                c["trigger"],
+                " ".join(c["outcomes"]) or "none (time limit)",
+                c["violations"],
+                c["task_time_s"],
+                c["starvation_events"],
+                c["inferences"],
+                d.get("position"),
+                d.get("velocity"),
+                c["reaction_s"],
+                c["freeze_s"],
+            ]
+        )
+    header = ["scenario", "inference s", "corrector", "trigger", "outcomes", "violations", "task s", "starvations", "inferences"]
+    header += ["jump", "velocity jump /s", "reaction s", "freeze s"]
+    return header, rows
+
+
+def inference_report(results: Json) -> str:
+    return f"Inference matrix ({results['label']})\n" + table(*inference_rows(results)) + "\n" + INFERENCE_LEGEND
+
+
+def inference_markdown(results: Json) -> str:
+    header, rows = inference_rows(results)
+    return "\n".join([f"Inference matrix ({results['label']}).", "", *md_table(header, rows), "", INFERENCE_LEGEND])

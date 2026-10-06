@@ -3,7 +3,10 @@
 - a cup attaches when the gripper closes (crosses 0.5) within 2 cm of it;
 - a released or slipping cup settles on the highest support below it
   (counter, table, or the floor);
-- an injected slip detaches the held cup.
+- an injected slip detaches the held cup;
+- injected scene changes: a "human" moves an object that is not held by
+  some centimetres (`move`), or an object that was absent appears (`appear`),
+  settling on the support below; each is a ground-truth event.
 
 Cups do not collide with each other or with the arm's links. Only simulator
 components and the evaluation harness read this; the runtime never does.
@@ -37,8 +40,22 @@ class Trigger:
         return t0 is not None and t0 + self.delay <= now < t0 + self.delay + self.duration
 
 
+@dataclass(frozen=True)
+class Change:
+    """A one-shot scene change, `delay` after the first `after` event: `move`
+    shifts `entity` by `x` metres, `appear` puts it at x = `x`."""
+
+    after: str
+    delay: Ns
+    kind: str
+    entity: str
+    x: float
+
+
 class World:
-    def __init__(self, scene: Scene, positions: dict[str, float], body: BodySpec, slips: Sequence[Trigger] = ()) -> None:
+    def __init__(
+        self, scene: Scene, positions: dict[str, float], body: BodySpec, slips: Sequence[Trigger] = (), changes: Sequence[Change] = ()
+    ) -> None:
         self.scene = scene
         self.body = body
         self.kin = Kinematics(body)
@@ -52,6 +69,7 @@ class World:
         self.held: str | None = None
         self._offset = (0.0, 0.0)
         self._slips = list(slips)
+        self._changes = list(changes)
         self.first: dict[str, Ns] = {"start": 0}
         self.events: list[tuple[Ns, str, str]] = []
         self.violations: list[tuple[Ns, str]] = []
@@ -71,9 +89,24 @@ class World:
         tops = [s.z for s in self.scene.surfaces.values() if s.x0 <= x <= s.x1 and s.z <= z - half + PENETRATION]
         self.cups[cup][1] = max(tops, default=0.0) + half
 
+    def _change(self, now: Ns) -> None:
+        for c in [c for c in self._changes if (t0 := self.first.get(c.after)) is not None and now >= t0 + c.delay]:
+            self._changes.remove(c)
+            if c.kind == "appear":
+                self.cups[c.entity] = [c.x, math.inf]
+            elif self.held == c.entity or c.entity not in self.cups:
+                self._note(now, "move refused", f"{c.entity} is held or absent")
+                continue
+            else:
+                self.cups[c.entity] = [self.cups[c.entity][0] + c.x, math.inf]
+            self._settle(c.entity)
+            self._note(now, c.kind, f"{c.entity} at ({self.cups[c.entity][0]:.3f}, {self.cups[c.entity][1]:.3f})")
+
     def apply(self, now: Ns, command: Sequence[float]) -> None:
         """S0's command reaches the actuators (ideal tracking). Checks every
         limit against ground truth and records any violation."""
+        if self._changes:
+            self._change(now)
         b = self.body
         dt = seconds(now - self._last) if self._last is not None else None
         for i, v in enumerate(command):

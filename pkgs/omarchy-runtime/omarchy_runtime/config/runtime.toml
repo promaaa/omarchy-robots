@@ -22,10 +22,16 @@ reconnect_backoff_s = 0.25  # first wait between connection attempts; it doubles
 reconnect_backoff_max_s = 2.0  # up to this
 connect_attempt_s = 1.0  # one connection attempt waits at most this long
 
+[s1_host]  # parameters of the robot-side S1 extensions
+blend_s = 0.1  # corrector "blend": the window over which S0's position blends into a new chunk
+mismatch = 0.02  # trigger "mismatch": infer when S0's state is this far (action-space units) from what it tracks
+
 [extensions]  # ids from omarchy_runtime/extensions.py
 filter = "identity"
 recovery = "retry_once"
 s2_latency = "fixed"
+corrector = "none"  # ChunkCorrector, applied when a chunk is handed to S0
+trigger = "periodic"  # InferenceTrigger, asked at S1's rate
 
 [extensions.verifiers]  # per predicate
 in = "geometric"

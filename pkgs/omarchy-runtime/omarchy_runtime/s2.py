@@ -55,7 +55,11 @@ class ScriptedS2:
         *,
         fallback: bool,
         task_prefix: str,
+        fallback_lasts: Ns | None = None,
     ) -> None:
+        """`fallback_lasts`: how long S0 may stay in the fallback once engaged
+        (holding the safe pose after reaching it); by default, its rows only."""
+        self.fallback_lasts = fallback_lasts
         self.api = api
         self.body = body
         self.recovery = recovery
@@ -109,7 +113,14 @@ class ScriptedS2:
             # The window opens when the execution starts running, on the runtime's clock.
             b = self.body
             spec = FallbackSpec.make(
-                b.action_space, b.dims, FALLBACK_DURATION, [b.safe_pose], update.t, update.t + FALLBACK_WINDOW, "s2.scripted"
+                b.action_space,
+                b.dims,
+                FALLBACK_DURATION,
+                [b.safe_pose],
+                update.t,
+                update.t + FALLBACK_WINDOW,
+                "s2.scripted",
+                self.fallback_lasts,
             )
             self._decide(now, InstallFallback(update.execution_id, spec))
         if update.summary is None:

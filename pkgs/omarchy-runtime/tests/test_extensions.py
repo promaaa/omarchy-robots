@@ -2,24 +2,53 @@
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 import numpy as np
 
-from omarchy_runtime.contracts import ConfigError, GiveUp, Goal, LatencyModel, ObservationFilter, RecoveryPolicy, Retry, Verifier, ns
+from omarchy_runtime.contracts import (
+    ChunkCorrector,
+    ConfigError,
+    GiveUp,
+    Goal,
+    InferenceTrigger,
+    LatencyModel,
+    ObservationFilter,
+    RecoveryPolicy,
+    Retry,
+    Verifier,
+    ns,
+)
 from omarchy_runtime.extensions import (
+    CORRECTORS,
     FILTERS,
+    INFERENCE_TRIGGERS,
     LATENCY,
     RECOVERY,
     VERIFIERS,
+    Blend,
     FixedLatency,
     GeometricVerifier,
     IdentityFilter,
     LognormalLatency,
+    Mismatch,
+    NoCorrection,
+    Periodic,
     RetryOnce,
 )
-from tests.contracts import FilterContract, LatencyContract, RecoveryContract, VerifierContract
-from tests.helpers import scenario
+from tests.contracts import (
+    CorrectorContract,
+    FilterContract,
+    LatencyContract,
+    RecoveryContract,
+    TriggerContract,
+    VerifierContract,
+    gantry_chunk,
+    s0_history,
+    s0_state,
+)
+from tests.helpers import GANTRY, scenario
 
 
 class TestIdentityFilter(FilterContract, unittest.TestCase):
@@ -77,6 +106,46 @@ class TestLognormalLatency(LatencyContract, unittest.TestCase):
             LognormalLatency(0.0, 0.5)
 
 
+class TestNoCorrection(CorrectorContract, unittest.TestCase):
+    def make(self) -> ChunkCorrector:
+        return NoCorrection()
+
+
+class TestBlend(CorrectorContract, unittest.TestCase):
+    def make(self) -> ChunkCorrector:
+        return Blend(ns(0.1))
+
+    def test_starts_where_s0_is_and_joins_the_chunk_after_its_window(self) -> None:
+        here = list(GANTRY.home)
+        rows = [[here[0] + 0.05, here[1], here[2]]] * 10  # 5 cm away: a jump without blending
+        chunk = gantry_chunk(7, ns(1.0), rows, observed_at=ns(0.99))
+        state = s0_state(ns(1.2), tuple(here), None)
+        out = Blend(ns(0.1)).correct(chunk, s0_history(ns(0.99), ns(1.2), here, here), state, ns(1.2))
+        self.assertEqual(out.t_start, ns(1.2))
+        self.assertTrue(np.allclose(out.actions[0], here))  # no jump at the switch
+        self.assertTrue(np.allclose(out.actions[2:], rows[0]))  # after 0.1 s: the chunk
+        self.assertEqual(out.valid_until, chunk.valid_until)
+
+
+class TestPeriodic(TriggerContract, unittest.TestCase):
+    def make(self) -> InferenceTrigger:
+        return Periodic()
+
+
+class TestMismatch(TriggerContract, unittest.TestCase):
+    def make(self) -> InferenceTrigger:
+        return Mismatch(0.02)
+
+    def test_infers_on_a_deviation_or_an_ending_chunk_never_while_one_is_coming(self) -> None:
+        c = self.context()
+        self.assertFalse(Mismatch(0.02).due(c))  # on its plan, the chunk lasts
+        off = dataclasses.replace(c, history=s0_history(ns(0.5), ns(1.0), [0.6, 1.1, 1.0], [0.63, 1.1, 1.0]))
+        self.assertTrue(Mismatch(0.02).due(off))  # 3 cm from what it tracks
+        ending = dataclasses.replace(c, now=ns(1.3))  # the chunk ends at 1.35, a new one needs 0.05 + 0.05
+        self.assertTrue(Mismatch(0.02).due(ending))
+        self.assertFalse(Mismatch(0.02).due(dataclasses.replace(off, in_flight=1)))
+
+
 class TestRegistries(unittest.TestCase):
     """Configuration selects implementations by id; ids match the registry keys."""
 
@@ -85,6 +154,11 @@ class TestRegistries(unittest.TestCase):
             for key, make in registry.items():
                 self.assertEqual(make().id, key)
         self.assertEqual(LATENCY["fixed"](0.0, 0.0).id, "fixed")
+        params = {"blend_s": 0.1, "mismatch": 0.02}
+        for key, make_corrector in CORRECTORS.items():
+            self.assertEqual(make_corrector(params).id, key)
+        for key, make_trigger in INFERENCE_TRIGGERS.items():
+            self.assertEqual(make_trigger(params).id, key)
         self.assertEqual(LATENCY["lognormal"](1.0, 0.5).id, "lognormal")
 
 

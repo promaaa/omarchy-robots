@@ -348,6 +348,11 @@ class ActionChunk:
     or a higher `seq`: then it is stale. Each S1 run numbers its chunks from 1.
     Chunks flow from S1 to S0 directly, never through the runtime; the
     runtime sees only their metadata, in S0's status.
+
+    `observed_at` is when the observation the chunk was computed from was
+    taken, and `inference_ns` the inference's measured latency, from its
+    start to the chunk's hand-off to S0 (set by S1's host): what an
+    asynchronous correction needs to know how old the chunk is.
     """
 
     seq: int
@@ -358,12 +363,30 @@ class ActionChunk:
     actions: Array
     valid_until: Ns
     source: str
+    observed_at: Ns = 0
+    inference_ns: Ns = 0
 
     @staticmethod
-    def make(seq: int, action_space: str, dims: Sequence[str], t_start: Ns, dt: Ns, rows: Any, valid_until: Ns, source: str) -> ActionChunk:
+    def make(
+        seq: int,
+        action_space: str,
+        dims: Sequence[str],
+        t_start: Ns,
+        dt: Ns,
+        rows: Any,
+        valid_until: Ns,
+        source: str,
+        *,
+        observed_at: Ns | None = None,
+        inference_ns: Ns = 0,
+    ) -> ActionChunk:
+        """`observed_at` defaults to `t_start`."""
         if dt <= 0:
             raise ChunkRejected(Rejection.SHAPE, f"chunk dt is {dt} ns")
-        return ActionChunk(seq, action_space, tuple(dims), t_start, dt, _actions(rows, dims, "chunk"), valid_until, source)
+        seen = t_start if observed_at is None else observed_at
+        return ActionChunk(
+            seq, action_space, tuple(dims), t_start, dt, _actions(rows, dims, "chunk"), valid_until, source, seen, inference_ns
+        )
 
     @property
     def horizon(self) -> int:
@@ -372,14 +395,17 @@ class ActionChunk:
 
 @dataclass(frozen=True, eq=False)
 class FallbackSpec:
-    """A short trajectory S0 runs instead of HOLD when its chunk expires.
+    """A short trajectory S0 runs instead of HOLD when its chunk expires, or
+    when the execution fails (the runtime engages it then).
 
     S2 may install one ahead of time, so S0 always has a safe behaviour and
     never waits for a slower layer. Row k is the target at te + (k+1)*dt, where
     te is the tick at which S0 engages the fallback: the trajectory starts from
     wherever S0 is at te. S0 engages it at most once, only while
-    valid_from <= now <= valid_until, runs it to its last row, then returns to
-    HOLD. A new valid chunk takes over at once.
+    valid_from <= now <= valid_until, runs its rows, then holds the last row,
+    still in FALLBACK, until te + `lasts`: then the fallback has expired and S0
+    returns to HOLD. `lasts` is at least the rows' duration (the default: no
+    holding). A new valid chunk takes over at once.
     """
 
     action_space: str
@@ -389,12 +415,26 @@ class FallbackSpec:
     valid_from: Ns
     valid_until: Ns
     source: str
+    lasts: Ns
 
     @staticmethod
-    def make(action_space: str, dims: Sequence[str], dt: Ns, rows: Any, valid_from: Ns, valid_until: Ns, source: str) -> FallbackSpec:
+    def make(
+        action_space: str,
+        dims: Sequence[str],
+        dt: Ns,
+        rows: Any,
+        valid_from: Ns,
+        valid_until: Ns,
+        source: str,
+        lasts: Ns | None = None,
+    ) -> FallbackSpec:
         if dt <= 0 or valid_until < valid_from:
             raise ChunkRejected(Rejection.SHAPE, f"fallback dt {dt} ns, window [{valid_from}, {valid_until}]")
-        return FallbackSpec(action_space, tuple(dims), dt, _actions(rows, dims, "fallback"), valid_from, valid_until, source)
+        actions = _actions(rows, dims, "fallback")
+        duration = int(actions.shape[0]) * dt
+        if lasts is not None and lasts < duration:
+            raise ChunkRejected(Rejection.SHAPE, f"fallback lasts {lasts} ns, shorter than its {duration} ns of rows")
+        return FallbackSpec(action_space, tuple(dims), dt, actions, valid_from, valid_until, source, duration if lasts is None else lasts)
 
     @property
     def duration(self) -> Ns:
@@ -409,6 +449,7 @@ class FallbackSpec:
             "valid_from": self.valid_from,
             "valid_until": self.valid_until,
             "source": self.source,
+            "lasts": self.lasts,
         }
 
     @staticmethod
@@ -422,6 +463,7 @@ class FallbackSpec:
                 int(value["valid_from"]),
                 int(value["valid_until"]),
                 str(value["source"]),
+                int(value["lasts"]),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ContractError(f"not a fallback: {e}") from e
@@ -438,6 +480,8 @@ class ChunkMeta:
     horizon: int
     valid_until: Ns
     received: Ns
+    observed_at: Ns = 0
+    inference_ns: Ns = 0
 
     def to_json(self) -> Json:
         return {
@@ -448,7 +492,21 @@ class ChunkMeta:
             "horizon": self.horizon,
             "valid_until": self.valid_until,
             "received": self.received,
+            "observed_at": self.observed_at,
+            "inference_ns": self.inference_ns,
         }
+
+
+@dataclass(frozen=True, eq=False)
+class S0History:
+    """S0's latest ticks, oldest first, as plain arrays: tick times (ns), the
+    positions S0 commanded and the desired positions it was tracking (n x D).
+    For the robot side (S1's host, a chunk corrector, an inference trigger)
+    at S1's rate; never streamed into traces."""
+
+    t: NDArray[np.int64]
+    command: Array
+    desired: Array
 
 
 @dataclass(frozen=True)
@@ -470,6 +528,7 @@ class S0Counters:
     late_ticks: int = 0
     max_interval_ns: Ns = 0
     max_step: float = 0.0
+    fallback_expiries: int = 0  # fallbacks whose time (lasts) ran out: S0 went from FALLBACK to HOLD
 
     def since(self, start: S0Counters) -> S0Counters:
         """Counts accumulated after `start` (the maxima are running maxima)."""
@@ -484,6 +543,7 @@ class S0Counters:
             self.late_ticks - start.late_ticks,
             self.max_interval_ns,
             self.max_step,
+            self.fallback_expiries - start.fallback_expiries,
         )
 
     def to_json(self) -> Json:
@@ -498,6 +558,7 @@ class S0Counters:
             "late_ticks": self.late_ticks,
             "max_interval_ns": self.max_interval_ns,
             "max_step": self.max_step,
+            "fallback_expiries": self.fallback_expiries,
         }
 
 
@@ -787,6 +848,55 @@ class S1Policy(Protocol):
         """The executor's claim once it has one; None while it is still working."""
 
 
+@dataclass(frozen=True, eq=False)
+class InferenceContext:
+    """What an InferenceTrigger sees, at S1's rate: S0's status and its
+    recent ticks, how many inferences are on their way, the last measured
+    inference latency, and S1's period (how often the trigger is asked)."""
+
+    now: Ns
+    status: S0Status
+    history: S0History
+    in_flight: int
+    latency: Ns
+    period: Ns
+
+
+class ChunkCorrector(Protocol):
+    """Applied on the robot side when S1's host hands a new chunk to S0:
+    returns the chunk S0 executes. It receives the new chunk (computed from
+    an observation taken at chunk.observed_at, inference_ns ago at most),
+    S0's executed history since that observation, and S0's current status.
+
+    It runs in S0's loop: it must return within about 0.5 ms, must not
+    block, must not read ground truth or any simulator state, and must not
+    call S0; the result keeps the chunk's seq, source, action space and
+    observation time."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def version(self) -> str: ...
+
+    def correct(self, chunk: ActionChunk, history: S0History, state: S0Status, now: Ns) -> ActionChunk: ...
+
+
+class InferenceTrigger(Protocol):
+    """Decides, at S1's rate, whether S1 starts its next inference now. It
+    must answer within about 0.5 ms, must not block, read ground truth or
+    call S0, and must start one when S0 has no chunk and none is on its way
+    (else S0 starves)."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def version(self) -> str: ...
+
+    def due(self, context: InferenceContext) -> bool: ...
+
+
 class S1Host(Protocol):
     """Where S1 runs: it steps the attached policy and delivers its chunks to S0."""
 
@@ -821,12 +931,17 @@ class S0(Protocol):
     def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
         """Replace the installed fallback. Raises ChunkRejected if it does not fit the body."""
 
-    def hold(self) -> None:
-        """Stop executing the active chunk and drop the installed fallback: HOLD
-        from the next tick until a new chunk arrives. The runtime calls it when
-        an execution stops running."""
+    def hold(self, fallback: bool = False) -> None:
+        """Stop executing the active chunk. Without `fallback`, also drop the
+        installed fallback: HOLD from the next tick until a new chunk arrives.
+        With it, engage the installed fallback at the next tick if it is
+        valid (else HOLD). The runtime calls it when an execution stops
+        running: with `fallback` when the execution failed."""
 
     def status(self) -> S0Status: ...
+
+    def history(self, since: Ns) -> S0History:
+        """Ticks at or after `since`, from a bounded buffer (the last seconds only)."""
 
 
 class ObservationFilter(Protocol):

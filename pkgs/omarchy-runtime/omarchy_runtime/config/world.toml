@@ -28,6 +28,11 @@ width = 0.08
 height = 0.10
 x = 0.92
 
+[objects.dish_1]  # absent until a scenario makes it appear (slot_blocked)
+width = 0.08
+height = 0.10
+present = false
+
 [sensor]  # structured detections, no images
 source = "sim.camera"
 noise_m = 0.003  # standard deviation of each coordinate

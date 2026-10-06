@@ -37,14 +37,14 @@ from omarchy_runtime.contracts import (
     RecoveryPolicy,
     ns,
 )
-from omarchy_runtime.extensions import FILTERS, LATENCY, RECOVERY, VERIFIERS, describe
+from omarchy_runtime.extensions import CORRECTORS, FILTERS, INFERENCE_TRIGGERS, LATENCY, RECOVERY, VERIFIERS, describe
 from omarchy_runtime.runtime import Runtime
 from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Latest, Mailbox, Scheduler, WallScheduler, distribution
 from omarchy_runtime.sim.s0 import SimS0
 from omarchy_runtime.sim.s1 import ScriptedPickPlace, SimS1Host, Stall
 from omarchy_runtime.sim.sensor import Occlusion, Sensor
-from omarchy_runtime.sim.world import Trigger, World
+from omarchy_runtime.sim.world import Change, Trigger, World
 from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity, where_measured
 from omarchy_runtime.wallclock import stamp
 
@@ -69,6 +69,8 @@ class RunResult:
     s2: Json  # where S2 ran: in-process, or remote with its address and hello
     s2_link: Json | None  # S2's liveness as the runtime's supervisor saw it (remote S2 only)
     tags: Mapping[str, str]
+    observations: list[tuple[Ns, Ns]]  # (taken, delivered to S1 and the runtime), for the harness
+    inferences: int  # how many times S1 inferred (its trigger said due)
 
     def record(self, t0: Ns = 0, t1: Ns | None = None) -> dict[str, Any]:
         """S0's per-tick record between t0 and t1, both included."""
@@ -82,6 +84,7 @@ class RunResult:
             "desired": self.s0.record_desired[:n][keep],
             "seq": self.s0.record_seq[:n][keep],
             "valid_until": self.s0.record_valid_until[:n][keep],
+            "observed_at": self.s0.record_observed[:n][keep],
         }
 
     def violations(self, t0: Ns = 0, t1: Ns | None = None) -> list[tuple[Ns, str]]:
@@ -123,16 +126,22 @@ def _timing(cfg: Json, seed: int, pauses: list[Trigger], s0_stalls: list[Trigger
     return Timing(_delay(t, "observation_age", "scenario timing", np.random.default_rng([seed, 6])), skip, pauses, s0_stalls)
 
 
-def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], list[Trigger], list[Trigger]]:
+def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], list[Trigger], list[Trigger], list[Change]]:
     scene = config.scene(cfg)
-    slips, stalls, occlusions, pauses, s0_stalls = [], [], [], [], []
+    slips, stalls, occlusions, pauses, s0_stalls, changes = [], [], [], [], [], []
     for n, f in enumerate(cfg["scenario"].get("faults", [])):
         where = f"scenario faults[{n}]"
         after = config.get(f, "after", str, where)
         if after not in TRIGGERS:
             raise ConfigError(f"{where}.after: {after!r} is not one of {', '.join(TRIGGERS)}")
-        when = Trigger(after, ns(config.get(f, "delay_s", float, where)), ns(config.get(f, "duration_s", float, where)))
         kind = config.get(f, "kind", str, where)
+        if kind in ("move", "appear"):
+            entity = config.get(f, "entity", str, where)
+            if entity not in scene.objects:
+                raise ConfigError(f"{where}.entity: no object {entity!r} in world.toml")
+            changes.append(Change(after, ns(config.get(f, "delay_s", float, where)), kind, entity, config.get(f, "x", float, where)))
+            continue
+        when = Trigger(after, ns(config.get(f, "delay_s", float, where)), ns(config.get(f, "duration_s", float, where)))
         if kind == "slip":
             slips.append(when)
         elif kind == "s1_stall":
@@ -147,8 +156,8 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], lis
         elif kind == "s0_stall":
             s0_stalls.append(when)
         else:
-            raise ConfigError(f"{where}.kind: {kind!r} is not slip, s1_stall, occlusion, pause or s0_stall")
-    return slips, stalls, occlusions, pauses, s0_stalls
+            raise ConfigError(f"{where}.kind: {kind!r} is not slip, s1_stall, occlusion, pause, s0_stall, move or appear")
+    return slips, stalls, occlusions, pauses, s0_stalls, changes
 
 
 def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple[RecoveryPolicy, LatencyModel, Json]:
@@ -165,6 +174,11 @@ def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
     return recovery, latency, {"recovery": describe(recovery), "s2_latency": describe(latency) | {"seconds": ttft, "spread": spread}}
+
+
+def _lasts(s2: Json) -> Ns | None:
+    """[s2] fallback_lasts_s: how long S0 may stay in S2's fallback once engaged."""
+    return ns(config.get(s2, "fallback_lasts_s", float, "scenario s2")) if "fallback_lasts_s" in s2 else None
 
 
 def _reconnect(cfg: Json) -> link.Reconnect:
@@ -198,20 +212,23 @@ def run(
     ttft: float | None = None,
     ttft_spread: float = 0.0,
     tags: Mapping[str, str] | None = None,
+    overrides: Json | None = None,
 ) -> RunResult:
     """Run one scenario. `clock` is "simulated" or "wall"; `s0_hz` replaces
     S0's configured rate; `s2` is the address of an S2 process (omarchy-runtime
     s2) to connect to, waiting up to `s2_timeout`, instead of S2 in this
     process, from the local address `s2_bind` if given (the S2 link's
     tunnel); `ttft` and `ttft_spread` replace the latency of S2 in this
-    process (see s2_parts). `tags` go into the trace header as they are."""
+    process (see s2_parts). `tags` go into the trace header as they are.
+    `overrides` is merged into the effective configuration (and its hash),
+    as the inference matrix varies S1's latency, corrector and trigger."""
     if clock not in ("simulated", "wall"):
         raise ConfigError(f"clock {clock!r} is not simulated or wall")
     if s2 is not None and clock != "wall":
         raise ConfigError("an S2 in another process runs on the wall clock: add --clock wall")
     if s2 is not None and ttft is not None:
         raise ConfigError("an S2 in another process has its own time to first token: give --ttft to omarchy-runtime s2")
-    cfg = config.effective(name)
+    cfg = config.merge(config.effective(name), overrides or {})
     if clock == "wall":
         cfg["world"]["rates_hz"] |= config.get(cfg["world"], "wall_rates_hz", dict, "world.toml")
     if s0_hz is not None:
@@ -227,11 +244,12 @@ def run(
     verification = cfg["runtime"]["verification"]
     sensor_cfg = cfg["world"]["sensor"]
     ext = cfg["runtime"]["extensions"]
-    slips, stalls, occlusions, pauses, s0_stalls = _faults(cfg)
+    slips, stalls, occlusions, pauses, s0_stalls, changes = _faults(cfg)
     timing = _timing(cfg, seed, pauses, s0_stalls)
     run_id = f"{int(np.random.default_rng([seed, 1]).integers(1 << 32)):08x}"
 
-    world = World(scene, {k: v["x"] for k, v in cfg["world"]["objects"].items()}, body, slips)
+    present = {k: config.get(v, "x", float, f"world objects.{k}") for k, v in cfg["world"]["objects"].items() if v.get("present", True)}
+    world = World(scene, present, body, slips, changes)
     period = SECOND // rates["s0"]
     late = config.get(cfg["world"]["s0"], "late_after_periods", float, "world.toml s0")
     s0 = SimS0(body, world, capacity=limit * rates["s0"] // SECOND + 1, nominal=period, late_after=round(late * period))
@@ -247,12 +265,16 @@ def run(
     for_runtime: Mailbox[Observation] = Mailbox()
     config.get(s["s1"], "latency_s", float, "scenario s1")
     s1_latency = _delay(s["s1"], "latency", "scenario s1", np.random.default_rng([seed, 4]))
-    host = SimS1Host(s0, for_s1, s1_latency or (lambda: 0), stalls, world)
     try:
         observation_filter = FILTERS[ext["filter"]]()
         verifiers = {p: VERIFIERS[v]() for p, v in ext["verifiers"].items()}
+        corrector = CORRECTORS[ext["corrector"]](cfg["runtime"]["s1_host"])
+        trigger = INFERENCE_TRIGGERS[ext["trigger"]](cfg["runtime"]["s1_host"])
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
+    host = SimS1Host(
+        s0, for_s1, s1_latency or (lambda: 0), stalls, world, period=SECOND // rates["s1"], corrector=corrector, trigger=trigger
+    )
     recovery, latency, s2_named = s2_parts(cfg, ttft, ttft_spread)
     goals = config.goals(s["s2"], "scenario s2")
     os_build, os_note = os_identity()
@@ -288,6 +310,8 @@ def run(
         "extensions": {
             "filter": describe(observation_filter),
             "verifiers": {p: describe(v) for p, v in verifiers.items()},
+            "corrector": describe(corrector) | ({"blend_s": cfg["runtime"]["s1_host"]["blend_s"]} if corrector.id == "blend" else {}),
+            "trigger": describe(trigger) | ({"mismatch": cfg["runtime"]["s1_host"]["mismatch"]} if trigger.id == "mismatch" else {}),
         }
         | s2_named,
         "s2": placement,
@@ -323,6 +347,7 @@ def run(
     truths: list[bool | None] = []
 
     aging: list[tuple[Ns, int, Observation]] = []  # observations on their way, a heap by arrival time
+    observed: list[tuple[Ns, Ns]] = []
     skips = np.random.default_rng([seed, 5])
 
     def sense(now: Ns) -> None:
@@ -331,6 +356,7 @@ def run(
         heapq.heappush(aging, (now + age, sensor.count, observation))
         while aging and aging[0][0] <= now:
             _, _, ready = heapq.heappop(aging)
+            observed.append((ready.t, now))
             for_s1.put(ready)
             for_runtime.put(ready)
 
@@ -366,6 +392,7 @@ def run(
             np.random.default_rng([seed, 3]),
             fallback=bool(s["s2"].get("fallback", False)),
             task_prefix=run_id,
+            fallback_lasts=_lasts(s["s2"]),
         )
         sched.add("s2", SECOND // rates["s2"], unless_paused(scripted.step))
         s2_done = lambda: scripted.done  # noqa: E731
@@ -402,6 +429,8 @@ def run(
         placement,
         s2_link,
         dict(tags or {}),
+        observed,
+        host.inferences,
     )
     if record_s0:
         for summary in runtime.finished:
@@ -450,6 +479,7 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
         np.random.default_rng([seed, 3]),
         fallback=bool(s["s2"].get("fallback", False)),
         task_prefix=run_id,
+        fallback_lasts=_lasts(s["s2"]),
     )
     sched = WallScheduler()
     sched.add("link", ns(0.001), api.step)
