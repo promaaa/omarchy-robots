@@ -139,7 +139,7 @@ def cmd_placement(args: argparse.Namespace) -> int:
 
 def cmd_placement_docs(args: argparse.Namespace) -> int:
     results = json.loads(Path(args.results).read_text())
-    placement.write_docs(results, [Path(f) for f in args.files])
+    placement.write_docs(results, [Path(f) for f in args.files], args.source)
     print(f"The S2 placement table in {', '.join(args.files)} is now the one of {args.results}.")
     return 0
 
@@ -197,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("placement-docs", help="write a placement results.json's table into documentation files, between its markers")
     p.add_argument("results", help="the results.json written by `placement --out`")
     p.add_argument("files", nargs="+", help="for example README.md manual/runtime.md")
+    p.add_argument("--source", help='where the results come from, for the caption, e.g. "CI run 123, GitHub runner, 2 CPUs, KVM"')
     p.set_defaults(func=cmd_placement_docs)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")

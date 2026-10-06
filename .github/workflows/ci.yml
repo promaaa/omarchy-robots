@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       placement:
-        description: Also run the S2 placement experiment, full matrix (two VMs, KVM, about 20 min)
+        description: Also run the S2 placement experiment, full matrix (two VMs, KVM, about 15 min)
         type: boolean
         default: false
 

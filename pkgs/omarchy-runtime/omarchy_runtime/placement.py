@@ -206,16 +206,18 @@ def report(results: Json) -> str:
     return "\n".join(parts)
 
 
-def markdown(results: Json) -> str:
+def markdown(results: Json, source: str | None = None) -> str:
+    """The table in Markdown; `source` says where the results come from (a CI run, a host)."""
     header, body = rows(results)
-    lines = [caption(results), "", "| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    text = caption(results) + (f" Source: {source}." if source else "")
+    lines = [text, "", "| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(r) + " |" for r in body]
     return "\n".join(lines + ["", f"Tolerance: {results['tolerance']}"])
 
 
-def write_docs(results: Json, files: Sequence[Path]) -> None:
+def write_docs(results: Json, files: Sequence[Path], source: str | None = None) -> None:
     """Replace what is between the markers in each file with the table."""
-    block = f"{BEGIN}\n{markdown(results)}\n{END}"
+    block = f"{BEGIN}\n{markdown(results, source)}\n{END}"
     for path in files:
         text = path.read_text()
         start, end = text.find(BEGIN), text.find(END)

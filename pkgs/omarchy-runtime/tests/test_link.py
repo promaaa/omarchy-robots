@@ -180,8 +180,9 @@ class TestRemoteS2(unittest.TestCase):
         self.assertIn("no emulated network, not in VMs, soft real-time", placement.report(gathered))
         doc = tmpdir() / "README.md"
         doc.write_text(f"# Title\n\n{placement.BEGIN}\nold table\n{placement.END}\n\nAfter.\n")
-        placement.write_docs(gathered, [doc])
+        placement.write_docs(gathered, [doc], "a test")
         text = doc.read_text()
+        self.assertIn("Source: a test.", text)
         self.assertNotIn("old table", text)
         self.assertIn("| local | 0.1 | 1x SUCCEEDED |", text)
         self.assertTrue(text.endswith(f"{placement.END}\n\nAfter.\n"))

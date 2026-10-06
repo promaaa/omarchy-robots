@@ -148,13 +148,37 @@ For every cell the table gives the outcomes, safety violations (ground truth), S
 ```sh
 nix build .#checks.x86_64-linux.vm-s2-placement   # lan, degraded, outage x TTFT 0.1, 1 s (in nix flake check)
 nix build .#s2-placement                          # every profile x TTFT 0.1, 1, 5 s; wants KVM
-nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md
+nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
+  --source "CI run <id>, ..."      # writes the table below
 ```
 
 `result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
 
 <!-- s2-placement:begin -->
-Not measured yet.
+S2 placement, two-cup task (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (9a39cd6d1762), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Task and HOLD times are wall-clock; simulated is the same task with S2 in one process on simulated time. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37403591975 (https://github.com/promaaa/omarchy-robots/actions/runs/37403591975), the full matrix alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
+
+| profile | TTFT s | outcomes | violations | S0 starvations | fallback s | HOLD s | task s | simulated s | S2 RTT p50/p99/max ms | outages | S0 interval p99/max ms | S0 overruns |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 1.0/2.0/2.2 | none | 5.39/10.13 | 1 of 3734 |
+| local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 2.0/2.1/3.4 | none | 5.28/6.48 | 0 of 4138 |
+| local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 2.0/2.1/3.1 | none | 5.30/6.73 | 0 of 5714 |
+| lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 18.70 | 18.45 | 3.0/5.0/6.3 | none | 5.30/7.38 | 0 of 3760 |
+| lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 3.1/4.4/6.0 | none | 5.42/8.39 | 0 of 4136 |
+| lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.04 | 28.40 | 28.30 | 3.0/4.3/4.9 | none | 5.36/6.85 | 0 of 5697 |
+| wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.39 | 18.70 | 18.45 | 22.0/33.5/144.0 | none | 5.30/6.42 | 0 of 3823 |
+| wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.99 | 20.35 | 20.35 | 23.0/46.0/146.0 | none | 5.40/6.89 | 0 of 4083 |
+| wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 22.0/67.6/154.0 | none | 5.32/6.41 | 0 of 5733 |
+| wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 102.3/119.3/121.3 | none | 5.33/6.77 | 0 of 3760 |
+| wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.24 | 20.60 | 20.35 | 102.2/119.1/122.0 | none | 5.44/9.75 | 1 of 4159 |
+| wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.34 | 28.70 | 28.30 | 102.9/119.2/120.1 | none | 5.41/8.34 | 0 of 5774 |
+| degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.74 | 19.15 | 18.45 | 664.0/2087.1/2281.0 | short 1.1 s, short 1.2 s, short 0.7 s, short 0.7 s, short 0.7 s | 5.42/6.64 | 0 of 3955 |
+| degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.69 | 21.05 | 20.35 | 547.5/1235.8/1412.0 | short 0.7 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.9 s | 5.42/8.59 | 0 of 4508 |
+| degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.69 | 29.05 | 28.30 | 641.1/1310.6/1406.0 | short 0.6 s, short 0.6 s, short 0.8 s, short 0.8 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.5 s, short 0.6 s | 5.30/7.97 | 0 of 5923 |
+| outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.39 | 19.75 | 18.45 | 3.0/6180.2/6377.1 | long 6.5 s | 5.36/13.77 | 1 of 3972 |
+| outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 4.64 | 22.00 | 20.35 | 4.0/6382.0/6597.9 | long 6.4 s | 5.43/7.26 | 0 of 4418 |
+| outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.25 | 28.65 | 28.30 | 3.0/6180.6/6464.2 | long 6.5 s | 5.29/9.77 | 1 of 5760 |
+
+Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
 <!-- s2-placement:end -->
 
 ## Extension points
