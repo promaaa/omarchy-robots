@@ -444,7 +444,7 @@ Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_run
 | `LatencyModel.sample(rng)` returns a delay, S2's time to first token | `fixed`; also `lognormal` (sampled for each decision) | where S2 should run (R2) |
 | `ChunkCorrector.correct(chunk, history, state, now)` returns the chunk S0 executes | `none`; also `blend` | asynchronous inference: correcting a chunk computed from an older observation (see below) |
 | `InferenceTrigger.due(context)` says whether S1 infers now | `periodic`; also `mismatch` | asynchronous inference: when to infer again (see below) |
-| `FallbackGenerator.fallback(body, status, valid_from, valid_until)` returns a capability's default fallback | `lift` for `place_in`; also `hold` | what S0 does when S1's chunks stop and S2 has no fallback, or after S2's ran out (see "Fallbacks"); named per capability in `capabilities.toml` (`default_fallback`); contract tests `FallbackGeneratorContract` |
+| `FallbackGenerator.fallback(body, status, valid_from, valid_until)` returns a capability's default fallback; `motion_key(body, status)`, cheap, changes exactly when that motion would | `lift` for `place_in`; also `hold` | what S0 does when S1's chunks stop and S2 has no fallback, or after S2's ran out (see "Fallbacks"); named per capability in `capabilities.toml` (`default_fallback`); contract tests `FallbackGeneratorContract` |
 
 An extension that raises, or returns the wrong type, never stops the run: a failing filter loses that observation (unfiltered data never reaches the belief), a failing verifier gives INCONCLUSIVE, a failing recovery policy means giving up, and each leaves an `error` event in the trace.
 

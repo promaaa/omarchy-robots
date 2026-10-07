@@ -12,7 +12,7 @@ new implementation should pass.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from typing import Any
 
 import numpy as np
@@ -238,6 +238,9 @@ class Hold:
     id = "hold"
     version = "1"
 
+    def motion_key(self, body: BodySpec, status: S0Status) -> Hashable:
+        return None  # always the same motion
+
     def offsets(self, body: BodySpec, status: S0Status) -> list[float]:
         return [0.0] * len(body.dims)
 
@@ -267,12 +270,20 @@ class LiftHeld(Hold):
     id = "lift"
     version = "1"
 
+    def motion_key(self, body: BodySpec, status: S0Status) -> Hashable:
+        return self._holding(body, status)
+
+    def _holding(self, body: BodySpec, status: S0Status) -> bool:
+        """A closed gripper on a body that can rise."""
+        if "z" not in body.dims or "gripper" not in body.dims:
+            return False
+        g = body.dims.index("gripper")
+        return status.position[g] < (body.lower[g] + body.upper[g]) / 2
+
     def offsets(self, body: BodySpec, status: S0Status) -> list[float]:
         row = super().offsets(body, status)
-        if "z" in body.dims and "gripper" in body.dims:
-            g = body.dims.index("gripper")
-            if status.position[g] < (body.lower[g] + body.upper[g]) / 2:
-                row[body.dims.index("z")] = LIFT_M
+        if self._holding(body, status):
+            row[body.dims.index("z")] = LIFT_M
         return row
 
 

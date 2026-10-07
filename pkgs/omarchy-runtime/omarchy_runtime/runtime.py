@@ -12,7 +12,7 @@ It never reads the simulator: everything it knows comes from observations
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -233,6 +233,7 @@ class Execution:
         self.wall: Counter[str] = Counter()
         self.fallbacks: list[Json] = []  # every installation: slot, kind, source, window, duration
         self.base: FallbackSpec | None = None  # the capability's default, as installed
+        self.base_key: Hashable = None  # its generator's motion key then
         self.s0_started: Ns | None = None  # S0's time when the execution started, for its coverage
         self.s0_stopped: Ns | None = None
         self.base_error: str | None = None  # the default fallback generator's last error, recorded once
@@ -574,9 +575,13 @@ class Runtime:
             return
         generator = self._defaults[cap.default_fallback]
         try:
+            key = generator.motion_key(self.body, self._status)
+            if ex.base is not None and key == ex.base_key:
+                return  # the same motion: nothing to build (asked at every step, so it must stay cheap)
             spec = generator.fallback(self.body, self._status, ex.started, ex.started + BASE_WINDOW)
             if not isinstance(spec, FallbackSpec):
                 raise ContractError(f"returned {type(spec).__name__}, not a FallbackSpec")
+            ex.base_key = key
             if ex.base is not None and spec.same_motion(ex.base):
                 return
             self._s0.install_fallback(spec, now, base=True)

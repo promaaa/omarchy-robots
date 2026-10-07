@@ -19,6 +19,14 @@ in VMs: not hardware-tested, and nothing is real-time.
 
 #### Fixed
 
+- The runtime built the capability's default fallback at every supervisor
+  step to see whether its motion had changed: 50 µs of a 156 µs runtime step
+  (profiled on the host, simulated run), in the thread S0 shares on the wall
+  clock, and slower still on an emulated CPU, where the local nix flake check
+  (QEMU TCG) failed the placement test's task-time tolerance four runs in
+  five. Contract change: `FallbackGenerator.motion_key(body, status)`, a
+  cheap value that changes exactly when the motion would; the runtime builds
+  the fallback only then. The runtime step is back at 95 µs (v0.0.2 part 4: 93 µs).
 - S2's fallback is spent again once a chunk takes over after it engaged,
   as before v0.0.2 part 5; the capability's default stays installed and engages
   again. v0.0.2 part 5 kept S2's installed, so that every brief gap in S1's chunks

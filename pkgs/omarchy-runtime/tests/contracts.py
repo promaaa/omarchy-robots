@@ -284,6 +284,19 @@ class FallbackGeneratorContract:
                 g = body.dims.index("gripper")
                 self.assertTrue(spec.relative[g] and bool(np.all(spec.actions[:, g] == 0.0)), "the fallback moves the gripper")
 
+    def test_the_motion_key_changes_exactly_with_the_motion(self: Any) -> None:
+        generator = self.make()
+        cases = self.cases()
+        for b1, s1 in cases:
+            for b2, s2 in cases:
+                if b1 is not b2:
+                    continue
+                same = generator.fallback(b1, s1, 0, 60_000 * MS).same_motion(generator.fallback(b2, s2, 0, 60_000 * MS))
+                self.assertEqual(generator.motion_key(b1, s1) == generator.motion_key(b2, s2), same, (b1.id, s1.position, s2.position))
+        body, status = cases[0]
+        hash(generator.motion_key(body, status))
+        _fast(self, lambda: generator.motion_key(body, status))
+
     def test_deterministic_and_within_its_time_budget(self: Any) -> None:
         generator = self.make()
         for body, status in self.cases():

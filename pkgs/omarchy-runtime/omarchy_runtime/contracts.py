@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import enum
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import NoneType
 from typing import TYPE_CHECKING, Any, Protocol
@@ -927,15 +927,19 @@ class FallbackGenerator(Protocol):
     """A capability's default fallback, computed by the runtime on the robot
     side from S0's status: installed in S0 as its base fallback when an
     execution starts, before S1's first chunk, and renewed whenever the
-    generator returns another motion (after a grasp, say). It must not block,
-    read ground truth or call S0; one that raises leaves the base fallback as
-    it was and records an error."""
+    generator returns another motion (after a grasp, say). `motion_key` is
+    cheap and asked at every supervisor step: it changes whenever
+    `fallback` would return another motion, and the runtime asks `fallback`
+    only then. Neither may block, read ground truth or call S0; one that
+    raises leaves the base fallback as it was and records an error."""
 
     @property
     def id(self) -> str: ...
 
     @property
     def version(self) -> str: ...
+
+    def motion_key(self, body: BodySpec, status: S0Status) -> Hashable: ...
 
     def fallback(self, body: BodySpec, status: S0Status, valid_from: Ns, valid_until: Ns) -> FallbackSpec: ...
 
