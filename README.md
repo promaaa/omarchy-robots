@@ -20,14 +20,14 @@ that names the exact system it ran on. **The robot is simulated** and nothing
 is real-time: the runtime runs in simulated time, or on the wall clock as soft
 real-time Python, with S2 in its process or in its own, on another machine.
 
-**Status:** v0.0.2 part 5 (milestone R4, part 1: a fallback before it is needed)
-runs and is tested in virtual machines: the base system, the runtime's
-simulated scenarios (on a laptop and inside an Omarchy Robots VM), the
-runtime on the wall clock with S2 in its own process on a second VM over an
-emulated network (the S2 placement experiment), and the installation of a
-generic PC onto an emulated disk. The Jetson and pc targets evaluate and are
-partly built; none has run on hardware yet (see the [support
-matrix](#support-matrix)).
+**Status:** v0.0.2 (milestone R4: a fallback before it is needed, measured
+S2 latency, repeated runs) runs and is tested in virtual machines: the base
+system, the runtime's simulated scenarios (on a laptop and inside an Omarchy
+Robots VM), the runtime on the wall clock with S2 in its own process on a
+second VM over an emulated network (the S2 placement experiment), and the
+installation of a generic PC onto an emulated disk. The Jetson and pc
+targets evaluate and are partly built; none has run on hardware yet (see the
+[support matrix](#support-matrix)).
 
 ## One file
 
@@ -670,7 +670,8 @@ steps, timing faults, reconnection, the S2 link over WireGuard), v0.0.2 part 4
 milestone R3's experiment (scenes that change, recovery under the fallback,
 the S2 placement matrix on them, the asynchronous inference seam), v0.0.2 part 5
 milestone R4's first part (fallbacks before they are needed, fallback
-coverage). The first board booted and
+coverage), v0.0.2 its second (measured S2 latency, repeated runs with
+intervals). The first board booted and
 validated on hardware takes v0.1.0. The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; their changes are noted

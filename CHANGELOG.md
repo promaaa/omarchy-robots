@@ -7,7 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Added
+## [0.0.2] - 2026-10-07
+
+### Part 6 (2026-10-07)
+
+Milestone R4, part 2: real S2 latencies and repeated runs. A small model's
+time to first token measured on the development host, committed with its
+provenance; the placement matrix run 6 times per cell with those measured
+TTFTs, each value a median with a 95 % interval. Measured on the host and
+in VMs: not hardware-tested, and nothing is real-time.
+
+#### Added
 
 - `omarchy-runtime ttft-measure`: an S2 backend's time to first token
   (TTFT), measured with a representative S2 prompt (choose the rack spot for
@@ -37,12 +47,11 @@ All notable changes to this project are documented here. The format follows
 - Flake outputs `llama-cpp` and `llama-cpp-avx2` (the same package with
   AVX2, FMA, F16C and BMI2): the local backend of ttft-measure.
 
-### Changed
+#### Changed
 
 - The placement tables have one row for each cell (scenario, profile, TTFT)
   over its runs; "cells within tolerance" became "runs within tolerance".
 
-## [0.0.2] - 2026-10-07
 
 ### Part 5 (2026-10-07)
 
