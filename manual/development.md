@@ -16,7 +16,7 @@ nix develop         # a shell with nixfmt, statix, deadnix, ruff, python3 with n
 
 The runtime has its own check, which runs without a VM in under a minute: `nix build .#checks.x86_64-linux.omarchy-runtime`. Inside `nix develop`, from `pkgs/omarchy-runtime`, `python3 -m unittest discover -s tests -t .` runs the same tests. [AGENTS.md](https://github.com/promaaa/omarchy-robots/blob/main/AGENTS.md) lists the runtime's binding principles and how to add an extension.
 
-The VM tests need the `nixos-test` and `kvm` system features in `nix.conf`. CI runs `nix flake check` on every push; building the `orin-agx-devkit` system on an arm64 runner is a manual workflow input, because it takes about an hour.
+The VM tests need the `nixos-test` and `kvm` system features in `nix.conf`. CI runs `nix flake check` as parallel jobs, one per VM test, one for the evaluations and one for the rest (`lint`, with the runtime's tests). Every check runs on a push to `main` and on a pull request; a push to another branch runs `lint` and the evaluations only; a change to documentation only (README, CHANGELOG, AGENTS.md, `manual/`, `branding/`, `*.md`) skips the VM tests; a nightly run checks `main` unless its commit already passed its VM tests; a tag runs nothing, its commit having been checked; a newer push cancels the run it supersedes. Building the `orin-agx-devkit` system on an arm64 runner, the S2 placement matrices and the repeated matrix are manual workflow inputs, because they take hours.
 
 ## What you can build
 

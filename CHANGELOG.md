@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Changed (CI)
+
+- CI spends runner minutes where they check something new; no check is
+  removed. A push to `main` and a pull request run every check; a push to
+  another branch runs `lint` (with the runtime's tests) and the evaluations
+  only; a change to documentation only skips the VM tests; a nightly run
+  checks `main` unless its commit already passed its VM tests; a tag runs
+  nothing (its commit was checked when pushed); a newer push or pull
+  request update cancels the run it supersedes. The jobs whose closures fit
+  in a runner's free 14 GB no longer delete its toolchains first (1 to 5 min
+  each); every job prints its disk use. Billed minutes per push, the sum of
+  all jobs, from six runs of 2026-10-07: 68 to 96 (median 76.5) before; 55 to
+  84 (median 64.5) for a code change on `main`, 22 to 49 (median 26) for a
+  branch or a documentation change, 0 for a tag. No Nix store cache: the
+  jobs spend their time running VMs and evaluating, not downloading.
+
 ## [0.0.2] - 2026-10-07
 
 ### Part 6 (2026-10-07)
