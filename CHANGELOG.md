@@ -7,7 +7,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Changed
+## [0.0.2] - 2026-10-07
+
+### Part 5 (2026-10-07)
+
+Milestone R4, part 1: a fallback exists before it is needed. The
+capability's default fallback is installed by the runtime when an execution
+starts, S2's prediction travels with the goal, and S0 holds both, with no
+gap between them. Fallback coverage is measured for every execution, and
+the full-matrix check is strict again. Tested in simulation and in VMs:
+not hardware-tested, and nothing is real-time.
+
+#### Changed
 
 - Contract change, fallbacks exist before they are needed: S0 holds two
   fallbacks and runs the first valid one, else HOLD. S2's (predicted with
@@ -45,7 +56,7 @@ All notable changes to this project are documented here. The format follows
   retry started and the capability's default took over (before: S0 went to
   HOLD).
 
-### Added
+#### Added
 
 - `FallbackGenerator` (contracts.py), with `hold` (every dimension holds
   where S0 is, the gripper included) and `lift` (the same; holding an
@@ -64,7 +75,6 @@ All notable changes to this project are documented here. The format follows
   from both runs' traces the same way. The README and the manual show the
   v0.0.2 part 4 matrix against this release's.
 
-## [0.0.2] - 2026-10-06
 
 ### Part 4 (2026-10-06)
 
