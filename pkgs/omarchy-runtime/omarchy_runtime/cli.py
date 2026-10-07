@@ -94,9 +94,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     else:
         print(f"os      {header['os_note']}")
     ext = header["extensions"]
-    named = {k: f"{v['id']}@{v['version']}" for k, v in ext.items() if k != "verifiers"}
+    named = {k: f"{v['id']}@{v['version']}" for k, v in ext.items() if "id" in v}  # the others map a key to one each
     verifiers = ", ".join(f"{p} {v['id']}@{v['version']}" for p, v in ext["verifiers"].items())
     print(f"filter  {named['filter']}  recovery {named['recovery']}  S2 latency {named['s2_latency']}  verifiers {verifiers}")
+    defaults = ", ".join(f"{c} {v['id']}@{v['version']}" for c, v in ext.get("default_fallbacks", {}).items())
+    print(f"default fallbacks  {defaults or 'none'}")
     truths = {}
     if (run / "results.json").exists():
         truths = {r["execution"]: r["truth"] for r in json.loads((run / "results.json").read_text())["executions"]}

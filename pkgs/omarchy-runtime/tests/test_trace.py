@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -14,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from omarchy_runtime import cli
 from omarchy_runtime.scenario import run
 from omarchy_runtime.trace import NO_OS, os_identity, validate_run
 from tests.helpers import scenario, tmpdir
@@ -56,6 +59,10 @@ class TestValidate(unittest.TestCase):
         header = json.loads((scenario("nominal_a").dir / "run.json").read_text())
         self.assertEqual(header["trace_schema"], 5)
         self.assertEqual(header["extensions"]["default_fallbacks"], {"place_in": {"id": "lift", "version": "1"}})
+        shown = io.StringIO()
+        with contextlib.redirect_stdout(shown):
+            self.assertEqual(cli.main(["show", str(scenario("nominal_a").dir)]), 0)
+        self.assertIn("default fallbacks  place_in lift@1", shown.getvalue())
         self.assertEqual(header["extensions"]["filter"], {"id": "identity", "version": "1"})
         self.assertEqual(header["extensions"]["verifiers"]["in"], {"id": "geometric", "version": "1"})
         self.assertEqual(header["extensions"]["recovery"]["id"], "retry_once")
