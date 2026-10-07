@@ -1,0 +1,470 @@
+{
+  "format": "omarchy-latency/1",
+  "kind": "s2_ttft",
+  "label": "measured on host",
+  "unit": "s",
+  "samples": [
+    8.999962991,
+    8.524725632,
+    8.928383149,
+    8.344588835,
+    8.508175795,
+    8.715630796,
+    8.470312592,
+    8.517331043,
+    8.434516092,
+    8.661871879,
+    8.560448256,
+    8.531249301,
+    8.577509246,
+    8.518816916,
+    8.477162356,
+    8.449437649,
+    8.422945736,
+    8.821176391,
+    8.525836774,
+    8.501450354,
+    8.447966808,
+    8.504431938,
+    8.454887352,
+    8.448548112,
+    8.402216278,
+    8.540397012,
+    8.58290475,
+    8.527794759,
+    8.339580634,
+    8.465576695,
+    8.414681558,
+    8.429283326,
+    8.354412546,
+    8.50535547,
+    8.418228201,
+    8.464718244,
+    8.497651177,
+    8.453020977,
+    8.374196471,
+    8.354130673,
+    8.45116209,
+    8.519896995,
+    8.514176896,
+    8.522154937,
+    8.566921746,
+    9.651161472,
+    8.601280984,
+    8.457061876,
+    8.841333054,
+    8.555786947
+  ],
+  "total_s": [
+    16.20128394,
+    13.522051909,
+    13.769338833,
+    13.127448347,
+    13.570239583,
+    13.590665724,
+    13.281849695,
+    13.398442599,
+    13.228125112,
+    13.437373973,
+    13.342910383,
+    13.296967744,
+    13.382445421,
+    13.4731133,
+    13.373354755,
+    13.207593034,
+    13.303567542,
+    13.584911435,
+    13.363495319,
+    13.355284298,
+    13.305358235,
+    13.38111357,
+    13.356089439,
+    13.276038293,
+    13.238220912,
+    13.45374518,
+    13.352233231,
+    13.385976642,
+    13.199844837,
+    13.275913842,
+    13.209678434,
+    13.399374543,
+    13.232766038,
+    13.249616822,
+    13.283827973,
+    13.290424805,
+    13.267152196,
+    13.33861222,
+    13.169916021,
+    13.228897275,
+    13.499611227,
+    13.349498606,
+    13.3683482,
+    13.447871116,
+    13.561491097,
+    14.503500191,
+    13.469072992,
+    13.389763431,
+    13.714659286,
+    13.546329727
+  ],
+  "failures": [],
+  "reconnects": 50,
+  "answers": {
+    "valid_json": 50,
+    "of": 50
+  },
+  "server_timings": [
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8993.654,
+      "predicted_n": 40,
+      "predicted_ms": 7201.533
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8515.523,
+      "predicted_n": 40,
+      "predicted_ms": 4997.332
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8923.169,
+      "predicted_n": 40,
+      "predicted_ms": 4840.954
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8339.395,
+      "predicted_n": 40,
+      "predicted_ms": 4782.892
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8497.834,
+      "predicted_n": 40,
+      "predicted_ms": 5062.016
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8705.875,
+      "predicted_n": 40,
+      "predicted_ms": 4875.168
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8465.475,
+      "predicted_n": 40,
+      "predicted_ms": 4811.543
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8512.244,
+      "predicted_n": 40,
+      "predicted_ms": 4881.101
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8429.544,
+      "predicted_n": 40,
+      "predicted_ms": 4793.648
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8653.585,
+      "predicted_n": 40,
+      "predicted_ms": 4775.504
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8555.321,
+      "predicted_n": 40,
+      "predicted_ms": 4782.485
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8520.023,
+      "predicted_n": 40,
+      "predicted_ms": 4765.759
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8571.844,
+      "predicted_n": 40,
+      "predicted_ms": 4804.972
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8513.627,
+      "predicted_n": 40,
+      "predicted_ms": 4954.329
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8472.128,
+      "predicted_n": 40,
+      "predicted_ms": 4896.337
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8443.843,
+      "predicted_n": 40,
+      "predicted_ms": 4758.148
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8417.882,
+      "predicted_n": 40,
+      "predicted_ms": 4880.598
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8815.057,
+      "predicted_n": 40,
+      "predicted_ms": 4764.901
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8520.762,
+      "predicted_n": 40,
+      "predicted_ms": 4837.688
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8496.518,
+      "predicted_n": 40,
+      "predicted_ms": 4853.851
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8440.711,
+      "predicted_n": 40,
+      "predicted_ms": 4858.947
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8499.088,
+      "predicted_n": 40,
+      "predicted_ms": 4877.125
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8449.572,
+      "predicted_n": 40,
+      "predicted_ms": 4901.535
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8439.47,
+      "predicted_n": 40,
+      "predicted_ms": 4827.509
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8394.221,
+      "predicted_n": 40,
+      "predicted_ms": 4836.019
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8535.443,
+      "predicted_n": 40,
+      "predicted_ms": 4913.372
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8577.954,
+      "predicted_n": 40,
+      "predicted_ms": 4769.297
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8522.462,
+      "predicted_n": 40,
+      "predicted_ms": 4858.219
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8334.609,
+      "predicted_n": 40,
+      "predicted_ms": 4860.269
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8460.676,
+      "predicted_n": 40,
+      "predicted_ms": 4810.34
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8403.249,
+      "predicted_n": 40,
+      "predicted_ms": 4795.018
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8418.683,
+      "predicted_n": 40,
+      "predicted_ms": 4970.041
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8344.681,
+      "predicted_n": 40,
+      "predicted_ms": 4878.887
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8497.015,
+      "predicted_n": 40,
+      "predicted_ms": 4744.273
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8413.177,
+      "predicted_n": 40,
+      "predicted_ms": 4865.547
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8459.927,
+      "predicted_n": 40,
+      "predicted_ms": 4825.692
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8492.6,
+      "predicted_n": 40,
+      "predicted_ms": 4769.51
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8443.531,
+      "predicted_n": 40,
+      "predicted_ms": 4885.575
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8366.764,
+      "predicted_n": 40,
+      "predicted_ms": 4795.719
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8349.075,
+      "predicted_n": 40,
+      "predicted_ms": 4874.771
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8446.213,
+      "predicted_n": 40,
+      "predicted_ms": 5048.086
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8515.101,
+      "predicted_n": 40,
+      "predicted_ms": 4829.584
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8509.217,
+      "predicted_n": 40,
+      "predicted_ms": 4854.175
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8513.704,
+      "predicted_n": 40,
+      "predicted_ms": 4925.769
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8562.052,
+      "predicted_n": 40,
+      "predicted_ms": 4994.576
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 9644.341,
+      "predicted_n": 40,
+      "predicted_ms": 4854.095
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8596.427,
+      "predicted_n": 40,
+      "predicted_ms": 4867.812
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8452.101,
+      "predicted_n": 40,
+      "predicted_ms": 4932.736
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8835.006,
+      "predicted_n": 40,
+      "predicted_ms": 4873.328
+    },
+    {
+      "prompt_n": 632,
+      "prompt_ms": 8550.87,
+      "predicted_n": 40,
+      "predicted_ms": 4990.593
+    }
+  ],
+  "summary": {
+    "ttft": {
+      "n": 50,
+      "median": 8.504893704,
+      "p05": 8.35425751585,
+      "p95": 8.88921060625,
+      "min": 8.339580634,
+      "max": 9.651161472,
+      "mean": 8.543049035220001
+    },
+    "total": {
+      "n": 50,
+      "median": 13.359792379,
+      "p05": 13.20333152565,
+      "p95": 13.74473303685,
+      "min": 13.127448347,
+      "max": 16.20128394,
+      "mean": 13.45110818654
+    }
+  },
+  "provenance": {
+    "date": "2026-10-07",
+    "host": {
+      "cpu": "Intel(R) Core(TM) i7-9700 CPU @ 3.00GHz",
+      "threads": 8,
+      "memory_gib": 62.7,
+      "os": "Omarchy",
+      "kernel": "7.2.5-3-omarchy",
+      "virtualization": "none",
+      "kvm": false
+    },
+    "backend": "llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096",
+    "endpoint": "http://127.0.0.1/v1",
+    "model": {
+      "name": "Qwen2.5-1.5B-Instruct",
+      "file": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+      "quantization": "Q4_K_M",
+      "source": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q4_k_m.gguf (the publisher's repository, revision 91cad511)",
+      "license": "Apache-2.0",
+      "requested_as": "qwen2.5-1.5b-instruct"
+    },
+    "method": "omarchy-runtime ttft-measure: 1 warm-up request(s) not counted, then 50 requests one after the other on one open connection, streaming; TTFT from sending a request to the first token of the answer, total to the end of the stream; temperature 0.0, at most 48 tokens; prompt cache off (cache_prompt false)",
+    "prompt_sha256": "d7e8788c6ff8249b688b1e823b80606478279ee756b063cfc5bff2a35d998261",
+    "prompt": "choose the next rack spot for cup_1 from the belief S2 has when S1 gave up in slot_blocked (data/s2_belief.json)",
+    "network_path": "loopback on the measuring host",
+    "runtime": {
+      "version": "0.0.2",
+      "revision": "5732d468c7db303e3dba7f6970b11d7a4ad1123a-dirty",
+      "dirty": true
+    }
+  }
+}

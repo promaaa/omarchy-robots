@@ -385,6 +385,37 @@ cd pkgs/omarchy-runtime
 nix develop ../.. -c python3 -m unittest discover -s tests -t .
 ```
 
+## Measured latencies
+
+> **Measured on the development host.** A desktop CPU (Intel i7-9700, 8 threads), no GPU, no robot.
+
+The S2 placement experiment's 0.1 s, 1 s and 5 s stand in for a model's time to first token (TTFT). `omarchy-runtime ttft-measure` measures a real one: it sends a representative S2 prompt (choose the next rack spot for the cup from the belief S2 has when S1 gave up in `slot_blocked`, answer in JSON) N times, streaming, to an OpenAI-compatible endpoint, and records for each request the TTFT (from sending it to the first token of the answer), the total latency and any failure. The result is a latency distribution file (`omarchy_runtime/data/latency/`, the format in AGENTS.md) with its provenance: date, host, backend, model and its file's SHA-256, prompt hash, method, network path. Its label is "measured on host".
+
+```sh
+nix build --inputs-from . nixpkgs#llama-cpp -o llama-cpp     # llama.cpp as nixpkgs packages it (no AVX2)
+nix build .#llama-cpp-avx2 -o llama-cpp-avx2                 # the same, built for AVX2 hosts
+llama-cpp-avx2/bin/llama-server -m qwen2.5-1.5b-instruct-q4_k_m.gguf --host 127.0.0.1 --port 8090 --threads 8 --parallel 1
+nix run .#omarchy-runtime -- ttft-measure --url http://127.0.0.1:8090/v1 --model qwen2.5-1.5b-instruct --n 50 --no-prompt-cache \
+  --backend "..." --model-file qwen2.5-1.5b-instruct-q4_k_m.gguf --model-source "<official URL>" --quantization Q4_K_M \
+  --out omarchy_runtime/data/latency/<name>.json
+nix run .#omarchy-runtime -- ttft-docs --docs README.md manual/runtime.md   # writes the table below
+```
+
+The model is Qwen2.5-1.5B-Instruct, quantized Q4_K_M, from its publisher's repository on Hugging Face (`Qwen/Qwen2.5-1.5B-Instruct-GGUF`, revision 91cad511, Apache-2.0); the file's SHA-256 is in each distribution's provenance. The weights are not in this repository. `--no-prompt-cache` makes llama-server process the whole prompt every time, as a fresh S2 decision would. A cloud backend takes the same command with its URL and a key from an environment variable (`OMARCHY_S2_API_KEY` by default) or a file outside the repository (`--api-key-file`); the key is sent only to the backend and never printed or written. None has been measured: no key was provided.
+
+<!-- s2-ttft:begin -->
+S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host, never on a robot.
+
+| distribution | label | backend | model | TTFT median s | p05 s | p95 s | n | failures | network path | date |
+|---|---|---|---|---|---|---|---|---|---|---|
+| qwen2.5-1.5b-q4km-host | measured on host | llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 8.505 | 8.354 | 8.889 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+| qwen2.5-1.5b-q4km-host-avx2 | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock), built with AVX2, FMA, F16C, BMI2 (flake output llama-cpp-avx2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 3.804 | 3.539 | 3.945 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+<!-- s2-ttft:end -->
+
+The placement experiment draws S2's TTFT from these files as well (`omarchy-runtime s2 --ttft-file NAME`: each decision takes one of the measured TTFTs, drawn at random with replacement from the run's seed). The repeated matrix runs every cell 6 times, with both measured distributions (llama.cpp as packaged, and built for AVX2) besides 0.1, 1 and 5 s, one scenario per CI job (`nix build .#s2-placement-repeated-<scenario>`; workflow dispatch with `repeated`), and `omarchy-runtime placement-merge` joins the four parts into one table. Each value is the median of a cell's runs, with a distribution-free confidence interval for that median from order statistics: the narrowest pair of the k-th smallest and k-th largest runs whose binomial coverage is at least 95 %; with 6 runs, the smallest and the largest, 96.9 %.
+
+The inference matrix takes measured S1 inference delays the same way: `omarchy-runtime inference-matrix --delay-file FILE` adds one row of delays drawn from an `s1_inference` file (`[s1] latency_file` in a scenario does it for one run). No such file is in this repository: the S1 delays above are the fixed 50, 150 and 300 ms.
+
 ## Asynchronous inference
 
 A VLA model infers a chunk from an observation, and the robot moves while it infers: when the chunk reaches S0, it was computed for a state that is already gone. Two extension points, both on the robot side in S1's host, never in the runtime, let a method act on this:

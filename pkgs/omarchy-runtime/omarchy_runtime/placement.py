@@ -15,10 +15,13 @@ soft real-time.
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from omarchy_runtime.contracts import ConfigError, Json
 from omarchy_runtime.evaluate import md_table, scenario_result, table
@@ -68,6 +71,10 @@ def _cell(s: Json) -> Json:
         "scenario": s["scenario"],
         "ttft_s": latency["seconds"],
         "ttft_spread": latency["spread"],
+        "distribution": latency.get("distribution"),
+        "ttft_label": f"{latency['distribution']} (median {latency['seconds']:.2f} s)"
+        if latency.get("distribution")
+        else f"{latency['seconds']:.1f}",
         "latency_model": f"{latency['id']}@{latency['version']}",
         "s2": s["s2"]["placement"],
         "s2_address": s["s2"].get("address"),
@@ -107,12 +114,16 @@ def gather(paths: Sequence[Path]) -> Json:
     with its simulated reference (the same scenario and latency model, S2 in
     one process, simulated time)."""
     cells = [_cell(s) for path in paths for s in json.loads(path.read_text())["scenarios"]]
-    references: dict[tuple[str, float, float], Json] = {}
+    references: dict[tuple[str, float, float | None, str | None], Json] = {}
     with tempfile.TemporaryDirectory() as tmp:
         for c in cells:
-            key = (c["scenario"], c["ttft_s"], c["ttft_spread"])
+            key = (c["scenario"], c["ttft_s"], c["ttft_spread"], c["distribution"])
             if key not in references:
-                r = run(c["scenario"], Path(tmp) / f"ref-{len(references)}", ttft=key[1], ttft_spread=key[2])
+                where = Path(tmp) / f"ref-{len(references)}"
+                if c["distribution"]:
+                    r = run(c["scenario"], where, ttft_file=c["distribution"])
+                else:
+                    r = run(c["scenario"], where, ttft=c["ttft_s"], ttft_spread=c["ttft_spread"])
                 references[key] = scenario_result(r, validate_run(r.dir))
             ref = references[key]
             c["simulated_task_time_s"] = expected = ref["task_time_s"]
@@ -130,6 +141,21 @@ def gather(paths: Sequence[Path]) -> Json:
             if c["task_time_s"] < 0.85 * expected:
                 c["problems"].append(f"task time {c['task_time_s']:.2f} s, below 85 % of the simulated {expected:.2f} s")
             c["passed"] = not c["problems"]
+    return _results(cells)
+
+
+def merge(paths: Sequence[Path]) -> Json:
+    """Placement results (results.json written by `placement --out`) from
+    several runs of the experiment, one table: the full matrix split over
+    CI jobs. Each cell remembers the artifact it came from, for its trace."""
+    cells = []
+    for path in paths:
+        for c in json.loads(path.read_text())["cells"]:
+            cells.append(c | {"artifact": c.get("artifact") or str(path.resolve().parent.parent)})
+    return _results(cells)
+
+
+def _results(cells: list[Json]) -> Json:
     first = cells[0] if cells else {}
     emulated = any(c["netem"] not in ("", "none") for c in cells)
     in_vms = bool(cells) and all(c["os"]["board"] == "vm" for c in cells)
@@ -149,24 +175,96 @@ def gather(paths: Sequence[Path]) -> Json:
         ),
         "coverage": "the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it",
         "rtt": "heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end",
+        "interval": INTERVAL,
         "tolerance": TOLERANCE,
         "cells": cells,
+        "groups": groups(cells),
         "passed": bool(cells) and all(c["passed"] for c in cells),
     }
+
+
+INTERVAL = (
+    "median of a cell's runs, and in brackets a distribution-free confidence interval for that median from order "
+    "statistics: the narrowest pair (k-th smallest, k-th largest) whose binomial coverage is at least 95 % (with 6 runs, "
+    "the smallest and the largest, 96.9 %); no interval below 6 runs"
+)
+
+
+def median_interval(values: Sequence[float]) -> Json:
+    """The median, and a confidence interval for it of at least 95 %
+    coverage from order statistics (None below 6 values)."""
+    x, n = sorted(values), len(values)
+    out: Json = {"median": float(np.median(x)), "low": None, "high": None, "coverage": None, "n": n}
+
+    def coverage(k: int) -> float:  # of [x(k), x(n+1-k)], 1-indexed: 1 - 2 P(B <= k - 1), B ~ Binomial(n, 1/2)
+        return 1.0 - 2.0 * float(sum(math.comb(n, i) for i in range(k))) / float(2**n)
+
+    k = 1
+    while k + 1 <= n // 2 and coverage(k + 1) >= 0.95:
+        k += 1
+    if n >= 2 and coverage(k) >= 0.95:
+        out |= {"low": x[k - 1], "high": x[n - k], "coverage": coverage(k)}
+    return out
+
+
+def groups(cells: Sequence[Json]) -> list[Json]:
+    """The runs of each (scenario, profile, TTFT), in the order they came."""
+    by: dict[tuple[str, str, str], list[Json]] = {}
+    for c in cells:
+        by.setdefault((c["scenario"], c["profile"], c.get("ttft_label") or f"{c['ttft_s']:.1f}"), []).append(c)
+    out = []
+    for (scenario, profile, label), runs in by.items():
+        first = runs[0]
+
+        def stat(values: list[float | None]) -> Json | None:
+            got = [v for v in values if v is not None]
+            return median_interval(got) if got else None
+
+        recovered = [c for c in runs if c["recovery"]]
+        covered = [c["fallback_coverage"] for c in runs if c.get("fallback_coverage") is not None]
+        out.append(
+            {
+                "scenario": scenario,
+                "profile": profile,
+                "ttft_s": first["ttft_s"],
+                "ttft_label": label,
+                "runs": len(runs),
+                "passed": sum(c["passed"] for c in runs),
+                "violations": sum(c["violations"] for c in runs),
+                "starvation_events": sum(c["starvation_events"] for c in runs),
+                "outcomes": sorted({" ".join(c["outcomes"]) for c in runs}),
+                "task_time_s": stat([c["task_time_s"] for c in runs]),
+                "reaction_s": stat([c["reaction_s"] for c in runs]),
+                "recovery_s": stat([c["recovery"]["recovery_s"] for c in recovered]),
+                "simulated": {
+                    "task_time_s": first["simulated_task_time_s"],
+                    "reaction_s": first["simulated_reaction_s"],
+                    "recovery_s": first["simulated_recovery_s"],
+                },
+                "engaged": sum(bool(c["recovery"]["fallback_engaged"]) for c in recovered),
+                "expired": sum(bool(c["recovery"]["fallback_expired"]) for c in recovered),
+                "recoveries": len(recovered),
+                "fallback_coverage": min(covered) if covered else None,
+                "rtt_p50_ms": stat([c["rtt_ms"]["p50"] if c["rtt_ms"] else None for c in runs]),
+                "long_outage_s": stat([max((o["duration_s"] for o in c["outages"] if o["class"] == "long"), default=None) for c in runs]),
+                "s0_overruns_max": max((c["loop"]["s0"]["overruns"] for c in runs if c["loop"].get("s0")), default=None),
+            }
+        )
+    return out
 
 
 def _f(value: float | None, digits: int = 2) -> str:
     return "-" if value is None else f"{value:.{digits}f}"
 
 
-def _vs(wall: float | None, simulated: float | None) -> str:
-    return "-" if wall is None else f"{wall:.2f} ({_f(simulated)})"
-
-
-def _recovery(c: Json | None) -> str:
-    if c is None or c["recovery"] is None:
+def _stat(s: Json | None, simulated: float | None = None) -> str:
+    """median [interval] (simulated)."""
+    if s is None:
         return "-"
-    return _vs(c["recovery"]["recovery_s"], c["simulated_recovery_s"]) + (", expired" if c["recovery"]["fallback_expired"] else "")
+    text = f"{s['median']:.2f}"
+    if s["low"] is not None:
+        text += f" [{s['low']:.2f}, {s['high']:.2f}]"
+    return text + (f" ({simulated:.2f})" if simulated is not None else "")
 
 
 def _coverage(cells: Sequence[Json]) -> str:
@@ -174,10 +272,19 @@ def _coverage(cells: Sequence[Json]) -> str:
     return f"{100 * min(covered):.1f} %" if covered else "-"
 
 
+def _ordered(results: Json) -> list[tuple[tuple[str, str], dict[str, Json]]]:
+    rows: dict[tuple[str, str], dict[str, Json]] = {}
+    for g in results.get("groups") or groups(results["cells"]):
+        rows.setdefault((g["profile"], g["ttft_label"]), {})[g["scenario"]] = g
+    return list(rows.items())
+
+
 def summary(results: Json) -> tuple[list[str], list[list[str]]]:
     """One row for each profile and TTFT, every scenario's cell in it: the
-    two-cup task time, cup_moved's reaction, the recovery times (wall-clock,
-    and simulated in parentheses), and safety over the row's cells."""
+    two-cup task time, cup_moved's reaction, the recovery times (the median
+    of the runs, its interval in brackets, the simulated run in parentheses),
+    and S2's fallbacks expired, the fallback coverage and safety over the
+    row's runs."""
     header = [
         "profile",
         "TTFT s",
@@ -189,79 +296,77 @@ def summary(results: Json) -> tuple[list[str], list[list[str]]]:
         "fallback coverage",
         "violations",
         "S0 starvations",
-        "cells within tolerance",
+        "runs within tolerance",
     ]
-    groups: dict[tuple[str, float], dict[str, Json]] = {}
-    for c in results["cells"]:
-        groups.setdefault((c["profile"], c["ttft_s"]), {})[c["scenario"]] = c
     out = []
-    for (profile, ttft), by in groups.items():
-        cells = list(by.values())
-        two_cup, moved = by.get("s2_placement"), by.get("cup_moved")
-        recovered = [c for c in cells if c["recovery"]]
+    for (profile, label), by in _ordered(results):
+        gs = list(by.values())
+        two_cup, moved, blocked, expiry = (by.get(s) for s in ("s2_placement", "cup_moved", "slot_blocked", "fallback_expiry"))
+        recoveries = sum(g["recoveries"] for g in gs)
         out.append(
             [
                 profile,
-                _f(ttft, 1),
-                _vs(two_cup["task_time_s"], two_cup["simulated_task_time_s"]) if two_cup else "-",
-                _vs(moved["reaction_s"], moved["simulated_reaction_s"]) if moved else "-",
-                _recovery(by.get("slot_blocked")),
-                _recovery(by.get("fallback_expiry")),
-                f"{sum(c['recovery']['fallback_expired'] for c in recovered)} of {len(recovered)}" if recovered else "-",
-                _coverage(cells),
-                str(sum(c["violations"] for c in cells)),
-                str(sum(c["starvation_events"] for c in cells)),
-                f"{sum(c['passed'] for c in cells)} of {len(cells)}",
+                label,
+                _stat(two_cup["task_time_s"], two_cup["simulated"]["task_time_s"]) if two_cup else "-",
+                _stat(moved["reaction_s"], moved["simulated"]["reaction_s"]) if moved else "-",
+                _stat(blocked["recovery_s"], blocked["simulated"]["recovery_s"]) if blocked else "-",
+                _stat(expiry["recovery_s"], expiry["simulated"]["recovery_s"]) if expiry else "-",
+                f"{sum(g['expired'] for g in gs)} of {recoveries}" if recoveries else "-",
+                _coverage(gs),
+                str(sum(g["violations"] for g in gs)),
+                str(sum(g["starvation_events"] for g in gs)),
+                f"{sum(g['passed'] for g in gs)} of {sum(g['runs'] for g in gs)}",
             ]
         )
     return header, out
 
 
 def rows(results: Json) -> tuple[list[str], list[list[str]]]:
+    """One row for each cell (scenario, profile, TTFT), over its runs."""
     header = [
         "scenario",
         "profile",
         "TTFT s",
+        "runs",
         "outcomes",
         "violations",
         "S0 starvations",
-        "fallback s",
-        "HOLD s",
-        "task s",
-        "simulated s",
-        "S2 RTT p50/p99/max ms",
-        "outages",
-        "S0 interval p99/max ms",
-        "S0 overruns",
+        "task s (simulated)",
         "reaction s",
         "recovery s",
+        "fallback engaged",
+        "S2 fallbacks expired",
         "fallback coverage",
+        "S2 RTT p50 ms",
+        "long outage s",
+        "S0 overruns, most",
+        "runs within tolerance",
     ]
     out = []
-    for c in results["cells"]:
-        rtt, s0 = c["rtt_ms"], c["loop"].get("s0", {})
-        outcomes = sorted(set(c["outcomes"]))
-        out.append(
-            [
-                c["scenario"],
-                c["profile"],
-                _f(c["ttft_s"], 1),
-                f"{len(c['outcomes'])}x {outcomes[0]}" if len(outcomes) == 1 else " ".join(c["outcomes"]),
-                str(c["violations"]),
-                str(c["starvation_events"]),
-                _f(c["fallback_s"]),
-                _f(c["hold_s"]),
-                _f(c["task_time_s"]),
-                _f(c["simulated_task_time_s"]),
-                "/".join(_f(rtt[k], 1) for k in ("p50", "p99", "max")) if rtt else "-",
-                ", ".join(f"{o['class']} {o['duration_s']:.1f} s" for o in c["outages"]) or "none",
-                "/".join(_f(s0["interval_ms"][k]) for k in ("p99", "max")) if s0 else "-",
-                f"{s0['overruns']} of {s0['steps']}" if s0 else "-",
-                _vs(c["reaction_s"], c["simulated_reaction_s"]),
-                _recovery(c),
-                _coverage([c]),
-            ]
-        )
+    for _, by in _ordered(results):
+        for g in by.values():
+            n = g["recoveries"]
+            out.append(
+                [
+                    g["scenario"],
+                    g["profile"],
+                    g["ttft_label"],
+                    str(g["runs"]),
+                    "; ".join(g["outcomes"]),
+                    str(g["violations"]),
+                    str(g["starvation_events"]),
+                    _stat(g["task_time_s"], g["simulated"]["task_time_s"]),
+                    _stat(g["reaction_s"]),
+                    _stat(g["recovery_s"]),
+                    f"{g['engaged']} of {n}" if n else "-",
+                    f"{g['expired']} of {n}" if n else "-",
+                    _coverage([g]),
+                    _stat(g["rtt_p50_ms"]),
+                    _stat(g["long_outage_s"]),
+                    "-" if g["s0_overruns_max"] is None else str(g["s0_overruns_max"]),
+                    f"{g['passed']} of {g['runs']}",
+                ]
+            )
     return header, out
 
 
@@ -276,7 +381,8 @@ def caption(results: Json) -> str:
         f"S2 placement, the two-cup task and the dynamic scenarios ({results['label']}). "
         f"Measured {when} with omarchy-runtime {rt.get('version')} ({revision}), "
         f"{system}, S0 at {hz} Hz; {results['measured']}. Times are wall-clock; in parentheses and in the simulated column, "
-        f"the same task with S2 in one process on simulated time. Reaction, {results['reaction']}. Recovery, "
+        f"the same task with S2 in one process on simulated time. Values: {results.get('interval', 'one run per cell')}. "
+        f"Reaction, {results['reaction']}. Recovery, "
         f"{results['recovery']}. Fallback coverage, {results.get('coverage', 'not measured')}. S2 RTT: {results['rtt']}."
     )
 
@@ -300,13 +406,15 @@ def markdown(results: Json, source: str | None = None) -> str:
     return "\n".join(lines + ["", f"Tolerance: {results['tolerance']}"])
 
 
-def _local(results_path: Path, run_dir: str) -> Path:
+def _local(results_path: Path, cell: Json) -> Path:
     """A cell's run directory: where it was written, or under the `runs`
-    directory beside the `placement` one of a downloaded CI artifact."""
-    path = Path(run_dir)
-    if path.exists() or "/runs/" not in run_dir:
+    directory of the downloaded CI artifact it came from (`artifact`, set by
+    merge; else the one around `results_path`)."""
+    path = Path(cell["run_dir"])
+    if path.exists() or "/runs/" not in cell["run_dir"]:
         return path
-    return results_path.parent.parent / "runs" / run_dir.split("/runs/", 1)[1]
+    artifact = Path(cell["artifact"]) if cell.get("artifact") else results_path.parent.parent
+    return artifact / "runs" / str(cell["run_dir"]).split("/runs/", 1)[1]
 
 
 def _held(changes: Sequence[tuple[int, str]], t0: int, t1: int) -> int:
@@ -372,7 +480,7 @@ def compare(before: Path, after: Path) -> Json:
         results = json.loads(path.read_text())
         sources[side] = {"runtime": results["runtime"], "label": results["label"], "measured": results["measured"]}
         for c in results["cells"]:
-            measures = trace_fallbacks(_local(path, c["run_dir"]))
+            measures = trace_fallbacks(_local(path, c))
             row = rows.setdefault((c["profile"], c["ttft_s"]), {"profile": c["profile"], "ttft_s": c["ttft_s"]})
             mine = row.setdefault(side, {"coverage": [], "hold_s": [], "engaged": [], "expired": [], "recovery_s": {}})
             mine["coverage"] += [v for v in measures["coverage"].values() if v is not None]

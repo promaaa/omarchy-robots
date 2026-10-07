@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 include = ["omarchy_runtime*"]
 
 [tool.setuptools.package-data]
-omarchy_runtime = ["config/*.toml", "scenarios/*.toml"]
+omarchy_runtime = ["config/*.toml", "scenarios/*.toml", "data/*.json", "data/latency/*.json"]
 
 [tool.ruff]
 line-length = 140

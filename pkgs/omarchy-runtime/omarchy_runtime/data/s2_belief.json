@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "counter": {
+      "estimate": null,
+      "geometry": {
+        "x0": 0.15,
+        "x1": 0.5,
+        "z": 0.75
+      },
+      "kind": "surface"
+    },
+    "cup_1": {
+      "estimate": {
+        "confidence": 0.95,
+        "observation": "obs-95",
+        "source": "sim.camera",
+        "t": 4700000000,
+        "x": 0.456119,
+        "z": 1.042772
+      },
+      "geometry": {
+        "height": 0.1,
+        "width": 0.08
+      },
+      "kind": "object"
+    },
+    "cup_2": {
+      "estimate": {
+        "confidence": 0.95,
+        "observation": "obs-95",
+        "source": "sim.camera",
+        "t": 4700000000,
+        "x": 0.917916,
+        "z": 0.795169
+      },
+      "geometry": {
+        "height": 0.1,
+        "width": 0.08
+      },
+      "kind": "object"
+    },
+    "dish_1": {
+      "estimate": {
+        "confidence": 0.95,
+        "observation": "obs-95",
+        "source": "sim.camera",
+        "t": 4700000000,
+        "x": 0.272555,
+        "z": 0.801365
+      },
+      "geometry": {
+        "height": 0.1,
+        "width": 0.08
+      },
+      "kind": "object"
+    },
+    "drying_rack": {
+      "estimate": null,
+      "geometry": {
+        "x0": 0.22,
+        "x1": 0.48,
+        "z0": 0.75,
+        "z1": 0.95
+      },
+      "kind": "region"
+    },
+    "table": {
+      "estimate": null,
+      "geometry": {
+        "x0": 0.5,
+        "x1": 1.05,
+        "z": 0.75
+      },
+      "kind": "surface"
+    }
+  },
+  "robot": {
+    "dims": [
+      "shoulder",
+      "elbow",
+      "wrist",
+      "gripper"
+    ],
+    "ee": [
+      0.4583924457474436,
+      1.050002533498763
+    ],
+    "observation": "obs-95",
+    "position": [
+      1.5751131134836933,
+      -2.152026835641854,
+      -0.993882604636736,
+      0.0
+    ],
+    "t": 4700000000
+  },
+  "version": 95
+}

@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from omarchy_runtime import __version__
+from omarchy_runtime import latency as latency_files
 from omarchy_runtime.contracts import SECOND, Json, seconds
 from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
 from omarchy_runtime.scenario import RunResult, run
@@ -411,27 +412,33 @@ INFERENCE_DELAYS = (0.05, 0.15, 0.3)  # S1's inference latency, s
 INFERENCE_LABEL = "simulated time; a baseline for asynchronous inference, not a claim about which method is best"
 
 
-def inference_matrix(out: Path) -> Json:
+def inference_matrix(out: Path, delay_files: Sequence[str] = ()) -> Json:
     """S1's inference delay x chunk corrector x inference trigger (every one
     registered in extensions.py), on nominal_a and cup_moved, in simulated
     time: success, task time, S0 starvations, inferences, the discontinuity
-    at chunk switches, and reaction and freeze after the scene change."""
+    at chunk switches, and reaction and freeze after the scene change. The
+    delays: 50, 150 and 300 ms, and each measured distribution in
+    `delay_files` (latency.py, kind s1_inference), sampled for each chunk."""
+    delays: list[tuple[str, float, Json]] = [(f"{d:.2f}", d, {"latency_s": d}) for d in INFERENCE_DELAYS]
+    for f in delay_files:
+        d = latency_files.load(f, "s1_inference")
+        median = d["summary"]["median"]
+        delays.append((f"{d['name']} (median {median:.3f} s)", median, {"latency_file": str(latency_files.path_of(f).resolve())}))
     cells = []
     for name in INFERENCE_SCENARIOS:
-        for delay in INFERENCE_DELAYS:
+        for label, delay, s1 in delays:
             for corrector in CORRECTORS:  # every registered one: a new corrector or trigger joins the matrix
                 for trigger in INFERENCE_TRIGGERS:
-                    over = {
-                        "scenario": {"s1": {"latency_s": delay}},
-                        "runtime": {"extensions": {"corrector": corrector, "trigger": trigger}},
-                    }
-                    r = run(name, out / f"{name}-{delay}-{corrector}-{trigger}", overrides=over)
+                    over = {"scenario": {"s1": s1}, "runtime": {"extensions": {"corrector": corrector, "trigger": trigger}}}
+                    tag = label.split(" ")[0]
+                    r = run(name, out / f"{name}-{tag}-{corrector}-{trigger}", overrides=over)
                     res = scenario_result(r, validate_run(r.dir))
                     d = res["dynamics"]
                     cells.append(
                         {
                             "scenario": name,
                             "inference_s": delay,
+                            "inference": label,
                             "corrector": corrector,
                             "trigger": trigger,
                             "outcomes": [s["outcome"] for s in r.summaries],
@@ -465,7 +472,7 @@ def inference_rows(results: Json) -> tuple[list[str], list[list[Any]]]:
         rows.append(
             [
                 c["scenario"],
-                c["inference_s"],
+                c.get("inference") or c["inference_s"],
                 c["corrector"],
                 c["trigger"],
                 " ".join(c["outcomes"]) or "none (time limit)",

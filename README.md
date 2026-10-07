@@ -396,6 +396,27 @@ holds the cup where it is: S0 spent no time in HOLD while S2 decided (v0.0.2 par
 up to 26 s). So far, for recovery: where S2 lives still sets how long the
 robot waits, and no longer whether it waits under a fallback.
 
+### Measured S2 latency
+
+The 0.1 s, 1 s and 5 s above stand in for a model's time to first token.
+`omarchy-runtime ttft-measure` measures a real one: a representative S2
+prompt (choose the rack spot for the cup from S2's belief, answer in JSON),
+50 times, streaming, to an OpenAI-compatible endpoint. On the development
+host, a small instruct model served by llama.cpp from nixpkgs (as packaged,
+and built for AVX2) gave the distributions below, committed with their
+provenance in `pkgs/omarchy-runtime/omarchy_runtime/data/latency/` (the
+format is in AGENTS.md). No cloud backend was measured: no API key was
+provided (`OMARCHY_S2_API_KEY`).
+
+<!-- s2-ttft:begin -->
+S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host, never on a robot.
+
+| distribution | label | backend | model | TTFT median s | p05 s | p95 s | n | failures | network path | date |
+|---|---|---|---|---|---|---|---|---|---|---|
+| qwen2.5-1.5b-q4km-host | measured on host | llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 8.505 | 8.354 | 8.889 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+| qwen2.5-1.5b-q4km-host-avx2 | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock), built with AVX2, FMA, F16C, BMI2 (flake output llama-cpp-avx2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 3.804 | 3.539 | 3.945 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+<!-- s2-ttft:end -->
+
 The manual's [Runtime chapter](https://promaaa.github.io/omarchy-robots/runtime/)
 has the concepts, the trace format and the extension points for
 collaborators (observation filter, verifier, recovery policy, S2 latency,

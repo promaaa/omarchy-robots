@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from omarchy_runtime import config, link
+from omarchy_runtime import latency as latency_files
 from omarchy_runtime.belief import WorldState
 from omarchy_runtime.contracts import (
     SECOND,
@@ -105,15 +106,20 @@ class Timing:
     s0_stalls: list[Trigger]  # S0 alone does not tick
 
 
-def _delay(table: Json, key: str, where: str, rng: np.random.Generator) -> Callable[[], Ns] | None:
-    """A delay `key`_s, fixed, or lognormal with a nonzero `key`_spread; None when both are 0."""
+def _delay(table: Json, key: str, where: str, rng: np.random.Generator, measured: str | None = None) -> Callable[[], Ns] | None:
+    """A delay `key`_s, fixed, or lognormal with a nonzero `key`_spread; None
+    when both are 0. With `measured` (a distribution kind), `key`_file names a
+    measured distribution (latency.py) that replaces them."""
+    if measured is not None and f"{key}_file" in table:
+        model = latency_files.EmpiricalLatency(latency_files.load(str(table[f"{key}_file"]), measured))
+        return lambda: model.sample(rng)
     seconds_, spread = float(table.get(f"{key}_s", 0.0)), float(table.get(f"{key}_spread", 0.0))
     if seconds_ < 0 or spread < 0:
         raise ConfigError(f"{where}: {key}_s and {key}_spread must not be negative")
     if seconds_ == 0 and spread == 0:
         return None
-    model = LATENCY["fixed" if spread == 0 else "lognormal"](seconds_, spread)
-    return lambda: model.sample(rng)
+    modelled = LATENCY["fixed" if spread == 0 else "lognormal"](seconds_, spread)
+    return lambda: modelled.sample(rng)
 
 
 def _timing(cfg: Json, seed: int, pauses: list[Trigger], s0_stalls: list[Trigger]) -> Timing:
@@ -161,11 +167,21 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], lis
     return slips, stalls, occlusions, pauses, s0_stalls, changes
 
 
-def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple[RecoveryPolicy, LatencyModel, Json]:
+def s2_parts(
+    cfg: Json, ttft: float | None = None, spread: float = 0.0, ttft_file: str | None = None
+) -> tuple[RecoveryPolicy, LatencyModel, Json]:
     """S2's recovery policy and latency model, and how traces name them. The
     latency is the scenario's unless `ttft` gives another median time to
-    first token: fixed, or lognormal with a nonzero `spread`."""
+    first token (fixed, or lognormal with a nonzero `spread`) or `ttft_file`
+    a measured distribution (latency.py; its median is the TTFT named)."""
     s, ext = cfg["scenario"]["s2"], cfg["runtime"]["extensions"]
+    if ttft_file is not None:
+        if ttft is not None:
+            raise ConfigError("give a time to first token or a measured distribution, not both")
+        d = latency_files.load(ttft_file, "s2_ttft")
+        recovery, measured = RECOVERY[ext["recovery"]](), latency_files.EmpiricalLatency(d)
+        named = {"seconds": d["summary"]["median"], "spread": None, "distribution": d["name"], "sha256": d["sha256"], "label": d["label"]}
+        return recovery, measured, {"recovery": describe(recovery), "s2_latency": describe(measured) | named}
     if ttft is None:
         model, ttft, spread = ext["s2_latency"], config.get(s, "latency_s", float, "scenario s2"), float(s.get("latency_spread", 0.0))
     else:
@@ -219,6 +235,7 @@ def run(
     s2_bind: str | None = None,
     ttft: float | None = None,
     ttft_spread: float = 0.0,
+    ttft_file: str | None = None,
     tags: Mapping[str, str] | None = None,
     overrides: Json | None = None,
 ) -> RunResult:
@@ -226,16 +243,16 @@ def run(
     S0's configured rate; `s2` is the address of an S2 process (omarchy-runtime
     s2) to connect to, waiting up to `s2_timeout`, instead of S2 in this
     process, from the local address `s2_bind` if given (the S2 link's
-    tunnel); `ttft` and `ttft_spread` replace the latency of S2 in this
-    process (see s2_parts). `tags` go into the trace header as they are.
+    tunnel); `ttft` and `ttft_spread`, or `ttft_file`, replace the latency of
+    S2 in this process (see s2_parts). `tags` go into the trace header as they are.
     `overrides` is merged into the effective configuration (and its hash),
     as the inference matrix varies S1's latency, corrector and trigger."""
     if clock not in ("simulated", "wall"):
         raise ConfigError(f"clock {clock!r} is not simulated or wall")
     if s2 is not None and clock != "wall":
         raise ConfigError("an S2 in another process runs on the wall clock: add --clock wall")
-    if s2 is not None and ttft is not None:
-        raise ConfigError("an S2 in another process has its own time to first token: give --ttft to omarchy-runtime s2")
+    if s2 is not None and (ttft is not None or ttft_file is not None):
+        raise ConfigError("an S2 in another process has its own time to first token: give it to omarchy-runtime s2")
     cfg = config.merge(config.effective(name), overrides or {})
     if clock == "wall":
         cfg["world"]["rates_hz"] |= config.get(cfg["world"], "wall_rates_hz", dict, "world.toml")
@@ -272,7 +289,7 @@ def run(
     for_s1: Latest[Observation] = Latest()
     for_runtime: Mailbox[Observation] = Mailbox()
     config.get(s["s1"], "latency_s", float, "scenario s1")
-    s1_latency = _delay(s["s1"], "latency", "scenario s1", np.random.default_rng([seed, 4]))
+    s1_latency = _delay(s["s1"], "latency", "scenario s1", np.random.default_rng([seed, 4]), measured="s1_inference")
     try:
         observation_filter = FILTERS[ext["filter"]]()
         verifiers = {p: VERIFIERS[v]() for p, v in ext["verifiers"].items()}
@@ -285,7 +302,7 @@ def run(
     host = SimS1Host(
         s0, for_s1, s1_latency or (lambda: 0), stalls, world, period=SECOND // rates["s1"], corrector=corrector, trigger=trigger
     )
-    recovery, latency, s2_named = s2_parts(cfg, ttft, ttft_spread)
+    recovery, latency, s2_named = s2_parts(cfg, ttft, ttft_spread, ttft_file)
     goals = config.goals(s["s2"], "scenario s2")
     os_build, os_note = os_identity()
     placement: Json = {"placement": "in-process"}
@@ -450,11 +467,13 @@ def run(
     return result
 
 
-def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeout: Ns, announce: bool = False) -> Json:
+def serve_s2(
+    where: tuple[str, int], *, ttft: float | None, spread: float, timeout: Ns, announce: bool = False, ttft_file: str | None = None
+) -> Json:
     """The S2 process: accept one robot at `where` (waiting up to `timeout`),
     run the scripted S2 for the robot's scenario on the wall clock, with the
-    scenario's latency or a time to first token `ttft` (fixed, or lognormal
-    with `spread`), then leave and wait for the robot to end the run.
+    scenario's latency, a time to first token `ttft` (fixed, or lognormal
+    with `spread`) or a measured distribution `ttft_file`, then leave and wait for the robot to end the run.
 
     Returns S2's own view: whether it finished its goals, why the link
     closed, what the robot refused, its round trips (heartbeat echo, S2's
@@ -464,7 +483,7 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
     try:
         robot = link.check_hello(transport.wait("hello", timeout), "robot")
         cfg = config.effective(config.get(robot, "scenario", str, "robot hello"))
-        recovery, latency, named = s2_parts(cfg, ttft, spread)
+        recovery, latency, named = s2_parts(cfg, ttft, spread, ttft_file)
         body = BodySpec.from_json(robot["body"])
         seed = config.get(robot, "seed", int, "robot hello")
         run_id = config.get(robot, "run_id", str, "robot hello")

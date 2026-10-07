@@ -14,7 +14,11 @@ on:
         type: boolean
         default: false
       placement:
-        description: Also run the S2 placement experiment, full matrix (two VMs, KVM, about 15 min)
+        description: Also run the S2 placement experiment, full matrix (two VMs, KVM, about 40 min)
+        type: boolean
+        default: false
+      repeated:
+        description: Also run the repeated matrix, 6 runs per cell and the measured TTFT, one job per scenario (hours)
         type: boolean
         default: false
 
@@ -112,6 +116,32 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: s2-placement-${{ github.sha }}
+          path: s2-placement-results
+
+  # The repeated matrix: every cell run 6 times, the measured S2 TTFT besides
+  # 0.1, 1 and 5 s, one scenario per job, each alone on its runner. The
+  # artifacts are merged with `omarchy-runtime placement-merge`.
+  s2-placement-repeated:
+    name: S2 placement, repeated, ${{ matrix.scenario }} (x86_64, KVM)
+    if: github.event_name == 'workflow_dispatch' && inputs.repeated
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [s2_placement, cup_moved, slot_blocked, fallback_expiry]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Machine
+        run: |
+          echo "CPUs: $(nproc)"; free -h; ls -l /dev/kvm || true
+      - uses: cachix/install-nix-action@v31
+      - run: nix build -L .#s2-placement-repeated-${{ matrix.scenario }} -o s2-placement
+      - run: cat s2-placement/placement/table.txt
+      - run: cp -rL s2-placement s2-placement-results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s2-placement-repeated-${{ matrix.scenario }}-${{ github.sha }}
           path: s2-placement-results
 
   jetson:

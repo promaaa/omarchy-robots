@@ -7,6 +7,41 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Added
+
+- `omarchy-runtime ttft-measure`: an S2 backend's time to first token
+  (TTFT), measured with a representative S2 prompt (choose the rack spot for
+  the cup from the belief S2 has when S1 gave up in slot_blocked, answer in
+  JSON) sent N times, streaming, to an OpenAI-compatible endpoint: TTFT,
+  total latency, failures, valid answers, with provenance (date, host,
+  backend, model and its file's SHA-256, prompt hash, method, network path).
+  A key for a cloud backend comes from `OMARCHY_S2_API_KEY` or a file outside
+  the repository, and is never printed or written.
+- Latency distribution files (`latency.py`, format `omarchy-latency/1`,
+  kinds `s2_ttft` and `s1_inference`), checked when loaded and sampled at
+  random with replacement (`EmpiricalLatency`). Two are committed, both
+  "measured on host" (Intel i7-9700, 8 threads, no GPU), Qwen2.5-1.5B-Instruct
+  Q4_K_M from its publisher's repository: served by llama.cpp as nixpkgs
+  packages it (no AVX2), and built for AVX2. `ttft-docs` writes their table
+  into the README and the manual.
+- `--ttft-file` (run, s2): S2 draws its TTFT from a measured distribution.
+  `[s1] latency_file` in a scenario and `inference-matrix --delay-file` do the
+  same for S1's inference delay; AGENTS.md documents the format for a
+  collaborator's measurements.
+- The repeated placement matrix: every cell run 6 times, the measured TTFTs
+  besides 0.1, 1 and 5 s, one scenario per CI job (flake outputs
+  `s2-placement-repeated-<scenario>`, workflow dispatch with `repeated`);
+  `omarchy-runtime placement-merge` joins the parts. Each value is the
+  median of a cell's runs with a distribution-free confidence interval for
+  it from order statistics (with 6 runs, the smallest and largest, 96.9 %).
+- Flake outputs `llama-cpp` and `llama-cpp-avx2` (the same package with
+  AVX2, FMA, F16C and BMI2): the local backend of ttft-measure.
+
+### Changed
+
+- The placement tables have one row for each cell (scenario, profile, TTFT)
+  over its runs; "cells within tolerance" became "runs within tolerance".
+
 ## [0.0.2] - 2026-10-07
 
 ### Part 5 (2026-10-07)

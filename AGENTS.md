@@ -144,6 +144,45 @@ triggering). Both run on the robot side, in S1's host, never in the runtime.
   registered corrector and trigger: a new one joins the matrix once it is
   in its registry. A baseline, not a claim about which method is best.
 
+## Measured latencies: the distribution file
+
+Measured delays enter the runtime as one JSON file each, in one format for an
+S2 backend's time to first token and an S1 model's inference delay
+(`omarchy_runtime/latency.py`). The runtime samples them at random with
+replacement, from the run's seed; it never invents or fits a distribution.
+
+```text
+{
+  "format": "omarchy-latency/1",
+  "kind": "s1_inference",
+  "label": "measured on board",
+  "unit": "s",
+  "samples": [<seconds>, <seconds>, ...],
+  "provenance": {
+    "date": "<YYYY-MM-DD>",
+    "host": {"cpu": "...", "gpu": "...", "os": "..."},
+    "model": {"name": "...", "weights": "...", "sha256": "..."},
+    "method": "what was timed, from which event to which, how many runs, warm-up",
+    "input": "what the model was given: image size, prompt, action horizon"
+  }
+}
+```
+
+- `kind`: `s2_ttft` (written by `omarchy-runtime ttft-measure`) or
+  `s1_inference` (from a collaborator's model). `samples`: at least 5
+  successful measurements, in seconds; failures are not samples (a file may
+  list them under its own key). `label` starts with "measured" and says
+  where: "measured on host", "measured on board". An `s2_ttft` file also names
+  `backend`, `prompt_sha256` and `network_path` in its provenance.
+- Use: `omarchy-runtime inference-matrix --delay-file FILE` adds a row of
+  S1 delays drawn from the file to the inference matrix; `[s1] latency_file`
+  in a scenario does the same for one run; `--ttft-file FILE` (run, s2) and
+  the placement experiment draw S2's TTFT from an `s2_ttft` file. A file
+  committed under `omarchy_runtime/data/latency/` can be named without its
+  path. `latency.load` refuses a file that breaks these rules.
+- Minjae Lee's VLA inference delays go in an `s1_inference` file with his
+  own provenance; nothing in this repository stands in for them.
+
 ## Testing
 
 - Each scenario file states the expected outcome of each execution;

@@ -354,7 +354,7 @@ class TestRemoteS2(unittest.TestCase):
         text = doc.read_text()
         self.assertIn("Source: a test.", text)
         self.assertNotIn("old table", text)
-        self.assertIn("| local | 0.1 | 1x SUCCEEDED |", text)
+        self.assertIn("| nominal_a | local | 0.1 | 1 | SUCCEEDED | 0 | 0 |", text)
         self.assertTrue(text.endswith(f"{placement.END}\n\nAfter.\n"))
         self.assertIn('<details markdown="1"><summary>Every cell (1)</summary>', text)
         doc.write_text("no markers\n")
@@ -379,7 +379,7 @@ class TestRemoteS2(unittest.TestCase):
         self.assertLess(c["recovery"]["recovery_s"], 1.0)
         header, body = placement.summary(gathered)
         row = dict(zip(header, body[0], strict=True))
-        self.assertEqual((row["S2 fallbacks expired"], row["cells within tolerance"], row["two-cup task s"]), ("0 of 1", "1 of 1", "-"))
+        self.assertEqual((row["S2 fallbacks expired"], row["runs within tolerance"], row["two-cup task s"]), ("0 of 1", "1 of 1", "-"))
         self.assertTrue(row["slot_blocked recovery s"].endswith("(0.15)"))
         self.assertEqual(row["fallback coverage"], "100.0 %")
         # Before and after, here the same run twice: the table placement-compare writes.

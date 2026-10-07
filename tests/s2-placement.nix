@@ -11,19 +11,25 @@
 # trace, carry the robot's build.json and stay within the stated tolerance
 # of the simulated run; the supervisor must classify the injected outage as
 # long; every recovery must run under a fallback, and every execution must
-# hold a valid fallback for at least 99 % of its running time. $out/placement holds results.json, table.txt and table.md, $out/runs
-# the robot's traces, $out/s2-* the S2 processes' own reports. Every number
-# is labelled: emulated network, VMs, soft real-time.
+# hold a valid fallback for at least 99 % of its running time.
+# $out/placement holds results.json, table.txt and table.md, $out/runs the
+# robot's traces, $out/s2-* the S2 processes' own reports. Every number is
+# labelled: emulated network, VMs, soft real-time.
 #
 # `full = false` (nix flake check, CI): the two-cup task on 4 profiles x 2
 # TTFTs, and each dynamic scenario on lan and outage_long with a TTFT of 1 s.
 # `full = true` (`nix build .#s2-placement`, the manual CI job): every
-# scenario x every profile x 0.1, 1, 5 s.
+# scenario (or `scenarios`) x every profile x 0.1, 1, 5 s and each measured
+# TTFT distribution in `measured` (names in the runtime's data/latency, S2
+# sampling its TTFT from it), each cell run `repetitions` times.
 {
   pkgs,
   robotModules,
   onBoard,
   full ? false,
+  scenarios ? null,
+  measured ? [ ],
+  repetitions ? 1,
 }:
 let
   profiles = [
@@ -44,13 +50,14 @@ let
     if full then
       [
         {
-          scenario = [ "s2_placement" ] ++ dynamic;
+          scenario = if scenarios == null then [ "s2_placement" ] ++ dynamic else scenarios;
           profile = profiles;
           ttft = [
             0.1
             1
             5
-          ];
+          ]
+          ++ measured;
         }
       ]
     else
@@ -80,11 +87,17 @@ let
   cells = pkgs.lib.concatMap pkgs.lib.cartesianProduct groups;
 in
 {
-  name = "omarchy-s2-placement${if full then "-full" else ""}";
+  name = "omarchy-s2-placement${
+    if full then
+      "-full" + pkgs.lib.concatMapStrings (s: "-" + s) (if scenarios == null then [ ] else scenarios)
+    else
+      ""
+  }";
   node.pkgsReadOnly = false;
   defaults = ./slow-host.nix;
-  # The full matrix has 84 cells: more than the driver's default hour.
-  globalTimeout = if full then 3 * 3600 else 3600;
+  # The full matrix has 84 cells, or 168 runs per scenario with 6 repetitions:
+  # more than the driver's default hour.
+  globalTimeout = if full then 5 * 3600 else 3600;
 
   nodes.robot =
     { lib, ... }:
@@ -111,6 +124,7 @@ in
     import time
 
     CELLS = json.loads('${builtins.toJSON cells}')
+    REPETITIONS = ${toString repetitions}
     # netem on both nodes' link interfaces: half the round-trip delay and
     # jitter each way, so both directions see the same; loss per packet, in
     # each direction. With jitter, netem also reorders packets.
@@ -146,8 +160,9 @@ in
     def background(machine, command, log):
         machine.succeed(f"(set +e; {command}; echo $? > {log}.rc) > {log} 2> {log}.err &")
 
-    def cell(scenario, profile, ttft):
-        name = f"{scenario}-{profile}-ttft{ttft}"
+    def cell(scenario, profile, ttft, k):
+        name = f"{scenario}-{profile}-ttft{ttft}" + (f"-r{k}" if REPETITIONS > 1 else "")
+        latency = f"--ttft-file {ttft}" if isinstance(ttft, str) else f"--ttft {ttft}"  # a measured distribution, or fixed
         spec = PROFILES[profile]
         shape(spec)
         local = profile == "local"
@@ -155,7 +170,7 @@ in
         listen = "127.0.0.1:7447" if local else "0.0.0.0:7447"
         target = "127.0.0.1:7447" if local else "edge:7447"
         s2_node.succeed("mkdir -p /tmp/s2")
-        background(s2_node, f"omarchy-runtime s2 --listen {listen} --ttft {ttft} --timeout 300", f"/tmp/s2/{name}.json")
+        background(s2_node, f"omarchy-runtime s2 --listen {listen} {latency} --timeout 300", f"/tmp/s2/{name}.json")
         tags = f"--tag profile={profile} --tag netem={shlex.quote(spec or 'none')}"
         run = f"omarchy-runtime run {scenario} --clock wall --s2 {target} --runs {RUNS}/{name} {tags}"
         background(robot, f"su - admin -c {shlex.quote(run)}", f"/tmp/robot-{name}.log")
@@ -178,10 +193,11 @@ in
             header = json.loads(robot.succeed(f"cat {run_dir}/run.json"))
             assert header["os"] == build, (header["os"], build)
             assert header["clock"] == "wall" and header["s2"]["placement"] == "remote", header["s2"]
-            assert header["extensions"]["s2_latency"]["seconds"] == ttft, header["extensions"]
+            latency = header["extensions"]["s2_latency"]
+            assert latency.get("distribution") == ttft if isinstance(ttft, str) else latency["seconds"] == ttft, latency
         return name
 
-    names = {cell(c["scenario"], c["profile"], c["ttft"]): c["profile"] for c in CELLS}
+    names = {cell(c["scenario"], c["profile"], c["ttft"], k): c["profile"] for c in CELLS for k in range(1, REPETITIONS + 1)}
     results = " ".join(f"{RUNS}/{n}/run-*/results.json" for n in names)
     status, table = robot.execute(f"omarchy-runtime placement {results} --out /tmp/placement")
     print(table)
@@ -195,7 +211,7 @@ in
     with subtest("every cell keeps the safety invariants and the tolerance"):
         placement = json.loads(robot.succeed("cat /tmp/placement/results.json"))
         assert status == 0 and placement["passed"], [(c["scenario"], c["profile"], c["ttft_s"], c["problems"]) for c in placement["cells"]]
-        assert len(placement["cells"]) == len(CELLS), len(placement["cells"])
+        assert len(placement["cells"]) == len(CELLS) * REPETITIONS, len(placement["cells"])
         assert all(c["violations"] == 0 for c in placement["cells"])
         assert "VMs" in placement["label"] and "soft real-time" in placement["label"], placement["label"]
 

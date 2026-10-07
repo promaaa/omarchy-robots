@@ -89,6 +89,21 @@
           {
             x86_64-linux = {
               inherit (pkgs) omarchy-robot omarchy-runtime;
+              # The local S2 backend of `omarchy-runtime ttft-measure`: nixpkgs'
+              # llama.cpp, as packaged (baseline x86-64: GGML_NATIVE off, no
+              # AVX2), and the same built for AVX2 hosts (FMA, F16C, BMI2 too).
+              inherit (pkgs) llama-cpp;
+              llama-cpp-avx2 = pkgs.llama-cpp.overrideAttrs (old: {
+                cmakeFlags =
+                  old.cmakeFlags
+                  ++ map (flag: lib.cmakeBool flag true) [
+                    "GGML_AVX"
+                    "GGML_AVX2"
+                    "GGML_FMA"
+                    "GGML_F16C"
+                    "GGML_BMI2"
+                  ];
+              });
               vm = self.nixosConfigurations.vm.config.system.build.vm;
               default = self.packages.x86_64-linux.vm;
               installer-vm = installer self.nixosConfigurations.vm;
@@ -102,6 +117,27 @@
                 }
               );
             }
+            # The same for one scenario at a time, with the measured S2 TTFT
+            # distributions (ttft-measure, data/latency: the local model on the
+            # host, llama.cpp as packaged and built for AVX2) besides 0.1, 1 and
+            # 5 s, every cell run 6 times: the repeated matrix, one CI job each.
+            // lib.genAttrs' [ "s2_placement" "cup_moved" "slot_blocked" "fallback_expiry" ] (
+              scenario:
+              lib.nameValuePair "s2-placement-repeated-${scenario}" (
+                pkgs.testers.runNixOSTest (
+                  import ./tests/s2-placement.nix {
+                    inherit pkgs robotModules onBoard;
+                    full = true;
+                    scenarios = [ scenario ];
+                    measured = [
+                      "qwen2.5-1.5b-q4km-host"
+                      "qwen2.5-1.5b-q4km-host-avx2"
+                    ];
+                    repetitions = 6;
+                  }
+                )
+              )
+            )
             // perBoard "flash" (board: flash board [ (onBoard board) ]);
             aarch64-linux = perBoard "installer" (board: installer self.nixosConfigurations.${board}) // {
               # Pure Python and numpy: the same package for a Jetson.

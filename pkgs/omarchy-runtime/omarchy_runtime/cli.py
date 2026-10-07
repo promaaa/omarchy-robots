@@ -6,13 +6,14 @@ Everything here is simulated: no robot, no real-time guarantee.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from collections import Counter
 from pathlib import Path
 
-from omarchy_runtime import __version__, config, evaluate, link, placement, scenario
+from omarchy_runtime import __version__, config, evaluate, latency, link, placement, scenario, ttft
 from omarchy_runtime.contracts import ConfigError, OmarchyError, ns, seconds
 from omarchy_runtime.trace import runtime_identity, validate_run
 from omarchy_runtime.wallclock import stamp
@@ -65,6 +66,7 @@ def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
         s0_hz=args.s0_hz,
         ttft=args.ttft,
         ttft_spread=args.ttft_spread,
+        ttft_file=args.ttft_file,
         tags=tags,
         **remote,
     )
@@ -127,7 +129,9 @@ def cmd_s2(args: argparse.Namespace) -> int:
     tunnel = link.tunnel()
     where = link.address(args.listen or (f"{tunnel['address']}:{tunnel['port']}" if tunnel else "127.0.0.1:7447"))
     link.through_tunnel(tunnel, where[0], listening=True)
-    report = scenario.serve_s2(where, ttft=args.ttft, spread=args.ttft_spread, timeout=ns(args.timeout), announce=True)
+    report = scenario.serve_s2(
+        where, ttft=args.ttft, spread=args.ttft_spread, timeout=ns(args.timeout), announce=True, ttft_file=args.ttft_file
+    )
     print(json.dumps(report, indent=2))
     return 0 if report["done"] else 1
 
@@ -152,6 +156,18 @@ def cmd_placement_docs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_placement_merge(args: argparse.Namespace) -> int:
+    results = placement.merge([Path(p) for p in args.results])
+    print(placement.report(results))
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+    (out / "table.txt").write_text(placement.report(results) + "\n")
+    (out / "table.md").write_text(placement.markdown(results) + "\n")
+    print(f"\nresults.json, table.txt and table.md: {out}")
+    return 0 if results["passed"] else 1
+
+
 def cmd_placement_compare(args: argparse.Namespace) -> int:
     comparison = placement.compare(Path(args.before), Path(args.after))
     text = placement.compare_markdown(comparison, args.before_source, args.after_source)
@@ -162,9 +178,52 @@ def cmd_placement_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ttft_measure(args: argparse.Namespace) -> int:
+    model: dict[str, object] = {"name": args.model_name or args.model}
+    if args.model_file:
+        digest = hashlib.sha256()
+        with open(args.model_file, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                digest.update(block)
+        model |= {"file": Path(args.model_file).name, "sha256": digest.hexdigest()}
+    model |= {k: v for k, v in (("quantization", args.quantization), ("source", args.model_source), ("license", args.license)) if v}
+    try:
+        key = ttft.api_key(args.api_key_env, args.api_key_file)
+        result = ttft.measure(
+            args.url,
+            args.model,
+            args.n,
+            key=key,
+            backend=args.backend,
+            model_info=model,
+            warmup=args.warmup,
+            no_prompt_cache=args.no_prompt_cache,
+        )
+    except OmarchyError as e:
+        if "no API key" in str(e):
+            print(f"No API key for {args.url}: set {args.api_key_env} or pass --api-key-file (a file outside the repository).")
+            return 2
+        raise
+    print(ttft.report(result))
+    if args.out:
+        Path(args.out).write_text(ttft.as_text(result))
+        print(f"\nDistribution: {args.out}")
+    return 0
+
+
+def cmd_ttft_docs(args: argparse.Namespace) -> int:
+    names = args.names or sorted(p.stem for p in latency.DATA.glob("*.json") if json.loads(p.read_text()).get("kind") == "s2_ttft")
+    text = ttft.docs_table(names)
+    print(text)
+    if args.docs:
+        placement.write_block([Path(f) for f in args.docs], "s2-ttft", text)
+        print(f"\nThe TTFT table in {', '.join(args.docs)} is now this one.")
+    return 0
+
+
 def cmd_inference_matrix(args: argparse.Namespace) -> int:
     out = fresh(runs_dir(args), f"inference-{stamp()}")
-    results = evaluate.inference_matrix(out)
+    results = evaluate.inference_matrix(out, args.delay_file or ())
     print(evaluate.inference_report(results))
     print(f"\nTraces and results.json: {out}")
     if args.docs:
@@ -204,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     runs.add_argument("--s2-timeout", type=float, default=120.0, help="seconds to wait for the S2 process (default 120)")
     runs.add_argument("--ttft", type=float, help="S2's median time to first token in this process, s (default: the scenario's latency)")
     runs.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of that time (default 0: fixed)")
+    runs.add_argument("--ttft-file", help="or a measured TTFT distribution: a path, or a name in data/latency (ttft-measure)")
     runs.add_argument("--tag", action="append", default=[], metavar="KEY=VALUE", help="recorded in the trace header (repeatable)")
     p = sub.add_parser("demo", parents=[runs], help=f"run {' and '.join(DEMO)}, and tell what happened")
     p.set_defaults(func=lambda a: cmd_eval(a, DEMO, "demo"))
@@ -219,12 +279,42 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--ttft", type=float, help="S2's median time to first token, s (default: the scenario's latency)")
     p.add_argument("--ttft-spread", type=float, default=0.0, help="lognormal spread of the time to first token (default 0: fixed)")
+    p.add_argument("--ttft-file", help="or a measured TTFT distribution: a path, or a name in data/latency (ttft-measure)")
     p.add_argument("--timeout", type=float, default=600.0, help="seconds to wait for the robot (default 600)")
     p.set_defaults(func=cmd_s2)
     p = sub.add_parser("placement", help="gather S2 placement cells (their results.json) into one table")
     p.add_argument("results", nargs="+", help="results.json of each cell's evaluation")
     p.add_argument("--out", help="write results.json, table.txt and table.md there")
     p.set_defaults(func=cmd_placement)
+    p = sub.add_parser("ttft-measure", help="measure an S2 backend's time to first token: a representative prompt, N times, streaming")
+    p.add_argument("--url", required=True, help="OpenAI-compatible base URL, e.g. http://127.0.0.1:8080/v1 (llama-server)")
+    p.add_argument("--model", required=True, help="the model name the endpoint expects")
+    p.add_argument("--n", type=int, default=50, help="measured requests (default 50)")
+    p.add_argument("--warmup", type=int, default=1, help="requests first, not counted (default 1)")
+    p.add_argument(
+        "--backend", required=True, help='what serves it, for provenance, e.g. "llama.cpp llama-server 9190 (nixpkgs), 8 threads"'
+    )
+    p.add_argument("--model-name", help="the model's name, for provenance")
+    p.add_argument("--model-file", help="the weights file: its SHA-256 goes into the provenance")
+    p.add_argument("--model-source", help="where the weights came from (an official URL)")
+    p.add_argument("--quantization", help="e.g. Q4_K_M")
+    p.add_argument("--license", help="the weights' license")
+    p.add_argument("--no-prompt-cache", action="store_true", help="llama-server: process the whole prompt every time (cache_prompt false)")
+    p.add_argument("--api-key-env", default="OMARCHY_S2_API_KEY", help="environment variable with the API key (default OMARCHY_S2_API_KEY)")
+    p.add_argument("--api-key-file", help="or a file with the API key, outside the repository")
+    p.add_argument("--out", help="write the distribution file (JSON) there")
+    p.set_defaults(func=cmd_ttft_measure)
+
+    p = sub.add_parser("ttft-docs", help="the committed TTFT distributions (data/latency) as a table, for the docs")
+    p.add_argument("names", nargs="*", help="distributions by name or path (default: every s2_ttft file in data/latency)")
+    p.add_argument("--docs", nargs="+", metavar="FILE", help="also write the table into these files, between their markers")
+    p.set_defaults(func=cmd_ttft_docs)
+
+    p = sub.add_parser("placement-merge", help="merge placement results (the full matrix split over CI jobs) into one table")
+    p.add_argument("results", nargs="+", help="results.json of each part (placement --out), with its runs/ beside placement/")
+    p.add_argument("--out", required=True, help="write results.json, table.txt and table.md there")
+    p.set_defaults(func=cmd_placement_merge)
+
     p = sub.add_parser("placement-compare", help="compare two placement results (before and after), from their results and traces")
     p.add_argument("before", help="results.json of the earlier run (placement --out), with its runs/ beside placement/")
     p.add_argument("after", help="results.json of the later run")
@@ -244,6 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--runs", help="where run directories go (default: $OMARCHY_RUNTIME_RUNS, else ./runs)")
     p.add_argument("--docs", nargs="+", metavar="FILE", help="also write the table into these files, between their markers")
+    p.add_argument(
+        "--delay-file",
+        nargs="+",
+        metavar="FILE",
+        help="measured S1 inference delays (latency format, kind s1_inference): one more delay each",
+    )
     p.set_defaults(func=cmd_inference_matrix)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")
