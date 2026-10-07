@@ -17,6 +17,18 @@ provenance; the placement matrix run 6 times per cell with those measured
 TTFTs, each value a median with a 95 % interval. Measured on the host and
 in VMs: not hardware-tested, and nothing is real-time.
 
+#### Fixed
+
+- S2's fallback is spent again once a chunk takes over after it engaged,
+  as before v0.0.2 part 5; the capability's default stays installed and engages
+  again. v0.0.2 part 5 kept S2's installed, so that every brief gap in S1's chunks
+  sent S0 towards S2's pose again: the inference matrix showed it when its
+  table was regenerated (cup_moved with the `mismatch` trigger at 300 ms,
+  whose S0 runs out of chunks again and again, took 20.45 s instead of
+  11.35 s, and with `blend` did not finish; no violation). Coverage does
+  not change: the default covers. None of the placement matrix's runs met
+  it: S2's fallback engaged there only after a failure, before the retry.
+
 #### Added
 
 - `omarchy-runtime ttft-measure`: an S2 backend's time to first token

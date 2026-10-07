@@ -238,7 +238,7 @@ class TestS0(unittest.TestCase):
         self.s0.submit_chunk(chunk(2, 0.1, [[x, z, g]], 1.0), ns(0.1))
         self.s0.tick(ns(0.101))
         self.assertIs(self.s0.mode, S0Mode.TRACKING)
-        self.assertIsNotNone(self.s0.fallback)  # still installed: it engages again the next time
+        self.assertIsNone(self.s0.fallback)  # S2's, once used, is spent
 
     def test_the_base_takes_over_when_s2_fallback_expires(self) -> None:
         x, z, g = self.home
@@ -257,6 +257,10 @@ class TestS0(unittest.TestCase):
         self.assertNotIn(S0Mode.HOLD.value, [S0_MODES[m] for m in self.s0.record_mode[11 : self.s0.c["ticks"]]])
         self.assertEqual(self.s0.c["fallback_expiries"], 1)
         self.assertEqual(self.s0.c["fallback_cover_ns"], ns(0.5))
+        self.s0.submit_chunk(chunk(2, 0.501, [[x, z, g]], 0.01), ns(0.501))
+        self.run_until(0.6, 0.501)  # a chunk took over, ran out: the base engages again, from where S0 is
+        self.assertEqual((self.s0.mode, self.s0.status().fallback_source), (S0Mode.FALLBACK, "base"))
+        self.assertIs(self.s0.base, base)
         self.s0.hold()
         self.assertEqual((self.s0.fallback, self.s0.base), (None, None))
 

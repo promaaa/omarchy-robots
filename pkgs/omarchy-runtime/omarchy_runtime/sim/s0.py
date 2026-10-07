@@ -161,7 +161,9 @@ class SimS0:
     def _desired(self, now: Ns) -> tuple[S0Mode, np.ndarray]:
         c = self.chunk
         if c is not None and now <= c.valid_until:
-            self.engaged, self.armed = None, False  # the fallback stays installed, to engage again from its start
+            if self.engaged is not None and self.engaged[0] is self.fallback:
+                self.fallback = None  # S2's, once used, is spent: the base stays, to engage again
+            self.engaged, self.armed = None, False
             f = min(max((now - c.t_start) / c.dt, 0.0), c.horizon - 1.0)
             i = int(f)
             a = c.actions

@@ -412,8 +412,10 @@ class FallbackSpec:
     until te + `lasts`: then the fallback has expired, S0 drops it and runs the
     next one (S2's expires into the base) or HOLD. `lasts` is at least the
     rows' duration (the default: no holding). A new valid chunk takes over at
-    once; the fallback stays installed and engages again, from its start, the
-    next time S0 needs it.
+    once. S2's fallback, once engaged, is then spent (S2 may install
+    another): a brief gap in S1's chunks must not send S0 towards S2's pose
+    again and again. The base stays installed and engages again, from its
+    start, the next time S0 needs it.
     """
 
     action_space: str

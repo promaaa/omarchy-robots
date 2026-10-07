@@ -33,7 +33,7 @@ A fallback must exist before it is needed. S0 holds two, in two slots, and runs 
 1. **S2's fallback.** S2 predicts it and sends it with the goal (`fallback` in the `request`), its window relative to the execution's start, so that the runtime installs it when the execution starts, before S1's first chunk, whatever S2's latency. S2 may refine it later (`install_fallback`): the refined one replaces the predicted one.
 2. **The capability's default**, S0's base fallback. Each capability names a generator in `config/capabilities.toml` (`default_fallback`); the runtime computes it on the robot side from S0's status and installs it when the execution starts. `hold` keeps every dimension where S0 is when it engages, the gripper included (relative rows of zeros); `lift`, the default of `place_in`, does the same, and on a body with a `z` dimension (the gantry) with the gripper closed rises 2 cm first. A default never moves the gripper, so a closing gripper is never reopened on an object. The runtime renews the default whenever the generator returns another motion (after a grasp, after a release); the one replaced stays until then. It is valid for the execution and a wait for S2 after it (600 s from the start).
 
-Precedence: S2's refined, then S2's predicted, then the capability's default, then HOLD. A fallback engages when a chunk ran out with no successor, or when the runtime asks after a failure; while an execution awaits S1's first chunk, S0 holds. A new chunk takes over at once, and the fallback stays installed for the next time. When S2's fallback runs out (`fallback_lasts_s`), S0 goes on under the default in the same tick. Rows can be targets or, per dimension (`relative`), offsets from where S0 is when it engages. Every installation is recorded (`fallback.install`: slot, kind, source, window, duration), and the execution summary lists them.
+Precedence: S2's refined, then S2's predicted, then the capability's default, then HOLD. A fallback engages when a chunk ran out with no successor, or when the runtime asks after a failure; while an execution awaits S1's first chunk, S0 holds. A new chunk takes over at once; S2's fallback, once engaged, is then spent (S2 may install another), so that brief gaps in S1's chunks do not send S0 towards S2's pose again and again; the default stays installed for the next time. When S2's fallback runs out (`fallback_lasts_s`), S0 goes on under the default in the same tick. Rows can be targets or, per dimension (`relative`), offsets from where S0 is when it engages. Every installation is recorded (`fallback.install`: slot, kind, source, window, duration), and the execution summary lists them.
 
 **Fallback coverage** is the fraction of an execution's running time (from its start to S1's claim or its failure) during which S0 holds a valid fallback, as S0 counts it tick by tick (`fallback_cover_ns`). It is reported for each execution (`fallback_coverage` in its summary and in `results.json`), each scenario (the least) and each placement cell; the evaluation requires at least 99 % for every execution.
 
@@ -522,10 +522,10 @@ Inference matrix (simulated time; a baseline for asynchronous inference, not a c
 | cup_moved | 0.15 | none | mismatch | SUCCEEDED | 0 | 9.65 | 0 | 38 | 0.12 | 0.82 | 0.25 | 0.20 |
 | cup_moved | 0.15 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.01 | 2.34 | 0.20 | 0.15 |
 | cup_moved | 0.15 | blend | mismatch | SUCCEEDED | 0 | 9.75 | 0 | 38 | 0.00 | 1.83 | 0.30 | 0.25 |
-| cup_moved | 0.30 | none | periodic | SUCCEEDED | 0 | 10.30 | 0 | 197 | 0.30 | 1.94 | 0.35 | 0.30 |
-| cup_moved | 0.30 | none | mismatch | SUCCEEDED | 0 | 11.35 | 30 | 32 | - | - | 0.60 | 0.55 |
-| cup_moved | 0.30 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.04 | 2.15 | 0.35 | 0.30 |
-| cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 12.75 | 34 | 36 | - | - | 0.60 | 0.55 |
+| cup_moved | 0.30 | none | periodic | SUCCEEDED | 0 | 10.65 | 0 | 204 | 0.33 | 1.79 | 0.35 | 0.30 |
+| cup_moved | 0.30 | none | mismatch | SUCCEEDED | 0 | 11.35 | 30 | 32 | - | - | 0.45 | 0.40 |
+| cup_moved | 0.30 | blend | periodic | none (time limit) | 0 | 60.00 | 0 | 1197 | 0.06 | 2.81 | 0.35 | 0.30 |
+| cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 12.05 | 32 | 34 | - | - | 0.45 | 0.40 |
 
 jump: the largest jump of S0's desired position at a chunk switch (rad for the arm's joints); velocity jump: of its desired velocity. reaction: from the cup's move to S0 executing a chunk computed after it; freeze: from the first observation after the move reaching S1 to that tick.
 <!-- inference-matrix:end -->
