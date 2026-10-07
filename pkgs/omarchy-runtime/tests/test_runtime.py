@@ -42,7 +42,7 @@ from omarchy_runtime.contracts import (
     VerdictKind,
     ns,
 )
-from omarchy_runtime.extensions import FixedLatency, GeometricVerifier, IdentityFilter
+from omarchy_runtime.extensions import FixedLatency, GeometricVerifier, IdentityFilter, LiftHeld
 from omarchy_runtime.runtime import Params, Runtime
 from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Mailbox
@@ -56,23 +56,25 @@ class FakeS0:
     def __init__(self) -> None:
         self.mode = S0Mode.HOLD
         self.meta: ChunkMeta | None = None
-        self.installed: list[FallbackSpec] = []
+        self.installed: list[FallbackSpec] = []  # S2's
+        self.bases: list[FallbackSpec] = []  # the capability's default
         self.cleared = 0
         self.t: Ns = 0
+        self.position = tuple(GANTRY.home)  # the gripper open
 
     def submit_chunk(self, chunk: ActionChunk, now: Ns) -> None:
         raise AssertionError("the runtime never submits chunks")
 
-    def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
+    def install_fallback(self, spec: FallbackSpec, now: Ns, base: bool = False) -> None:
         if spec.valid_until < now:
             raise ChunkRejected(Rejection.EXPIRED, "expired")
-        self.installed.append(spec)
+        (self.bases if base else self.installed).append(spec)
 
     def hold(self, fallback: bool = False) -> None:
         self.cleared += 1
 
     def status(self) -> S0Status:
-        return S0Status(self.t, self.mode, None, tuple(GANTRY.home), self.meta, bool(self.installed), S0Counters())
+        return S0Status(self.t, self.mode, None, self.position, self.meta, bool(self.installed or self.bases), S0Counters())
 
     def history(self, since: Ns) -> S0History:
         raise AssertionError("the runtime never reads S0's history")
@@ -158,6 +160,7 @@ class Rig:
             run_id="rig",
             config_hash="0",
             seed=0,
+            default_fallbacks={"lift": LiftHeld()},
         )
         self.runtime._trace.event(0, "run.start", None, {})
         self.closed = False
@@ -179,11 +182,11 @@ class Rig:
             self.runtime.step(self.t)
             self.updates += self.runtime.poll()
 
-    def request(self, goal: Goal = IN_RACK) -> str:
+    def request(self, goal: Goal = IN_RACK, fallback: FallbackSpec | None = None) -> str:
         """Submit a request; returns its request_id."""
         self.requests += 1
         request_id = f"r{self.requests}"
-        self.runtime.submit(GoalRequest(goal, "task", request_id))
+        self.runtime.submit(GoalRequest(goal, "task", request_id, fallback=fallback))
         return request_id
 
     def execution(self, request_id: str) -> str:
@@ -326,12 +329,50 @@ class TestFallbacksAndApi(unittest.TestCase):
         self.assertEqual(len(rig.s0.installed), 1)
         rig.policy.result = Report(Claim.DONE, "done")
         rig.run(0.1, chunks=True)
-        self.assertEqual(rig.s0.cleared, 1)
-        self.assertEqual(len(rig.runtime.executions[x].fallbacks), 1)
+        self.assertEqual(rig.s0.cleared, 2)  # the previous execution's fallbacks at its start; all at its end
+        self.assertEqual([f["kind"] for f in rig.runtime.executions[x].fallbacks], ["capability default", "s2 refined"])
         kinds = [e["type"] for e in rig.events()]
         self.assertEqual(kinds.count("fallback.rejected"), 2)
-        self.assertEqual(kinds.count("fallback.install"), 1)
+        self.assertEqual(kinds.count("fallback.install"), 2)
         self.assertEqual(kinds.count("s0.hold"), 1)
+
+    def test_s2_predicted_fallback_arrives_with_the_goal_before_s1(self) -> None:
+        rig = Rig()
+        predicted = FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(1.5), [list(GANTRY.safe_pose)], 0, ns(60), "s2.test")
+        r = rig.request(fallback=predicted)
+        rig.run(0.05)  # one step: the execution starts, S1 is attached, no chunk yet
+        x = rig.runtime.executions[rig.execution(r)]
+        assert x.started is not None
+        self.assertEqual(len(rig.host.attached), 1)
+        (base,) = rig.s0.bases
+        (s2,) = rig.s0.installed
+        # The window sent relative to the start, moved onto the runtime's clock.
+        self.assertEqual((s2.valid_from, s2.valid_until), (x.started, x.started + ns(60)))
+        self.assertEqual(base.relative, (True,) * len(GANTRY.dims))
+        self.assertEqual(base.source, "default.lift@1")
+        self.assertEqual([(f["slot"], f["kind"]) for f in x.fallbacks], [("base", "capability default"), ("s2", "s2 predicted")])
+        installs = [e["payload"] for e in rig.events() if e["type"] == "fallback.install"]
+        self.assertEqual(
+            [(p["slot"], p["kind"], p["valid_from"]) for p in installs],
+            [("base", "capability default", x.started)] * 1 + [("s2", "s2 predicted", x.started)],
+        )
+
+    def test_the_base_fallback_is_renewed_when_the_grasp_changes(self) -> None:
+        rig = Rig()
+        r = rig.request()
+        rig.run(0.2, chunks=True)
+        self.assertEqual(len(rig.s0.bases), 1)
+        rig.run(0.2, chunks=True)
+        self.assertEqual(len(rig.s0.bases), 1)  # the same motion: not installed again
+        rig.s0.position = (*GANTRY.home[:-1], 0.0)  # the gripper closed: holding
+        rig.run(0.1, chunks=True)
+        first, lifted = rig.s0.bases
+        z = GANTRY.dims.index("z")
+        self.assertEqual((first.actions[0, z], lifted.actions[0, z]), (0.0, 0.02))  # hold, then lift 2 cm and hold
+        self.assertEqual(lifted.valid_from, first.valid_from)  # the same window, from the execution's start
+        reasons = [e["payload"].get("reason") for e in rig.events() if e["type"] == "fallback.install"]
+        self.assertEqual(reasons, ["the execution starts", "the grasp changed"])
+        self.assertEqual(rig.execution(r), "rig-x01")
 
     def test_a_fallback_for_another_body_is_refused(self) -> None:
         rig = Rig()

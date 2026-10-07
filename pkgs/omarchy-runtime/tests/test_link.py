@@ -379,8 +379,18 @@ class TestRemoteS2(unittest.TestCase):
         self.assertLess(c["recovery"]["recovery_s"], 1.0)
         header, body = placement.summary(gathered)
         row = dict(zip(header, body[0], strict=True))
-        self.assertEqual((row["fallbacks expired"], row["cells within tolerance"], row["two-cup task s"]), ("0 of 1", "1 of 1", "-"))
+        self.assertEqual((row["S2 fallbacks expired"], row["cells within tolerance"], row["two-cup task s"]), ("0 of 1", "1 of 1", "-"))
         self.assertTrue(row["slot_blocked recovery s"].endswith("(0.15)"))
+        self.assertEqual(row["fallback coverage"], "100.0 %")
+        # Before and after, here the same run twice: the table placement-compare writes.
+        saved = tmpdir() / "placement" / "results.json"
+        saved.parent.mkdir(parents=True)
+        saved.write_text(json.dumps(gathered))
+        (compared,) = placement.compare(saved, saved)["rows"]
+        self.assertEqual((compared["profile"], compared["after"]["engaged"], compared["after"]["hold_s"]), ("local", [True], [0.0]))
+        self.assertIn(
+            "| local | 0.1 | 100.0 % → 100.0 % | 1 of 1 → 1 of 1 |", placement.compare_markdown(placement.compare(saved, saved), "a", "b")
+        )
 
 
 if __name__ == "__main__":

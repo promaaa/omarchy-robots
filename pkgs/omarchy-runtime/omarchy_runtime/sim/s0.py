@@ -1,8 +1,9 @@
 """The simulated S0: a 1 kHz (simulated) tick that never waits.
 
-At every tick it executes the active chunk while now <= valid_until, else an
-installed fallback inside its validity window, else HOLD (keep the position,
-gripper included). It then enforces the body's limits itself: position
+At every tick it executes the active chunk while now <= valid_until, else,
+once a chunk ran out with no successor or the runtime asked (a failure), a
+valid installed fallback (S2's, else the base fallback), else HOLD (keep the
+position, gripper included). It then enforces the body's limits itself: position
 limits, then velocity limits, then the gripper's workspace. A step is never
 larger than the velocity limit times the nominal tick period: after a late
 tick S0 continues from where it is, at that bound, without catching up. Not
@@ -29,9 +30,10 @@ from omarchy_runtime.contracts import (
 )
 from omarchy_runtime.sim.kinematics import Kinematics
 from omarchy_runtime.sim.world import World
-from omarchy_runtime.trace import S0_MODES
+from omarchy_runtime.trace import S0_FALLBACKS, S0_MODES
 
 CODES = {S0Mode(m): n for n, m in enumerate(S0_MODES)}
+SLOTS = {name: n for n, name in enumerate(S0_FALLBACKS)}  # the fallback S0 runs, in its per-tick record
 
 
 class SimS0:
@@ -61,8 +63,10 @@ class SimS0:
         self.mode = S0Mode.HOLD
         self.chunk: ActionChunk | None = None
         self.meta: ChunkMeta | None = None
-        self.fallback: FallbackSpec | None = None
-        self.engaged: tuple[Ns, np.ndarray] | None = None  # when the fallback started, and from where
+        self.fallback: FallbackSpec | None = None  # S2's: predicted with the goal, or refined
+        self.base: FallbackSpec | None = None  # the capability's default, from the runtime
+        self.engaged: tuple[FallbackSpec, Ns, np.ndarray] | None = None  # the fallback running, since when, from where
+        self.armed = False  # a chunk ran out, or the runtime asked: a fallback engages (not while awaiting a first chunk)
         self.t: Ns = 0
         self._last: Ns | None = None
         self.c = {
@@ -74,6 +78,7 @@ class SimS0:
             "hold_ns": 0,
             "late_ticks": 0,
             "fallback_expiries": 0,
+            "fallback_cover_ns": 0,
         }
         self.max_error = 0.0
         self.max_interval: Ns = 0
@@ -87,6 +92,7 @@ class SimS0:
         self.record_seq = np.full(capacity, -1, dtype=np.int64)  # the chunk tracked, -1 when not tracking
         self.record_valid_until = np.full(capacity, -1, dtype=np.int64)
         self.record_observed = np.full(capacity, -1, dtype=np.int64)  # the tracked chunk's observation time
+        self.record_fallback = np.zeros(capacity, dtype=np.int8)  # SLOTS: the fallback run in FALLBACK
         # The robot-side history: a ring buffer of the last ticks.
         n = max(2, history // nominal)
         self._h_t = np.zeros(n, dtype=np.int64)
@@ -115,16 +121,29 @@ class SimS0:
             chunk.seq, chunk.source, chunk.t_start, chunk.dt, chunk.horizon, chunk.valid_until, now, chunk.observed_at, chunk.inference_ns
         )
 
-    def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
+    def install_fallback(self, spec: FallbackSpec, now: Ns, base: bool = False) -> None:
         self._check(spec.action_space, spec.dims)
         if spec.valid_until < now:
             raise ChunkRejected(Rejection.EXPIRED, f"fallback valid until {spec.valid_until} ns, now {now} ns")
-        self.fallback, self.engaged = spec, None
+        old = self.base if base else self.fallback
+        if base:
+            self.base = spec
+        else:
+            self.fallback = spec
+        if self.engaged is not None and self.engaged[0] is old:
+            self.engaged = None  # the new one engages from where S0 is, at the next tick
 
     def hold(self, fallback: bool = False) -> None:
-        self.chunk, self.engaged = None, None
+        self.chunk, self.engaged, self.armed = None, None, fallback
         if not fallback:
-            self.fallback = None
+            self.fallback = self.base = None
+
+    def _covering(self, now: Ns) -> FallbackSpec | None:
+        """The fallback S0 runs, or would run if it needed one now."""
+        for fb in (self.fallback, self.base):
+            if fb is not None and ((self.engaged is not None and self.engaged[0] is fb) or fb.valid_from <= now <= fb.valid_until):
+                return fb
+        return None
 
     def history(self, since: Ns) -> S0History:
         n, size = self._h_count, len(self._h_t)
@@ -136,34 +155,40 @@ class SimS0:
         counters = S0Counters(max_tracking_error=self.max_error, max_interval_ns=self.max_interval, max_step=self.max_step, **self.c)
         active = self.chunk.seq if self.mode is S0Mode.TRACKING and self.chunk is not None else None
         position = tuple(float(v) for v in self.pos)
-        return S0Status(self.t, self.mode, active, position, self.meta, self.fallback is not None, counters)
+        cover = self._covering(self.t)
+        return S0Status(self.t, self.mode, active, position, self.meta, cover is not None, counters, cover.source if cover else None)
 
     def _desired(self, now: Ns) -> tuple[S0Mode, np.ndarray]:
         c = self.chunk
         if c is not None and now <= c.valid_until:
-            self.fallback = self.fallback if self.engaged is None else None  # a used fallback is spent
-            self.engaged = None
+            self.engaged, self.armed = None, False  # the fallback stays installed, to engage again from its start
             f = min(max((now - c.t_start) / c.dt, 0.0), c.horizon - 1.0)
             i = int(f)
             a = c.actions
             return S0Mode.TRACKING, a[i] if i == c.horizon - 1 else a[i] + (a[i + 1] - a[i]) * (f - i)
         if c is not None:
-            self.chunk = None
+            self.chunk, self.armed = None, True
             if self.mode is S0Mode.TRACKING:
                 self.c["starvation_events"] += 1
-        fb = self.fallback
-        if fb is not None and self.engaged is None and fb.valid_from <= now <= fb.valid_until:
-            self.engaged = (now, self.pos.copy())
-        if fb is not None and self.engaged is not None:
-            te, p0 = self.engaged
+        for slot in ("fallback", "base") if self.armed else ():  # S2's first
+            fb: FallbackSpec | None = getattr(self, slot)
+            if fb is None:
+                continue
+            if self.engaged is None or self.engaged[0] is not fb:
+                if not fb.valid_from <= now <= fb.valid_until:
+                    continue
+                self.engaged = (fb, now, self.pos.copy())
+            _, te, p0 = self.engaged
+            targets = np.where(np.array(fb.relative), p0 + fb.actions, fb.actions)
             f, rows = (now - te) / fb.dt, fb.actions.shape[0]
             if f <= rows:
                 i = min(int(f), rows - 1)
-                start = p0 if i == 0 else fb.actions[i - 1]
-                return S0Mode.FALLBACK, start + (fb.actions[i] - start) * (f - i)
+                start = p0 if i == 0 else targets[i - 1]
+                return S0Mode.FALLBACK, start + (targets[i] - start) * (f - i)
             if now - te <= fb.lasts:
-                return S0Mode.FALLBACK, fb.actions[-1]  # holding its last row
-            self.fallback, self.engaged = None, None
+                return S0Mode.FALLBACK, targets[-1]  # holding its last row
+            setattr(self, slot, None)  # expired: the next one, from where S0 is, or HOLD
+            self.engaged = None
             self.c["fallback_expiries"] += 1
         return S0Mode.HOLD, self.pos
 
@@ -189,6 +214,8 @@ class SimS0:
             self.c["fallback_ns"] += dt
         elif self.mode is S0Mode.HOLD:
             self.c["hold_ns"] += dt
+        if self._covering(now) is not None:
+            self.c["fallback_cover_ns"] += dt
         self.pos = command
         self.mode, self.t, self._last = mode, now, now
         self.world.apply(now, command.tolist())
@@ -202,6 +229,8 @@ class SimS0:
                 self.record_seq[n] = self.chunk.seq
                 self.record_valid_until[n] = self.chunk.valid_until
                 self.record_observed[n] = self.chunk.observed_at
+            if mode is S0Mode.FALLBACK and self.engaged is not None:
+                self.record_fallback[n] = SLOTS["s2" if self.engaged[0] is self.fallback else "base"]
         h = self._h_count % len(self._h_t)
         self._h_t[h], self._h_command[h], self._h_desired[h] = now, command, desired
         self._h_count += 1

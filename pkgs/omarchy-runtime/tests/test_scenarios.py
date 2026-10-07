@@ -15,10 +15,11 @@ from omarchy_runtime import config
 from omarchy_runtime.contracts import SECOND
 from omarchy_runtime.evaluate import scenario_result
 from omarchy_runtime.scenario import RunResult, run
-from omarchy_runtime.trace import S0_MODES, validate_run
+from omarchy_runtime.trace import S0_FALLBACKS, S0_MODES, validate_run
 from tests.helpers import scenario, tmpdir
 
 TRACKING, FALLBACK, HOLD = (S0_MODES.index(m) for m in ("TRACKING", "FALLBACK", "HOLD"))
+BASE, S2 = S0_FALLBACKS.index("base"), S0_FALLBACKS.index("s2")
 
 
 def events(r: RunResult) -> list[dict[str, Any]]:
@@ -133,12 +134,16 @@ class TestProperties(unittest.TestCase):
         self.assertEqual(outcomes(r), [("SUCCEEDED", None, "DONE", "SATISFIED")])
         start, _ = self.stall_window(r)
         rec = r.record(start, start + SECOND)
-        held = [(m, a, b) for m, a, b in blocks(rec["mode"]) if m == HOLD]
-        self.assertEqual(len(held), 1)
-        self.assertLessEqual(rec["t"][held[0][1]] - start, SECOND // 2)  # the last chunk ran out within its horizon
-        # S0 held at exactly the first tick after the last chunk's validity.
-        self.assertEqual(rec["t"][held[0][1]], rec["valid_until"][held[0][1] - 1] + SECOND // 1000)
-        self.assertTrue(np.all(rec["position"][held[0][1] : held[0][2] + 1, -1] == 0.0), "gripper opened while holding")
+        # The capability's default (no S2 fallback here): on an arm, hold where S0 is, the gripper included.
+        held = [(m, a, b) for m, a, b in blocks(rec["mode"]) if m in (HOLD, FALLBACK)]
+        self.assertEqual([m for m, _, _ in held], [FALLBACK])
+        a, b = held[0][1], held[0][2]
+        self.assertTrue(np.all(rec["fallback"][a : b + 1] == BASE))
+        self.assertLessEqual(rec["t"][a] - start, SECOND // 2)  # the last chunk ran out within its horizon
+        # S0 took the base fallback at exactly the first tick after the last chunk's validity.
+        self.assertEqual(rec["t"][a], rec["valid_until"][a - 1] + SECOND // 1000)
+        self.assertTrue(np.all(rec["position"][a : b + 1] == rec["position"][a]), "S0 moved while holding")
+        self.assertTrue(np.all(rec["position"][a : b + 1, -1] == 0.0), "gripper opened while holding")
         kinds = [kind for _, kind, _ in r.world.events]
         self.assertEqual(kinds, ["grasp", "release"])  # nothing slipped while S0 held
         self.assertEqual(r.summaries[0]["s0"]["starvation_events"], 1)
@@ -147,23 +152,36 @@ class TestProperties(unittest.TestCase):
         r = scenario("s1_stall_long")
         self.assertEqual(outcomes(r), [("FAILED", "S1_STALL", None, None)])
         self.assertEqual(r.world.held, "cup_1")
-        self.assertEqual(r.s0.mode.value, "HOLD")
+        # Still under the capability's default after the failure, waiting for S2: the cup held.
+        self.assertEqual((r.s0.mode.value, r.s0.status().fallback_source), ("FALLBACK", "default.lift@1"))
         s = r.summaries[0]
         start, _ = self.stall_window(r)
         self.assertLess(s["timing"]["ended"] - start, int(3.6 * SECOND))  # timeout 3 s, plus the last chunk's horizon
 
-    def test_fallback_runs_then_hold_then_resumption(self) -> None:
+    def test_s2_fallback_then_the_base_then_resumption(self) -> None:
         r = scenario("fallback_installed")
         self.assertEqual(outcomes(r), [("SUCCEEDED", None, "DONE", "SATISFIED")])
         start, _ = self.stall_window(r)
         rec = r.record(start, start + 3 * SECOND)
-        sequence = [m for m, _, _ in blocks(rec["mode"])]
-        self.assertEqual(sequence[:4], [TRACKING, FALLBACK, HOLD, TRACKING])
-        fb = [(a, b) for m, a, b in blocks(rec["mode"]) if m == FALLBACK][0]
-        self.assertAlmostEqual((rec["t"][fb[1]] - rec["t"][fb[0]]) / SECOND, 1.5, places=2)
+        self.assertEqual([m for m, _, _ in blocks(rec["mode"])][:3], [TRACKING, FALLBACK, TRACKING])  # never HOLD
+        a, b = [(a, b) for m, a, b in blocks(rec["mode"]) if m == FALLBACK][0]
+        # S2's fallback (predicted with the goal) runs its 1.5 s to the safe pose, expires into the base, which holds there.
+        runs = [(s, a + x, a + y) for s, x, y in blocks(rec["fallback"][a : b + 1])]
+        self.assertEqual([s for s, _, _ in runs], [S2, BASE])
+        (_, s0, s1), (_, b0, b1) = runs
+        self.assertAlmostEqual((rec["t"][s1] - rec["t"][s0]) / SECOND, 1.5, places=2)
         safe = np.array(r.world.body.safe_pose)
-        self.assertTrue(np.allclose(rec["position"][fb[1]], safe))
-        self.assertEqual(len(r.summaries[0]["fallbacks"]), 1)
+        self.assertTrue(np.allclose(rec["position"][s1], safe))
+        self.assertTrue(np.allclose(rec["position"][b0 : b1 + 1], safe))
+        self.assertEqual(r.summaries[0]["s0"]["fallback_expiries"], 1)
+        kinds = [(f["kind"], f["source"]) for f in r.summaries[0]["fallbacks"]]
+        # Precedence: the refined one replaced the predicted one in S0's S2 slot; the base stays under both.
+        expected = [
+            ("capability default", "default.lift@1"),
+            ("s2 predicted", "s2.scripted.predicted"),
+            ("s2 refined", "s2.scripted.refined"),
+        ]
+        self.assertEqual(kinds, expected)
         self.assertEqual([kind for _, kind, _ in r.world.events], ["grasp", "release"])
 
     def test_p5_one_scenario_two_bodies(self) -> None:
@@ -186,7 +204,7 @@ class TestProperties(unittest.TestCase):
         idle = [res["idle_fraction"] for res in results]
         self.assertEqual(times, sorted(times))
         self.assertEqual(idle, sorted(idle))
-        self.assertGreater(times[2] - times[0], 2 * 4.9)  # two decisions, each 4.9 s slower
+        self.assertGreaterEqual(times[2] - times[0], 2 * 4.9 - 1e-9)  # two decisions, each 4.9 s slower
 
     def test_a_retry_right_after_a_failure_starts_clean(self) -> None:
         # No settling and no S2 latency: x02 starts while x01's last chunk would still be valid.

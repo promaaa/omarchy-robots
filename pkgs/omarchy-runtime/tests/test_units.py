@@ -40,6 +40,7 @@ from omarchy_runtime.sim.kinematics import Kinematics
 from omarchy_runtime.sim.s0 import SimS0
 from omarchy_runtime.sim.s1 import ScriptedPickPlace
 from omarchy_runtime.sim.world import World
+from omarchy_runtime.trace import S0_MODES
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
 from tests.helpers import ARM, ARM_CFG, GANTRY, IN_RACK, RACK_SPOT, SCENE, TABLE_SPOT, belief, observation
 
@@ -229,11 +230,35 @@ class TestS0(unittest.TestCase):
     def test_a_new_chunk_takes_over_from_a_fallback(self) -> None:
         x, z, g = self.home
         self.s0.install_fallback(FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(1.0), [[x, z + 0.1, g]], 0, ns(10), "s2"), 0)
-        self.run_until(0.1)
-        self.assertIs(self.s0.mode, S0Mode.FALLBACK)
-        self.s0.submit_chunk(chunk(1, 0.1, [[x, z, g]], 1.0), ns(0.1))
+        self.run_until(0.05)
+        self.assertIs(self.s0.mode, S0Mode.HOLD)  # awaiting a first chunk: no fallback yet
+        self.s0.submit_chunk(chunk(1, 0.05, [[x, z, g]], 0.01), ns(0.05))
+        self.run_until(0.1, 0.051)
+        self.assertIs(self.s0.mode, S0Mode.FALLBACK)  # the chunk ran out
+        self.s0.submit_chunk(chunk(2, 0.1, [[x, z, g]], 1.0), ns(0.1))
         self.s0.tick(ns(0.101))
         self.assertIs(self.s0.mode, S0Mode.TRACKING)
+        self.assertIsNotNone(self.s0.fallback)  # still installed: it engages again the next time
+
+    def test_the_base_takes_over_when_s2_fallback_expires(self) -> None:
+        x, z, g = self.home
+        rel = (True, True, True)
+        base = FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(0.2), [[0.0, 0.0, 0.0]], 0, ns(10), "base", ns(10), rel)
+        s2 = FallbackSpec.make(GANTRY.action_space, GANTRY.dims, ns(0.1), [[x, z + 0.01, g]], 0, ns(10), "s2", ns(0.3))
+        self.s0.install_fallback(base, 0, base=True)
+        self.s0.install_fallback(s2, 0)
+        self.s0.submit_chunk(chunk(1, 0.0, [[x, z, g]], 0.01), 0)
+        self.run_until(0.2)
+        self.assertEqual((self.s0.mode, self.s0.status().fallback_source), (S0Mode.FALLBACK, "s2"))
+        self.run_until(0.5, 0.201)
+        # S2's ran its 0.3 s, then the base holds where S0 is, in the same tick: never HOLD, coverage all along.
+        self.assertEqual((self.s0.mode, self.s0.status().fallback_source), (S0Mode.FALLBACK, "base"))
+        self.assertTrue(np.allclose(self.s0.pos, [x, z + 0.01, g]))
+        self.assertNotIn(S0Mode.HOLD.value, [S0_MODES[m] for m in self.s0.record_mode[11 : self.s0.c["ticks"]]])
+        self.assertEqual(self.s0.c["fallback_expiries"], 1)
+        self.assertEqual(self.s0.c["fallback_cover_ns"], ns(0.5))
+        self.s0.hold()
+        self.assertEqual((self.s0.fallback, self.s0.base), (None, None))
 
 
 class TestLifecycle(unittest.TestCase):
@@ -318,7 +343,9 @@ class TestResolver(unittest.TestCase):
         self.assertTrue(r.reason.startswith("already satisfied"))
 
     def test_capability_shapes(self) -> None:
-        self.assertEqual(self.caps, [Capability("place_in", "in", ("object", "container"), ("gripper",), self.caps[0].preconditions)])
+        self.assertEqual(
+            self.caps, [Capability("place_in", "in", ("object", "container"), ("gripper",), self.caps[0].preconditions, "lift")]
+        )
 
 
 class TestMessages(unittest.TestCase):
@@ -326,6 +353,7 @@ class TestMessages(unittest.TestCase):
 
     def test_round_trip(self) -> None:
         spec = FallbackSpec.make(ARM.action_space, ARM.dims, ns(1.5), [list(ARM.safe_pose)], ns(2.0), ns(62.0), "s2.scripted")
+        predicted = FallbackSpec.make(ARM.action_space, ARM.dims, ns(0.2), [[0.0] * 4], 0, ns(60.0), "s2.x", ns(60.0), [True] * 4)
         messages: list[Message] = [
             GoalRequest(IN_RACK, "t01", "t01-r01"),
             GoalRequest(IN_RACK, "t01", "t01-r02", "run-x01", {"speed": 0.5, "note": ["a", 1]}),
@@ -334,6 +362,7 @@ class TestMessages(unittest.TestCase):
             Decision("t01", "run-x01", "retry", "verification failed", "retry_once@1"),
             Heartbeat(3, ns(0.2), (ns(0.0012), ns(0.0009))),
             Heartbeat(4, ns(0.3), final=True),
+            GoalRequest(IN_RACK, "t01", "t01-r03", fallback=predicted),
         ]
         for message in messages:
             with self.subTest(type(message).__name__):

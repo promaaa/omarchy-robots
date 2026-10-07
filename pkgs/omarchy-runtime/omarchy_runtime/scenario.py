@@ -37,7 +37,7 @@ from omarchy_runtime.contracts import (
     RecoveryPolicy,
     ns,
 )
-from omarchy_runtime.extensions import CORRECTORS, FILTERS, INFERENCE_TRIGGERS, LATENCY, RECOVERY, VERIFIERS, describe
+from omarchy_runtime.extensions import CORRECTORS, DEFAULT_FALLBACKS, FILTERS, INFERENCE_TRIGGERS, LATENCY, RECOVERY, VERIFIERS, describe
 from omarchy_runtime.runtime import Runtime
 from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Latest, Mailbox, Scheduler, WallScheduler, distribution
@@ -85,6 +85,7 @@ class RunResult:
             "seq": self.s0.record_seq[:n][keep],
             "valid_until": self.s0.record_valid_until[:n][keep],
             "observed_at": self.s0.record_observed[:n][keep],
+            "fallback": self.s0.record_fallback[:n][keep],
         }
 
     def violations(self, t0: Ns = 0, t1: Ns | None = None) -> list[tuple[Ns, str]]:
@@ -176,9 +177,16 @@ def s2_parts(cfg: Json, ttft: float | None = None, spread: float = 0.0) -> tuple
     return recovery, latency, {"recovery": describe(recovery), "s2_latency": describe(latency) | {"seconds": ttft, "spread": spread}}
 
 
-def _lasts(s2: Json) -> Ns | None:
-    """[s2] fallback_lasts_s: how long S0 may stay in S2's fallback once engaged."""
-    return ns(config.get(s2, "fallback_lasts_s", float, "scenario s2")) if "fallback_lasts_s" in s2 else None
+def _s2_fallbacks(s2: Json) -> dict[str, Any]:
+    """The scripted S2's fallbacks, from a scenario's [s2]: `fallback` (send
+    one predicted with each goal), `refine_fallback` (and refine it once the
+    execution runs), `fallback_lasts_s` (how long S0 may stay in it once
+    engaged; by default, its rows only)."""
+    for key in ("fallback", "refine_fallback"):
+        if not isinstance(s2.get(key, False), bool):
+            raise ConfigError(f"scenario s2.{key}: expected true or false")
+    lasts = ns(config.get(s2, "fallback_lasts_s", float, "scenario s2")) if "fallback_lasts_s" in s2 else None
+    return {"fallback": s2.get("fallback", False), "refine": s2.get("refine_fallback", False), "fallback_lasts": lasts}
 
 
 def _reconnect(cfg: Json) -> link.Reconnect:
@@ -270,6 +278,8 @@ def run(
         verifiers = {p: VERIFIERS[v]() for p, v in ext["verifiers"].items()}
         corrector = CORRECTORS[ext["corrector"]](cfg["runtime"]["s1_host"])
         trigger = INFERENCE_TRIGGERS[ext["trigger"]](cfg["runtime"]["s1_host"])
+        capabilities = config.capabilities(cfg)
+        defaults = {c.default_fallback: DEFAULT_FALLBACKS[c.default_fallback]() for c in capabilities if c.default_fallback}
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
     host = SimS1Host(
@@ -312,6 +322,7 @@ def run(
             "verifiers": {p: describe(v) for p, v in verifiers.items()},
             "corrector": describe(corrector) | ({"blend_s": cfg["runtime"]["s1_host"]["blend_s"]} if corrector.id == "blend" else {}),
             "trigger": describe(trigger) | ({"mismatch": cfg["runtime"]["s1_host"]["mismatch"]} if trigger.id == "mismatch" else {}),
+            "default_fallbacks": {c.id: describe(defaults[c.default_fallback]) for c in capabilities if c.default_fallback},
         }
         | s2_named,
         "s2": placement,
@@ -329,7 +340,7 @@ def run(
     implementations = {b.implementation: (lambda i=b.implementation: ScriptedPickPlace(i)) for b in config.bindings(cfg)}
     runtime = Runtime(
         body=body,
-        capabilities=config.capabilities(cfg),
+        capabilities=capabilities,
         bindings=config.bindings(cfg),
         implementations=implementations,
         params=params,
@@ -343,6 +354,7 @@ def run(
         run_id=run_id,
         config_hash=digest,
         seed=seed,
+        default_fallbacks=defaults,
     )
     truths: list[bool | None] = []
 
@@ -390,9 +402,8 @@ def run(
             recovery,
             latency,
             np.random.default_rng([seed, 3]),
-            fallback=bool(s["s2"].get("fallback", False)),
             task_prefix=run_id,
-            fallback_lasts=_lasts(s["s2"]),
+            **_s2_fallbacks(s["s2"]),
         )
         sched.add("s2", SECOND // rates["s2"], unless_paused(scripted.step))
         s2_done = lambda: scripted.done  # noqa: E731
@@ -477,9 +488,8 @@ def serve_s2(where: tuple[str, int], *, ttft: float | None, spread: float, timeo
         recovery,
         latency,
         np.random.default_rng([seed, 3]),
-        fallback=bool(s["s2"].get("fallback", False)),
         task_prefix=run_id,
-        fallback_lasts=_lasts(s["s2"]),
+        **_s2_fallbacks(s["s2"]),
     )
     sched = WallScheduler()
     sched.add("link", ns(0.001), api.step)

@@ -53,7 +53,7 @@ from omarchy_runtime.contracts import (
 from omarchy_runtime.trace import TraceWriter, dumps
 from omarchy_runtime.wallclock import monotonic_ns, sleep_until
 
-PROTOCOL = 2
+PROTOCOL = 3
 MAX_FRAME = 1 << 22  # bytes; a longer line is a protocol error
 CLOSE_TIMEOUT = ns(5.0)  # to send what is still buffered when closing
 USER_TIMEOUT_MS = 3000  # TCP_USER_TIMEOUT: unacknowledged data older than this aborts the connection

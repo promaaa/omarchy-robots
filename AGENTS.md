@@ -72,8 +72,11 @@ there when their handles are known.
 6. Injected time: components get `now` from the scheduler; only
    `wallclock.py` reads the wall clock or sleeps, for overhead, wall stamps
    and the wall-clock scheduler.
-7. S0 never waits: a valid chunk, else a valid fallback, else HOLD; S0
-   enforces the body's limits itself.
+7. S0 never waits: a valid chunk, else a valid fallback (S2's, else the
+   capability's default), else HOLD; S0 enforces the body's limits itself.
+   Every running execution holds a valid fallback from its start: the
+   capability's default, computed on the robot side, and S2's prediction,
+   sent with the goal. No gap: a fallback is replaced, never removed first.
 8. Explicit failure: `OmarchyError` categories and outcome categories; no
    bare except, no silent pass, no None as an error.
 9. Honesty: never call anything real-time; label every number (simulated,

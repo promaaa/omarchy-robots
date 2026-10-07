@@ -10,7 +10,8 @@
 # violation, S0 never without a chunk, a fallback or HOLD), validate its
 # trace, carry the robot's build.json and stay within the stated tolerance
 # of the simulated run; the supervisor must classify the injected outage as
-# long. $out/placement holds results.json, table.txt and table.md, $out/runs
+# long; every recovery must run under a fallback, and every execution must
+# hold a valid fallback for at least 99 % of its running time. $out/placement holds results.json, table.txt and table.md, $out/runs
 # the robot's traces, $out/s2-* the S2 processes' own reports. Every number
 # is labelled: emulated network, VMs, soft real-time.
 #
@@ -214,13 +215,17 @@ in
                 events = robot.succeed(f"cat {c['run_dir']}/events.jsonl")
                 assert '"state":"reconnected"' in events, f"{c['scenario']} {c['profile']} {c['ttft_s']}: no reconnection"
 
-    with subtest("the dynamic scenarios react, and recover through S2"):
+    with subtest("the dynamic scenarios react, and every recovery runs under a fallback"):
         for c in placement["cells"]:
+            name = (c["scenario"], c["profile"], c["ttft_s"])
             if c["scenario"] == "cup_moved":
-                assert c["reaction_s"] is not None, c
+                assert c["reaction_s"] is not None, name
             if c["scenario"] in ("slot_blocked", "fallback_expiry"):
-                # S2 installs each fallback after its TTFT: with 5 s, S1 gives up first and
-                # S0 holds without one, as in the simulated run. The retry must still come.
-                assert c["recovery"], (c["scenario"], c["profile"], c["ttft_s"])
+                # S1 gives up: a fallback engages (S2's, sent with the goal, else the capability's default), whatever the TTFT.
+                assert c["recovery"] and c["recovery"]["fallback_engaged"], (name, c["recovery"])
+
+    with subtest("fallback coverage: at least 99 % of every execution's running time"):
+        for c in placement["cells"]:
+            assert c["fallback_coverage"] is not None and c["fallback_coverage"] >= 0.99, (c["scenario"], c["profile"], c["ttft_s"], c["fallback_coverage"])
   '';
 }

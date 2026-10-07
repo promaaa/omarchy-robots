@@ -29,11 +29,12 @@ BEGIN, END = "<!-- s2-placement:begin -->", "<!-- s2-placement:end -->"
 CLOSE = ("local", "lan")  # profiles held to the simulated task time
 KEPT_RATE = 0.01  # S0 kept its rate when it overran in fewer than 1 % of its steps
 TOLERANCE = (
-    "Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and "
-    "ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be "
-    "classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to "
-    "first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late "
-    "loop delays every step, as on an emulated CPU); every profile at least 85 % of it."
+    "Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and"
+    " ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must "
+    "be classified by the deadlines; every execution's fallback coverage at least 99 %. Task time: local and lan "
+    "within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 "
+    "% of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every "
+    "profile at least 85 % of it."
 )
 
 
@@ -84,7 +85,9 @@ def _cell(s: Json) -> Json:
         "deadlines_s": deadlines,
         "outages": outages,
         "reaction_s": dyn.get("reaction_s"),
-        "recovery": recovery and {k: recovery[k] for k in ("recovery_s", "fallback_engaged", "fallback_s", "fallback_expired")},
+        "recovery": recovery
+        and {k: recovery.get(k) for k in ("recovery_s", "fallback_engaged", "fallback", "fallback_s", "fallback_expired")},
+        "fallback_coverage": s.get("fallback_coverage"),
         "s0_hz": header["rates_hz"]["s0"],
         "loop": {
             n: {"steps": c["steps"], "overruns": c["overruns"], "interval_ms": _ms(c["interval_ns"]), "step_ms": _ms(c["step_ns"])}
@@ -141,9 +144,10 @@ def gather(paths: Sequence[Path]) -> Json:
         "time": "wall-clock seconds on the robot's monotonic clock; simulated: the same task, S2 in one process, simulated time",
         "reaction": "cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it",
         "recovery": (
-            "slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S0 went from the fallback to HOLD "
-            "before the retry's first chunk (the fallback lasts 3 s in slot_blocked, 1.5 s in fallback_expiry)"
+            "slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S2's fallback (3 s in slot_blocked, "
+            "1.5 s in fallback_expiry) ran out before the retry started, and S0 went on under the capability's default"
         ),
+        "coverage": "the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it",
         "rtt": "heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end",
         "tolerance": TOLERANCE,
         "cells": cells,
@@ -165,6 +169,11 @@ def _recovery(c: Json | None) -> str:
     return _vs(c["recovery"]["recovery_s"], c["simulated_recovery_s"]) + (", expired" if c["recovery"]["fallback_expired"] else "")
 
 
+def _coverage(cells: Sequence[Json]) -> str:
+    covered = [c["fallback_coverage"] for c in cells if c.get("fallback_coverage") is not None]
+    return f"{100 * min(covered):.1f} %" if covered else "-"
+
+
 def summary(results: Json) -> tuple[list[str], list[list[str]]]:
     """One row for each profile and TTFT, every scenario's cell in it: the
     two-cup task time, cup_moved's reaction, the recovery times (wall-clock,
@@ -176,7 +185,8 @@ def summary(results: Json) -> tuple[list[str], list[list[str]]]:
         "cup_moved reaction s",
         "slot_blocked recovery s",
         "fallback_expiry recovery s",
-        "fallbacks expired",
+        "S2 fallbacks expired",
+        "fallback coverage",
         "violations",
         "S0 starvations",
         "cells within tolerance",
@@ -198,6 +208,7 @@ def summary(results: Json) -> tuple[list[str], list[list[str]]]:
                 _recovery(by.get("slot_blocked")),
                 _recovery(by.get("fallback_expiry")),
                 f"{sum(c['recovery']['fallback_expired'] for c in recovered)} of {len(recovered)}" if recovered else "-",
+                _coverage(cells),
                 str(sum(c["violations"] for c in cells)),
                 str(sum(c["starvation_events"] for c in cells)),
                 f"{sum(c['passed'] for c in cells)} of {len(cells)}",
@@ -224,6 +235,7 @@ def rows(results: Json) -> tuple[list[str], list[list[str]]]:
         "S0 overruns",
         "reaction s",
         "recovery s",
+        "fallback coverage",
     ]
     out = []
     for c in results["cells"]:
@@ -247,6 +259,7 @@ def rows(results: Json) -> tuple[list[str], list[list[str]]]:
                 f"{s0['overruns']} of {s0['steps']}" if s0 else "-",
                 _vs(c["reaction_s"], c["simulated_reaction_s"]),
                 _recovery(c),
+                _coverage([c]),
             ]
         )
     return header, out
@@ -264,7 +277,7 @@ def caption(results: Json) -> str:
         f"Measured {when} with omarchy-runtime {rt.get('version')} ({revision}), "
         f"{system}, S0 at {hz} Hz; {results['measured']}. Times are wall-clock; in parentheses and in the simulated column, "
         f"the same task with S2 in one process on simulated time. Reaction, {results['reaction']}. Recovery, "
-        f"{results['recovery']}. S2 RTT: {results['rtt']}."
+        f"{results['recovery']}. Fallback coverage, {results.get('coverage', 'not measured')}. S2 RTT: {results['rtt']}."
     )
 
 
@@ -285,6 +298,131 @@ def markdown(results: Json, source: str | None = None) -> str:
     every = f'<details markdown="1"><summary>Every cell ({len(results["cells"])})</summary>'
     lines = [text, "", *md_table(*summary(results)), "", every, "", *md_table(*rows(results)), "", "</details>"]
     return "\n".join(lines + ["", f"Tolerance: {results['tolerance']}"])
+
+
+def _local(results_path: Path, run_dir: str) -> Path:
+    """A cell's run directory: where it was written, or under the `runs`
+    directory beside the `placement` one of a downloaded CI artifact."""
+    path = Path(run_dir)
+    if path.exists() or "/runs/" not in run_dir:
+        return path
+    return results_path.parent.parent / "runs" / run_dir.split("/runs/", 1)[1]
+
+
+def _held(changes: Sequence[tuple[int, str]], t0: int, t1: int) -> int:
+    """Time in HOLD between t0 and t1, from S0's mode changes (time, new mode)."""
+    mode = next((to for t, to in reversed(changes) if t <= t0), None)
+    total, last = 0, t0
+    for t, to in changes:
+        if t0 < t < t1:
+            total += t - last if mode == "HOLD" else 0
+            mode, last = to, t
+    return total + (t1 - last if mode == "HOLD" else 0)
+
+
+def trace_fallbacks(run_dir: Path) -> Json:
+    """From a run's events, the same way for a trace of any schema since 2:
+    each execution's fallback coverage, the fraction of S0's status samples
+    (taken by the supervisor, 20 Hz) while it ran that report a fallback
+    installed, leaving out the sample at its start (taken before the runtime
+    installs anything); and for each execution after a failed one, the time
+    S0 spent in HOLD from the failure to that execution's start (from S0's
+    mode changes, as the supervisor saw them)."""
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    spans: dict[str, list[int | None]] = {}
+    failed: dict[str, int] = {}
+    order: list[str] = []
+    for e in events:
+        if e["type"] == "lifecycle":
+            ex, to = e["execution"], e["payload"]["to"]
+            if to == "RUNNING":
+                spans[ex] = [e["t"], None]
+                order.append(ex)
+            elif ex in spans and spans[ex][1] is None:
+                spans[ex][1] = e["t"]
+            if to == "FAILED":
+                failed[ex] = e["t"]
+    coverage: dict[str, float | None] = {}
+    for ex, (a, b) in spans.items():
+        assert a is not None
+        samples = [
+            bool(e["payload"]["fallback_installed"])
+            for e in events
+            if e["type"] == "s0.status" and e["execution"] == ex and a < e["t"] and (b is None or e["t"] <= b)
+        ]
+        coverage[ex] = sum(samples) / len(samples) if samples else None
+    changes = [(e["t"], e["payload"]["to"]) for e in events if e["type"] == "s0.mode"]
+    waits = []
+    for before, after in zip(order, order[1:], strict=False):
+        start = spans[after][0]
+        if before in failed and start is not None:
+            waits.append({"failed": before, "next": after, "hold_s": _held(changes, failed[before], start) / 1e9})
+    return {"coverage": coverage, "waits": waits}
+
+
+def compare(before: Path, after: Path) -> Json:
+    """Two placement results (results.json written by `placement --out`, with
+    the cells' traces beside them), compared for each profile and TTFT:
+    fallback coverage and the HOLD time while S2 decided (from the traces,
+    the same way for both), how often the fallback engaged and S2's expired
+    in a recovery, and the recovery times (from the results)."""
+    rows: dict[tuple[str, float], Json] = {}
+    sources = {}
+    for side, path in (("before", before), ("after", after)):
+        results = json.loads(path.read_text())
+        sources[side] = {"runtime": results["runtime"], "label": results["label"], "measured": results["measured"]}
+        for c in results["cells"]:
+            measures = trace_fallbacks(_local(path, c["run_dir"]))
+            row = rows.setdefault((c["profile"], c["ttft_s"]), {"profile": c["profile"], "ttft_s": c["ttft_s"]})
+            mine = row.setdefault(side, {"coverage": [], "hold_s": [], "engaged": [], "expired": [], "recovery_s": {}})
+            mine["coverage"] += [v for v in measures["coverage"].values() if v is not None]
+            mine["hold_s"] += [w["hold_s"] for w in measures["waits"]]
+            if c["recovery"]:
+                mine["engaged"].append(bool(c["recovery"]["fallback_engaged"]))
+                mine["expired"].append(bool(c["recovery"]["fallback_expired"]))
+                mine["recovery_s"][c["scenario"]] = c["recovery"]["recovery_s"]
+    return {"sources": sources, "rows": list(rows.values())}
+
+
+def _side(row: Json, side: str, what: str) -> str:
+    m = row.get(side)
+    if m is None:
+        return "-"
+    if what == "coverage":
+        return f"{100 * min(m['coverage']):.1f} %" if m["coverage"] else "-"
+    if what == "hold_s":
+        return f"{max(m['hold_s']):.2f}" if m["hold_s"] else "-"
+    if what in ("engaged", "expired"):
+        return f"{sum(m[what])} of {len(m[what])}" if m[what] else "-"
+    value = m["recovery_s"].get(what)
+    return "-" if value is None else f"{value:.2f}"
+
+
+def compare_markdown(comparison: Json, before: str, after: str) -> str:
+    header = [
+        "profile",
+        "TTFT s",
+        "fallback coverage",
+        "fallback engaged in recoveries",
+        "S2 fallbacks expired",
+        "HOLD while S2 decides s",
+        "slot_blocked recovery s",
+        "fallback_expiry recovery s",
+    ]
+    whats = ["coverage", "engaged", "expired", "hold_s", "slot_blocked", "fallback_expiry"]
+    body = [
+        [r["profile"], _f(r["ttft_s"], 1)] + [f"{_side(r, 'before', w)} → {_side(r, 'after', w)}" for w in whats]
+        for r in comparison["rows"]
+    ]
+    text = (
+        f'Before and after, each cell "before → after". Before: {before}. After: {after}. Coverage: the least, over the row\'s '
+        "executions, of the fraction of S0's status samples (the supervisor's, 20 Hz) taken while an execution ran that report "
+        "a fallback installed; HOLD while S2 decides: the longest time S0 spent in HOLD from a failure to the next execution's "
+        "start, from S0's mode changes as the supervisor saw them; both from the traces, the same way for both runs. Engaged, "
+        "expired and recovery: from each run's results (expired: before, S0 went from S2's fallback to HOLD; after, S2's ran "
+        "out and the capability's default took over)."
+    )
+    return "\n".join([text, "", *md_table(header, body)])
 
 
 def write_block(files: Sequence[Path], name: str, text: str) -> None:

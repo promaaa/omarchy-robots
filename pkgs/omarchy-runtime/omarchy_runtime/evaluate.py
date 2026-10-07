@@ -17,9 +17,11 @@ from omarchy_runtime import __version__
 from omarchy_runtime.contracts import SECOND, Json, seconds
 from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
 from omarchy_runtime.scenario import RunResult, run
-from omarchy_runtime.trace import S0_MODES, TraceCheck, validate_run, where_measured
+from omarchy_runtime.trace import S0_FALLBACKS, S0_MODES, TraceCheck, validate_run, where_measured
 
 TRACKING, FALLBACK, HOLD = (S0_MODES.index(m) for m in ("TRACKING", "FALLBACK", "HOLD"))
+BASE_SLOT, S2_SLOT = S0_FALLBACKS.index("base"), S0_FALLBACKS.index("s2")
+COVERAGE = 0.99  # the least fallback coverage an execution may have (S0's count, tick by tick)
 
 
 def agreement(verdict: str | None, truth: bool | None) -> str:
@@ -79,14 +81,15 @@ def dynamics(r: RunResult) -> Json:
       such observation reaching S1 to that tick (S0 executing a plan the
       belief already contradicts);
     - recovery, for each failed execution its retry follows: from the
-      failure to the retry running, the time S0 spent in the fallback
-      meanwhile, whether the fallback engaged, and whether it expired (S0
-      went from FALLBACK to HOLD) before the retry's first chunk;
+      failure to the retry running, the time S0 spent in a fallback
+      meanwhile, which fallback engaged first (S2's or the base, the
+      capability's default), and whether S2's expired (S0 went from it to
+      the base or HOLD) before the retry's first chunk;
     - discontinuity at chunk switches: the largest jump of S0's desired
       position, and of its desired velocity, where one chunk takes over
       from another (action-space units, and per second)."""
     rec = r.record()
-    t, mode, seq, seen, desired = rec["t"], rec["mode"], rec["seq"], rec["observed_at"], rec["desired"]
+    t, mode, seq, seen, desired, slot = rec["t"], rec["mode"], rec["seq"], rec["observed_at"], rec["desired"], rec["fallback"]
     out: Json = {
         "scene_changes": [],
         "reaction_s": None,
@@ -117,16 +120,21 @@ def dynamics(r: RunResult) -> Json:
         after = np.flatnonzero((t > t1) & (mode == TRACKING))
         t2 = int(t[after[0]]) if len(after) else t1
         window = (t >= t0) & (t <= t2)
-        modes, spans = mode[window], np.diff(np.r_[t[window], t2])
-        was_fallback = np.flatnonzero(modes == FALLBACK)
-        expired = bool(len(was_fallback)) and bool(np.any(modes[was_fallback[0] :] == HOLD))
+        modes, slots, spans = mode[window], slot[window], np.diff(np.r_[t[window], t2])
+        engaged = np.flatnonzero(modes == FALLBACK)
+        # Expired before S2 answered: from the failure to the retry's start (then S0 awaits its first chunk).
+        waiting = t[window] < t1
+        s2 = np.flatnonzero(waiting & (slots == S2_SLOT))
+        after = waiting[s2[0] :] if len(s2) else waiting[:0]
+        expired = bool(len(s2)) and bool(np.any(after & ((modes[s2[0] :] == HOLD) | (slots[s2[0] :] == BASE_SLOT))))
         out["recovery"].append(
             {
                 "failed": failed["execution_id"],
                 "retry": s["execution_id"],
                 "reason": failed["reason"],
                 "recovery_s": seconds(t1 - t0),
-                "fallback_engaged": bool(len(was_fallback)),
+                "fallback_engaged": bool(len(engaged)),
+                "fallback": S0_FALLBACKS[int(slots[engaged[0]])] if len(engaged) else None,
                 "fallback_s": seconds(int(spans[modes == FALLBACK].sum())),
                 "fallback_expired": expired,
             }
@@ -169,6 +177,7 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
                 "duration_s": seconds(timing["duration_ns"]),
                 "fallback_s": seconds(timing["fallback_ns"]),
                 "hold_s": seconds(timing["hold_ns"]),
+                "fallback_coverage": s["fallback_coverage"],
                 "violations": len(r.violations(timing["requested"], timing["ended"])),
                 "trace_complete": check.complete and s["execution_id"] in traced,
                 "wall": s["wall"],
@@ -182,11 +191,16 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
     problems = _invariants(r) + _expected(r) + [f"trace: {e}" for e in check.errors]
     if not r.completed:
         problems.append("the time limit ended the run")
+    covered = [s["fallback_coverage"] for s in r.summaries if s["fallback_coverage"] is not None]
+    for s in r.summaries:
+        if s["fallback_coverage"] is not None and s["fallback_coverage"] < COVERAGE:
+            problems.append(f"{s['execution_id']}: fallback coverage {s['fallback_coverage']:.4f}, below {COVERAGE}")
     return {
         "scenario": r.name,
         "description": r.cfg["scenario"].get("description", ""),
         "body": r.cfg["body"]["id"],
         "run_dir": str(r.dir),
+        "fallback_coverage": min(covered) if covered else None,
         "s2_latency_s": r.cfg["scenario"]["s2"]["latency_s"],
         "clock": r.clock,
         "tags": dict(r.tags),
@@ -304,6 +318,7 @@ def report(results: Json) -> str:
             r["agreement"],
             r["duration_s"],
             f"{r['fallback_s']:.2f}/{r['hold_s']:.2f}",
+            "-" if r["fallback_coverage"] is None else f"{100 * r['fallback_coverage']:.1f} %",
             r["violations"],
             r["trace_complete"],
         ]
@@ -321,6 +336,7 @@ def report(results: Json) -> str:
         "agreement",
         "duration s",
         "fallback/hold s",
+        "fallback coverage",
         "violations",
         "trace complete",
     ]

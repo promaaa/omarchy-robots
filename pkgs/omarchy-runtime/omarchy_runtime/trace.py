@@ -38,7 +38,7 @@ from omarchy_runtime.contracts import (
 )
 from omarchy_runtime.wallclock import perf_ns, wall_ns
 
-TRACE_SCHEMA = 4
+TRACE_SCHEMA = 5
 BUILD_JSON = Path("/etc/omarchy-robot/build.json")
 NO_OS = "no Omarchy Robots identity: /etc/omarchy-robot/build.json not found"
 
@@ -69,7 +69,8 @@ EVENT_TYPES = frozenset(
 # events per simulated second, whatever S0's rate.
 MAX_EVENTS_PER_SECOND = 200
 
-S0_RECORD = ("t", "mode", "position", "desired", "seq", "valid_until", "observed_at")
+S0_RECORD = ("t", "mode", "position", "desired", "seq", "valid_until", "observed_at", "fallback")
+S0_FALLBACKS = ("none", "base", "s2")  # the codes in an S0 record's "fallback" column: the fallback run in FALLBACK
 S0_MODES = ("TRACKING", "FALLBACK", "HOLD", "FAULT")  # the codes in an S0 record's "mode" column
 
 

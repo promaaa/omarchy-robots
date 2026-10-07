@@ -2,9 +2,11 @@
 
 It works through a list of goals, one task each. Every decision it takes
 (request a goal, install a fallback, retry or give up) is sent only after its
-latency model's delay, on the clock its scheduler injects. It may pre-install
-a fallback for each execution: the body's safe pose with the gripper closed.
-After a failure it asks its recovery policy what to do.
+latency model's delay, on the clock its scheduler injects. It may predict a
+fallback for each execution, the body's safe pose with the gripper closed,
+and send it with the goal, so that it is in S0 from the execution's start;
+it may refine it once the execution runs (the same pose, its window on the
+runtime's clock). After a failure it asks its recovery policy what to do.
 
 It uses the API asynchronously, in the same way in the runtime's process and
 in another one: it names each request, and learns the execution from the
@@ -56,10 +58,14 @@ class ScriptedS2:
         fallback: bool,
         task_prefix: str,
         fallback_lasts: Ns | None = None,
+        refine: bool = False,
     ) -> None:
-        """`fallback_lasts`: how long S0 may stay in the fallback once engaged
-        (holding the safe pose after reaching it); by default, its rows only."""
+        """`fallback`: send a predicted fallback with each goal; `refine`: and
+        install a refined one when the execution runs. `fallback_lasts`: how
+        long S0 may stay in it once engaged (holding the safe pose after
+        reaching it); by default, its rows only."""
         self.fallback_lasts = fallback_lasts
+        self.refine = refine
         self.api = api
         self.body = body
         self.recovery = recovery
@@ -71,7 +77,7 @@ class ScriptedS2:
         self.tasks = 0
         self.requests = 0
         self.waiting: str | None = None  # the request S2 is waiting for
-        self.fallbacks: set[str] = set()  # the executions S2 installed a fallback for
+        self.fallbacks: set[str] = set()  # the executions S2 refined a fallback for
         self.decided: list[tuple[Ns, Message]] = []  # decisions not sent yet, with the time they are ready
         self.goal: Goal | None = None
         self.task: str | None = None
@@ -100,29 +106,26 @@ class ScriptedS2:
             else:
                 self.done = True
 
+    def _safe_pose(self, start: Ns, source: str) -> FallbackSpec:
+        b = self.body
+        return FallbackSpec.make(
+            b.action_space, b.dims, FALLBACK_DURATION, [b.safe_pose], start, start + FALLBACK_WINDOW, source, self.fallback_lasts
+        )
+
     def _request(self, goal: Goal, retry_of: str | None = None, conditioning: Mapping[str, Any] | None = None) -> GoalRequest:
         assert self.task is not None
         self.requests += 1
-        return GoalRequest(goal, self.task, f"{self.task}-r{self.requests:02d}", retry_of, conditioning or {})
+        # Predicted with the goal: its window from the execution's start, which the runtime knows.
+        predicted = self._safe_pose(0, "s2.scripted.predicted") if self.fallback else None
+        return GoalRequest(goal, self.task, f"{self.task}-r{self.requests:02d}", retry_of, conditioning or {}, predicted)
 
     def _see(self, update: Update, now: Ns) -> None:
         if update.request_id != self.waiting:
             return
-        if update.state is State.RUNNING and self.fallback and update.execution_id not in self.fallbacks:
+        if update.state is State.RUNNING and self.refine and update.execution_id not in self.fallbacks:
             self.fallbacks.add(update.execution_id)
-            # The window opens when the execution starts running, on the runtime's clock.
-            b = self.body
-            spec = FallbackSpec.make(
-                b.action_space,
-                b.dims,
-                FALLBACK_DURATION,
-                [b.safe_pose],
-                update.t,
-                update.t + FALLBACK_WINDOW,
-                "s2.scripted",
-                self.fallback_lasts,
-            )
-            self._decide(now, InstallFallback(update.execution_id, spec))
+            # Refined: the window opens when the execution starts running, on the runtime's clock.
+            self._decide(now, InstallFallback(update.execution_id, self._safe_pose(update.t, "s2.scripted.refined")))
         if update.summary is None:
             return
         self.waiting = None

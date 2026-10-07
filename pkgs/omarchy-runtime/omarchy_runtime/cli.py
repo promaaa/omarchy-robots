@@ -150,6 +150,16 @@ def cmd_placement_docs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_placement_compare(args: argparse.Namespace) -> int:
+    comparison = placement.compare(Path(args.before), Path(args.after))
+    text = placement.compare_markdown(comparison, args.before_source, args.after_source)
+    print(text)
+    if args.docs:
+        placement.write_block([Path(f) for f in args.docs], "s2-placement-compare", text)
+        print(f"\nThe comparison in {', '.join(args.docs)} is now this one.")
+    return 0
+
+
 def cmd_inference_matrix(args: argparse.Namespace) -> int:
     out = fresh(runs_dir(args), f"inference-{stamp()}")
     results = evaluate.inference_matrix(out)
@@ -213,6 +223,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("results", nargs="+", help="results.json of each cell's evaluation")
     p.add_argument("--out", help="write results.json, table.txt and table.md there")
     p.set_defaults(func=cmd_placement)
+    p = sub.add_parser("placement-compare", help="compare two placement results (before and after), from their results and traces")
+    p.add_argument("before", help="results.json of the earlier run (placement --out), with its runs/ beside placement/")
+    p.add_argument("after", help="results.json of the later run")
+    p.add_argument("--before-source", required=True, help="where the earlier results come from, for the caption")
+    p.add_argument("--after-source", required=True, help="where the later results come from")
+    p.add_argument("--docs", nargs="+", metavar="FILE", help="also write the table into these files, between their markers")
+    p.set_defaults(func=cmd_placement_compare)
+
     p = sub.add_parser("placement-docs", help="write a placement results.json's table into documentation files, between its markers")
     p.add_argument("results", help="the results.json written by `placement --out`")
     p.add_argument("files", nargs="+", help="for example README.md manual/runtime.md")

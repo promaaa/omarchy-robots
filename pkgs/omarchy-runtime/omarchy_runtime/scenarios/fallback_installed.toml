@@ -1,6 +1,8 @@
-description = """S2 installs a fallback for the execution: move to the body's safe pose with the
-gripper closed. S1 then stalls for 2.5 s while carrying the cup: S0 runs the
-fallback, returns to HOLD when it ends, and S1 resumes from the safe pose."""
+description = """S2 sends a fallback with the goal (predicted: move to the body's safe pose with
+the gripper closed) and refines it once the execution runs. S1 then stalls
+for 2.5 s while carrying the cup: S0 runs S2's fallback, which expires into
+the capability's default (hold there, keep the grasp), never HOLD, and S1
+resumes from the safe pose."""
 seed = 7
 body = "arm3"
 
@@ -10,6 +12,7 @@ latency_s = 0.05
 [s2]
 latency_s = 0.1
 fallback = true
+refine_fallback = true
 goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
 
 [[faults]]

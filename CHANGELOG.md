@@ -7,6 +7,63 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+### Changed
+
+- Contract change, fallbacks exist before they are needed: S0 holds two
+  fallbacks and runs the first valid one, else HOLD. S2's (predicted with
+  the goal, or refined) takes precedence over the base fallback, a
+  capability's default computed by the runtime on the robot side. Both are
+  installed when an execution starts, before S1's first chunk;
+  `S0.install_fallback(spec, now, base=False)` replaces one in a single
+  step, so the one replaced stays valid until then. When S2's runs out, S0
+  goes on under the base in the same tick. A fallback engages when a chunk
+  ran out with no successor, or when the runtime asks after a failure; while
+  an execution awaits S1's first chunk, S0 holds. A chunk that takes over
+  no longer spends the fallback: it engages again the next time. Before,
+  S2 installed its fallback one decision after the execution started, and
+  with a 5 s TTFT S1 gave up before any fallback existed.
+- Contract change: `GoalRequest` carries S2's predicted fallback
+  (`fallback`, its window relative to the execution's start); link protocol
+  3 (protocol 2 peers are refused). `FallbackSpec` gains `relative` (per
+  dimension: offsets from where S0 is when it engages) and `S0Status`
+  `fallback_source`; `fallback_installed` now means a valid fallback is
+  installed, S2's or the base.
+- Contract change: S0 counts `fallback_cover_ns`, the time a valid fallback
+  is installed, tick by tick. Execution summaries carry
+  `fallback_coverage`, the fraction of their running time (from the start
+  to S1's claim or the failure) covered; evaluation requires at least 99 %
+  for every execution, and the placement experiment reports it per cell.
+- Trace schema 5: S0's per-tick record gains `fallback` (none, base or S2's,
+  the fallback S0 runs); `fallback.install` events carry the slot, the kind
+  (capability default, s2 predicted, s2 refined) and the window; the header
+  names each capability's default fallback generator.
+- The full-matrix test requires again that a fallback engages in every
+  recovery, and coverage of at least 99 % for every execution. The relaxed
+  check of v0.0.2 part 4 (the retry comes, with or without a fallback) is gone: the
+  strict one implies it.
+- A recovery's `fallback_expired` now means S2's fallback ran out before the
+  retry started and the capability's default took over (before: S0 went to
+  HOLD).
+
+### Added
+
+- `FallbackGenerator` (contracts.py), with `hold` (every dimension holds
+  where S0 is, the gripper included) and `lift` (the same; holding an
+  object on a body with a `z` dimension, rise 2 cm first) in
+  `DEFAULT_FALLBACKS`. `capabilities.toml` names one per capability
+  (`default_fallback`; `place_in` uses `lift`). A default never moves the
+  gripper (contract test `FallbackGeneratorContract`). The runtime renews
+  it when the generator returns another motion, after a grasp or a release.
+- The scripted S2 sends its predicted fallback with each goal
+  (`[s2] fallback = true`) and refines it once the execution runs when
+  `refine_fallback = true` (scenario `fallback_installed`).
+- `omarchy-runtime placement-compare BEFORE AFTER [--docs FILE...]`: two
+  placement runs compared for each profile and TTFT (fallback coverage,
+  the fallback engaged in recoveries, S2's fallbacks expired, the HOLD time
+  while S2 decides, the recovery times), coverage and HOLD time computed
+  from both runs' traces the same way. The README and the manual show the
+  v0.0.2 part 4 matrix against this release's.
+
 ## [0.0.2] - 2026-10-06
 
 ### Part 4 (2026-10-06)

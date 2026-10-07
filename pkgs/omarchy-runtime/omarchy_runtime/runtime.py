@@ -29,6 +29,8 @@ from omarchy_runtime.contracts import (
     ConfigError,
     ContractError,
     Decision,
+    FallbackGenerator,
+    FallbackSpec,
     Goal,
     GoalRequest,
     Heartbeat,
@@ -51,11 +53,14 @@ from omarchy_runtime.contracts import (
     Verdict,
     VerdictKind,
     Verifier,
+    ns,
     seconds,
 )
 from omarchy_runtime.sched import Mailbox, distribution
 from omarchy_runtime.trace import TraceWriter, dumps
 from omarchy_runtime.wallclock import perf_ns
+
+BASE_WINDOW = ns(600.0)  # the base fallback's window from an execution's start: it, and a wait for S2 after a failure
 
 
 @dataclass(frozen=True)
@@ -67,6 +72,7 @@ class Capability:
     params: tuple[str, ...]
     requires: tuple[str, ...]  # body features
     preconditions: tuple[tuple[str, str], ...]  # ("observed" | "reachable", param)
+    default_fallback: str | None = None  # a FallbackGenerator id: S0's base fallback while it runs
 
 
 @dataclass(frozen=True)
@@ -225,7 +231,11 @@ class Execution:
         self.counters_start: S0Counters | None = None
         self.counters = S0Counters()
         self.wall: Counter[str] = Counter()
-        self.fallbacks: list[Json] = []
+        self.fallbacks: list[Json] = []  # every installation: slot, kind, source, window, duration
+        self.base: FallbackSpec | None = None  # the capability's default, as installed
+        self.s0_started: Ns | None = None  # S0's time when the execution started, for its coverage
+        self.s0_stopped: Ns | None = None
+        self.base_error: str | None = None  # the default fallback generator's last error, recorded once
 
     def transition(self, to: State, category: Category | None = None, reason: str = "") -> None:
         if to not in TRANSITIONS.get(self.state, frozenset()):
@@ -263,7 +273,12 @@ class Runtime:
         run_id: str,
         config_hash: str,
         seed: int,
+        default_fallbacks: Mapping[str, FallbackGenerator] | None = None,
     ) -> None:
+        self._defaults = default_fallbacks or {}
+        for cap in capabilities:
+            if cap.default_fallback is not None and cap.default_fallback not in self._defaults:
+                raise ConfigError(f"capability {cap.id} names default fallback {cap.default_fallback}, which does not exist")
         for b in bindings:
             if b.implementation not in implementations:
                 raise ConfigError(f"binding of {b.capability} names implementation {b.implementation}, which does not exist")
@@ -517,8 +532,14 @@ class Runtime:
             self._set(ex, State.REJECTED, now, res.category, res.reason)
             return
         assert self._status is not None
-        ex.started, ex.counters_start = now, self._status.counters
+        ex.started, ex.counters_start, ex.s0_started = now, self._status.counters, self._status.t
         self._set(ex, State.RUNNING, now, reason=res.reason)
+        # Fallbacks before S1's first chunk: the previous execution's go, then the
+        # capability's default (S0's base), then S2's prediction sent with the goal.
+        self._s0.hold()
+        self._renew_base(ex, now, "the execution starts")
+        if ex.request.fallback is not None:
+            self._install_s2(ex, ex.request.fallback.shifted(now), now, "s2 predicted")
         try:
             policy = self._implementations[res.binding.implementation]()
             policy.start(ex.request.goal, self.belief.snapshot(), self.body, ex.request.conditioning)
@@ -538,6 +559,55 @@ class Runtime:
         self._event(now, "s0.hold", ex, {"reason": f"execution {ex.id} stopped running", "fallback": fallback})
         assert self._status is not None and ex.counters_start is not None
         ex.counters = self._status.counters.since(ex.counters_start)
+        ex.s0_stopped = self._status.t
+
+    def _capability(self, ex: Execution) -> Capability | None:
+        binding = ex.resolution.binding if ex.resolution else None
+        return next((c for c in self._capabilities if binding and c.id == binding.capability), None)
+
+    def _renew_base(self, ex: Execution, now: Ns, reason: str) -> None:
+        """The capability's default fallback, from S0's status, installed as
+        S0's base fallback when its motion differs from the one installed (at
+        the start; after a grasp). The one replaced stays until then."""
+        cap = self._capability(ex)
+        if cap is None or cap.default_fallback is None or self._status is None or ex.started is None:
+            return
+        generator = self._defaults[cap.default_fallback]
+        try:
+            spec = generator.fallback(self.body, self._status, ex.started, ex.started + BASE_WINDOW)
+            if not isinstance(spec, FallbackSpec):
+                raise ContractError(f"returned {type(spec).__name__}, not a FallbackSpec")
+            if ex.base is not None and spec.same_motion(ex.base):
+                return
+            self._s0.install_fallback(spec, now, base=True)
+        except Exception as e:  # noqa: BLE001 - a failing generator keeps the base fallback as it was
+            error = f"default fallback {generator.id} of {cap.id}: {type(e).__name__}: {e}"
+            if error != ex.base_error:
+                ex.base_error = error
+                self._event(now, "error", ex, {"category": "extension", "reason": error})
+            return
+        ex.base = spec
+        self._installed(ex, spec, now, "base", "capability default", {"capability": cap.id, "reason": reason})
+
+    def _install_s2(self, ex: Execution, spec: FallbackSpec, now: Ns, kind: str) -> None:
+        """S2's fallback, predicted with the goal or refined, into S0's S2 slot."""
+        reason = ""
+        if spec.action_space != self.body.action_space or spec.dims != self.body.dims:
+            reason = f"fallback for {spec.action_space} {list(spec.dims)}, body {self.body.id} is {self.body.action_space}"
+        else:
+            try:
+                self._s0.install_fallback(spec, now)
+            except ContractError as e:
+                reason = str(e)
+        if reason:
+            self._event(now, "fallback.rejected", ex, {"reason": reason, "source": spec.source, "kind": kind})
+            return
+        self._installed(ex, spec, now, "s2", kind, {})
+
+    def _installed(self, ex: Execution, spec: FallbackSpec, now: Ns, slot: str, kind: str, extra: Json) -> None:
+        record = {"t": now, "slot": slot, "kind": kind, "source": spec.source, "valid_from": spec.valid_from}
+        ex.fallbacks.append(record | {"valid_until": spec.valid_until, "lasts_ns": spec.lasts, "duration_ns": spec.duration})
+        self._event(now, "fallback.install", ex, spec.to_json() | {"slot": slot, "kind": kind} | extra)
 
     def _fail(self, ex: Execution, now: Ns, category: Category, reason: str) -> None:
         if ex.state is State.RUNNING:
@@ -548,6 +618,7 @@ class Runtime:
     def _supervise(self, ex: Execution, now: Ns) -> None:
         status, policy = self._status, ex.policy
         assert status is not None and policy is not None and ex.started is not None
+        self._renew_base(ex, now, "the grasp changed")
         chunk = status.last_chunk
         # S1 is attached after S0's tick at `started`: a chunk received then belongs to the execution before.
         last = chunk.received if chunk is not None and chunk.received > ex.started else None
@@ -629,24 +700,20 @@ class Runtime:
         self._set(ex, State.ABORTED, now, Category.CANCELLED, "cancelled by request")
 
     def _install(self, message: InstallFallback, now: Ns) -> None:
-        ex, spec = self.executions.get(message.execution_id), message.spec
-        reason = ""
+        ex = self.executions.get(message.execution_id)
         if ex is None or ex.state is not State.RUNNING:
             reason = f"execution {message.execution_id} is {ex.state if ex else 'unknown'}, not RUNNING"
-        elif spec.action_space != self.body.action_space or spec.dims != self.body.dims:
-            reason = f"fallback for {spec.action_space} {list(spec.dims)}, body {self.body.id} is {self.body.action_space}"
-        else:
-            try:
-                self._s0.install_fallback(spec, now)
-            except ContractError as e:
-                reason = str(e)
-        if reason:
-            self._event(now, "fallback.rejected", ex, {"reason": reason, "source": spec.source})
+            self._event(now, "fallback.rejected", ex, {"reason": reason, "source": message.spec.source, "kind": "s2 refined"})
             return
-        assert ex is not None
-        record = {"t": now, "source": spec.source, "valid_from": spec.valid_from, "valid_until": spec.valid_until}
-        ex.fallbacks.append(record | {"duration_ns": spec.duration})
-        self._event(now, "fallback.install", ex, spec.to_json())
+        self._install_s2(ex, message.spec, now, "s2 refined")
+
+    def _coverage(self, ex: Execution) -> float | None:
+        """The fraction of the time the execution ran (from its start to S1's
+        claim or its failure, on S0's clock) during which S0 held a valid
+        fallback: S0's own count, tick by tick. None if it never ran."""
+        if ex.s0_started is None or ex.s0_stopped is None or ex.s0_stopped <= ex.s0_started:
+            return None
+        return ex.counters.fallback_cover_ns / (ex.s0_stopped - ex.s0_started)
 
     def _summary(self, ex: Execution) -> Json:
         res, b = ex.resolution, ex.resolution.binding if ex.resolution else None
@@ -693,6 +760,7 @@ class Runtime:
             },
             "s0": ex.counters.to_json(),
             "fallbacks": ex.fallbacks,
+            "fallback_coverage": self._coverage(ex),
             "config_hash": self._config_hash,
             "seed": self._seed,
         }

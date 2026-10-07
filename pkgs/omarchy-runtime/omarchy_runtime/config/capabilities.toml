@@ -4,12 +4,16 @@
 #
 # Preconditions: "observed <param>" (a fresh, confident estimate) and
 # "reachable <param>" (inside the body's workspace).
+#
+# default_fallback: the generator (extensions.py, DEFAULT_FALLBACKS) of the
+# fallback S0 holds while the capability runs, before S2's and with no gap.
 
 [capabilities.place_in]
 achieves = "in"
 params = ["object", "container"]
 requires = ["gripper"]
 preconditions = ["observed object", "reachable object", "reachable container"]
+default_fallback = "lift"  # hold where S0 is; holding an object, rise 2 cm first (bodies with z)
 
 [[bindings]]
 capability = "place_in"

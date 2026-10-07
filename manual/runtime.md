@@ -22,9 +22,20 @@ The Omarchy Robots runtime sits between the intelligence that decides what a rob
 
 The runtime is the **control plane**: it owns the application API, capability resolution, the execution lifecycle, supervision, the belief about the world, verification and traces. It is not in the high-rate path. Chunks go from S1 to S0 directly, and the runtime samples S0's status at its own rate.
 
-**S0 never waits.** At every tick it executes a valid chunk, else a fallback S2 installed ahead of time, else its built-in HOLD, which keeps the joints where they are and leaves the gripper as it is. A chunk is executed only until its `valid_until`; S0 leaves it at the first tick after that.
+**S0 never waits.** At every tick it executes a valid chunk, else a valid fallback (S2's, else the capability's default: see "Fallbacks"), else its built-in HOLD, which keeps the joints where they are and leaves the gripper as it is. A chunk is executed only until its `valid_until`; S0 leaves it at the first tick after that.
 
-**S0's steps are bounded.** In one tick S0 never moves a dimension more than its velocity limit times S0's nominal tick period, whatever the real time since the last tick. A tick that comes later than a threshold (1.5 periods, `[s0]` in `config/world.toml`) is a late tick: S0 continues from where it is at that bound and never catches up with a jump; if the plan moved on meanwhile, S0 reaches it later and S1 plans again. S0 counts late ticks and reports the longest interval between ticks and its largest step as a fraction of the bound; the runtime records each new late tick (`s0.late`). This is part of the S0 contract, for a hardware S0 as well. When an execution stops running (claim, failure, cancellation), the runtime tells S0 to hold: the rest of the chunk and the fallback are dropped.
+**S0's steps are bounded.** In one tick S0 never moves a dimension more than its velocity limit times S0's nominal tick period, whatever the real time since the last tick. A tick that comes later than a threshold (1.5 periods, `[s0]` in `config/world.toml`) is a late tick: S0 continues from where it is at that bound and never catches up with a jump; if the plan moved on meanwhile, S0 reaches it later and S1 plans again. S0 counts late ticks and reports the longest interval between ticks and its largest step as a fraction of the bound; the runtime records each new late tick (`s0.late`). This is part of the S0 contract, for a hardware S0 as well. When an execution stops running, the runtime tells S0 to hold: the rest of the chunk is dropped. After a claim or a cancellation the fallbacks go too; after a failure S0 keeps them and engages one while S2 decides.
+
+### Fallbacks
+
+A fallback must exist before it is needed. S0 holds two, in two slots, and runs the first valid one, else HOLD:
+
+1. **S2's fallback.** S2 predicts it and sends it with the goal (`fallback` in the `request`), its window relative to the execution's start, so that the runtime installs it when the execution starts, before S1's first chunk, whatever S2's latency. S2 may refine it later (`install_fallback`): the refined one replaces the predicted one.
+2. **The capability's default**, S0's base fallback. Each capability names a generator in `config/capabilities.toml` (`default_fallback`); the runtime computes it on the robot side from S0's status and installs it when the execution starts. `hold` keeps every dimension where S0 is when it engages, the gripper included (relative rows of zeros); `lift`, the default of `place_in`, does the same, and on a body with a `z` dimension (the gantry) with the gripper closed rises 2 cm first. A default never moves the gripper, so a closing gripper is never reopened on an object. The runtime renews the default whenever the generator returns another motion (after a grasp, after a release); the one replaced stays until then. It is valid for the execution and a wait for S2 after it (600 s from the start).
+
+Precedence: S2's refined, then S2's predicted, then the capability's default, then HOLD. A fallback engages when a chunk ran out with no successor, or when the runtime asks after a failure; while an execution awaits S1's first chunk, S0 holds. A new chunk takes over at once, and the fallback stays installed for the next time. When S2's fallback runs out (`fallback_lasts_s`), S0 goes on under the default in the same tick. Rows can be targets or, per dimension (`relative`), offsets from where S0 is when it engages. Every installation is recorded (`fallback.install`: slot, kind, source, window, duration), and the execution summary lists them.
+
+**Fallback coverage** is the fraction of an execution's running time (from its start to S1's claim or its failure) during which S0 holds a valid fallback, as S0 counts it tick by tick (`fallback_cover_ns`). It is reported for each execution (`fallback_coverage` in its summary and in `results.json`), each scenario (the least) and each placement cell; the evaluation requires at least 99 % for every execution.
 
 ## Turning it on
 
@@ -70,9 +81,9 @@ A simulated kitchen in a vertical plane: a table with two cups, a counter with a
 | `slip_retry` | The cup slips over the table while S1 carries it. S1 does not notice and claims DONE; the verifier sees the cup on the table; the recovery policy retries once | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
 | `occluded_long` | The rack is hidden from the camera for the whole run. The cup is in the rack, but nothing can show it | UNVERIFIED/VERIFICATION_INCONCLUSIVE |
 | `occluded_short` | The rack is hidden for 2.5 s after the release, within the verifier's budget | SUCCEEDED |
-| `s1_stall_short` | S1 stops producing chunks for 1 s while it carries the cup: S0 holds, S1 resumes | SUCCEEDED |
-| `s1_stall_long` | S1 stops for good: after 3 s without a chunk the supervisor ends the execution, S0 still holding the cup | FAILED/S1_STALL |
-| `fallback_installed` | S2 installs a fallback (the safe pose, gripper closed); S1 stalls for 2.5 s; S0 runs the fallback, then HOLDs, then S1 resumes | SUCCEEDED |
+| `s1_stall_short` | S1 stops producing chunks for 1 s while it carries the cup: S0 runs the capability's default (holds the cup where it is), S1 resumes | SUCCEEDED |
+| `s1_stall_long` | S1 stops for good: after 3 s without a chunk the supervisor ends the execution, S0 still holding the cup under the capability's default | FAILED/S1_STALL |
+| `fallback_installed` | S2 sends a fallback with the goal (the safe pose, gripper closed) and refines it once the execution runs; S1 stalls for 2.5 s; S0 runs S2's fallback, then the capability's default, never HOLD, then S1 resumes | SUCCEEDED |
 | `unsupported_clean` | `clean(cup_1)`: no capability achieves it, and the resolver says why | REJECTED/NO_CAPABILITY |
 | `s2_latency_0p1`, `_1`, `_5` | Both cups, with S2 taking 0.1 s, 1 s or 5 s for every decision | SUCCEEDED twice; only the task time and the robot's idle time change |
 | `timing_observation_age` | Every observation is 20 ms old when S1 reads it. Regression: v0.0.2 part 2's first S1 fix timed out here | SUCCEEDED |
@@ -108,13 +119,13 @@ The scene can change during a task. A change is a `[[faults]]` entry, at a delay
 | `move` | `entity`, `x` | the entity moves by `x` along the table (refused while it is held) and settles on the support below |
 | `appear` | `entity`, `x` | an object declared absent (`present = false` in `world.toml`, as `dish_1`) appears at `x` |
 
-S2's fallback has a duration: `fallback_lasts_s` in a scenario's `[s2]` (by default, the duration of its rows). S0 holds the fallback's last row until then, and then returns to HOLD; S0's counters count each expiry (`fallback_expiries`). When an execution fails, the runtime engages the installed fallback.
+S2's fallback has a duration: `fallback_lasts_s` in a scenario's `[s2]` (by default, the duration of its rows). S0 holds the fallback's last row until then, and then goes on under the capability's default; S0's counters count each expiry (`fallback_expiries`). When an execution fails, the runtime engages the installed fallbacks. `fallback = true` in `[s2]` makes the scripted S2 send its prediction with each goal; `refine_fallback = true` also refines it once the execution runs.
 
 The evaluation measures how the robot met each change (`dynamics` in `results.json`, seconds on the run's clock):
 
 - **reaction**: from a move to S0 executing the first chunk computed from an observation taken after it;
 - **freeze**: from the first observation after the move reaching S1 to that tick, while S0 executes a plan the belief already contradicts;
-- **recovery**: for each failed execution that a retry follows, from the failure to the retry running, the time S0 spent in the fallback meanwhile, whether the fallback engaged, and whether it expired before the retry's first chunk;
+- **recovery**: for each failed execution that a retry follows, from the failure to the retry running, the time S0 spent in a fallback meanwhile, whether one engaged and which first (S2's or the capability's default), and whether S2's expired (S0 went from it to the default or HOLD) before the retry started;
 - **discontinuity**: the largest jump of S0's desired position, and of its desired velocity, where one chunk takes over from another;
 - **inferences**: how many times S1 inferred.
 
@@ -127,7 +138,7 @@ omarchy-runtime s2 --listen 0.0.0.0:7447 --ttft 1                 # on the S2 ma
 omarchy-runtime run s2_latency_1 --clock wall --s2 edge:7447      # on the robot
 ```
 
-The link is newline-delimited JSON over TCP. S2 listens and the robot connects to it, so the robot's firewall still admits SSH only; the S2 machine admits the port. The robot speaks first: its hello carries the run's identity (run id, scenario, seed, configuration hash, the runtime and OS builds), the body spec S2 builds fallbacks from, and the heartbeat period. S2 answers with its own identity, latency model and recovery policy. Then only control-plane traffic crosses: requests, fallback installs, cancels, decisions and heartbeats from S2; execution updates with their summaries, heartbeat echoes and refusals from the robot. Action chunks never cross: S1 and S0 stay in the robot's process.
+The link is newline-delimited JSON over TCP. S2 listens and the robot connects to it, so the robot's firewall still admits SSH only; the S2 machine admits the port. The robot speaks first: its hello carries the run's identity (run id, scenario, seed, configuration hash, the runtime and OS builds), the body spec S2 builds fallbacks from, and the heartbeat period. S2 answers with its own identity, latency model and recovery policy. Then only control-plane traffic crosses: requests (each may carry S2's predicted fallback), fallback installs, cancels, decisions and heartbeats from S2; execution updates with their summaries, heartbeat echoes and refusals from the robot. Action chunks never cross: S1 and S0 stay in the robot's process.
 
 A run survives a broken connection. Every message from S2 and every update from the robot carries a link number; heartbeats and echoes acknowledge the highest number applied. When S2 has been silent for 3 s, or the connection breaks, the robot connects again without blocking its loop, first at once, then after 0.25 s, doubling up to 2 s between attempts (`[s2_link]` in `config/runtime.toml`). S2 keeps listening for the whole run and resumes the session of the same run id. Both ends then send again, in order, what the other has not acknowledged, and ignore a number already applied, so a resumed session neither repeats nor loses a goal. The runtime itself treats a GoalRequest as idempotent by its `request_id`: the same request again creates no second execution, and its latest update comes again. TCP_USER_TIMEOUT (3 s) and keepalive bound how long the kernel holds unacknowledged data, so TCP's retransmission backoff no longer stretches an outage. The trace records each closed connection and each reconnection (`s2.link`: `closed`, `reconnected` with the time down, the attempts and the updates sent again).
 
@@ -165,10 +176,10 @@ Every run writes one directory:
 
 | File | Contents |
 |---|---|
-| `run.json` | Header: `trace_schema` (4), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
+| `run.json` | Header: `trace_schema` (5), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
 | `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions, with `observed_at` and `inference_ns`), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `run.end`. |
 | `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, configuration hash and seed. |
-| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity, and when the chunk's observation was taken), kept in a preallocated buffer and written once at the end. |
+| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity, when the chunk's observation was taken, and which fallback runs: none, base or S2's), kept in a preallocated buffer and written once at the end. |
 | `results.json` | Written by the evaluation harness only: ground truth and agreement for each execution. |
 
 Keys that start with `wall` are wall-clock values. Everything else follows from the scenario and its seed: the same scenario with the same seed gives the same trace.
@@ -189,7 +200,7 @@ Where should S2 live: on the robot, on an edge server, or in the cloud (research
 | `outage` | `lan`, then every packet dropped for 5 s during the first execution |
 | `outage_long` | `lan`, then every packet dropped for 20 s during the first execution: the robot connects again |
 
-The first table has one row for each profile and TTFT: the two-cup task time, `cup_moved`'s reaction time, the recovery time of `slot_blocked` and `fallback_expiry` (from S1 giving up to the retry running; "expired" when the fallback ended before it), how many fallbacks expired, and the violations, starvations and cells within tolerance over the row. Times are wall-clock, and in parentheses the same task in one process on simulated time. Every cell then follows: the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and its simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, S0's loop intervals and overruns, and the reaction and recovery times.
+The first table has one row for each profile and TTFT: the two-cup task time, `cup_moved`'s reaction time, the recovery time of `slot_blocked` and `fallback_expiry` (from S1 giving up to the retry running; "expired" when S2's fallback ran out before it and the capability's default took over), how many of S2's fallbacks expired, the least fallback coverage over the row's executions, and the violations, starvations and cells within tolerance over the row. Times are wall-clock, and in parentheses the same task in one process on simulated time. Every cell then follows: the outcomes, safety violations (ground truth), S0 starvation events, time in fallback and in HOLD over the whole task, the task time and its simulated time, S2's round trips (heartbeat echo), the outages the supervisor recorded with their class, S0's loop intervals and overruns, and the reaction and recovery times.
 
 ```sh
 nix build .#checks.x86_64-linux.vm-s2-placement   # in nix flake check: 14 cells (below)
@@ -321,6 +332,11 @@ S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc n
 Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
 <!-- s2-placement:end -->
 
+Before and after the fallback design of v0.0.2 part 5 (the full matrix of v0.0.2 part 4 against the one of this release), written by `omarchy-runtime placement-compare BEFORE AFTER --docs ...` from both runs' results and traces:
+
+<!-- s2-placement-compare:begin -->
+<!-- s2-placement-compare:end -->
+
 ## Extension points
 
 Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_runtime/contracts.py`, with a default implementation in `extensions.py`, chosen by id in `config/runtime.toml` (or a scenario's `[extensions]` table), and named with its version in every trace header.
@@ -333,6 +349,7 @@ Each extension point is one small interface in `pkgs/omarchy-runtime/omarchy_run
 | `LatencyModel.sample(rng)` returns a delay, S2's time to first token | `fixed`; also `lognormal` (sampled for each decision) | where S2 should run (R2) |
 | `ChunkCorrector.correct(chunk, history, state, now)` returns the chunk S0 executes | `none`; also `blend` | asynchronous inference: correcting a chunk computed from an older observation (see below) |
 | `InferenceTrigger.due(context)` says whether S1 infers now | `periodic`; also `mismatch` | asynchronous inference: when to infer again (see below) |
+| `FallbackGenerator.fallback(body, status, valid_from, valid_until)` returns a capability's default fallback | `lift` for `place_in`; also `hold` | what S0 does when S1's chunks stop and S2 has no fallback, or after S2's ran out (see "Fallbacks"); named per capability in `capabilities.toml` (`default_fallback`); contract tests `FallbackGeneratorContract` |
 
 An extension that raises, or returns the wrong type, never stops the run: a failing filter loses that observation (unfiltered data never reaches the belief), a failing verifier gives INCONCLUSIVE, a failing recovery policy means giving up, and each leaves an `error` event in the trace.
 

@@ -19,10 +19,14 @@ from typing import Any
 
 import numpy as np
 
+from omarchy_runtime import config
 from omarchy_runtime.contracts import (
     ActionChunk,
+    BodySpec,
     ChunkCorrector,
     ChunkMeta,
+    FallbackGenerator,
+    FallbackSpec,
     GiveUp,
     Goal,
     InferenceContext,
@@ -246,3 +250,44 @@ class TriggerContract:
         self.assertEqual(trigger.due(context), trigger.due(context))
         self.assertIsInstance(trigger.due(context), bool)
         _fast(self, lambda: trigger.due(context))
+
+
+class FallbackGeneratorContract:
+    """A capability's default fallback: one for the body, valid over the
+    window it is given and lasting all of it, that never moves the gripper
+    (a relative zero: a held object stays held, a closing gripper is not
+    reopened), the same for the same status, within its time budget."""
+
+    def make(self) -> FallbackGenerator:
+        raise NotImplementedError
+
+    def cases(self) -> list[tuple[BodySpec, S0Status]]:
+        out = []
+        for body in (GANTRY, config.body(config.effective("nominal_a"))):
+            g = body.dims.index("gripper")
+            for grip in (body.lower[g], body.upper[g], (body.lower[g] + body.upper[g]) / 2):
+                here = tuple(grip if i == g else v for i, v in enumerate(body.home))
+                out.append((body, s0_state(1000 * MS, here, None, S0Mode.HOLD)))
+        return out
+
+    def test_named(self: Any) -> None:
+        _named(self, self.make())
+
+    def test_for_the_body_over_its_window_never_moving_the_gripper(self: Any) -> None:
+        for body, status in self.cases():
+            with self.subTest(body=body.id, gripper=status.position[body.dims.index("gripper")]):
+                spec = self.make().fallback(body, status, 1000 * MS, 61_000 * MS)
+                self.assertIsInstance(spec, FallbackSpec)
+                self.assertEqual((spec.action_space, spec.dims), (body.action_space, body.dims))
+                self.assertEqual((spec.valid_from, spec.valid_until), (1000 * MS, 61_000 * MS))
+                self.assertGreaterEqual(spec.lasts, spec.valid_until - spec.valid_from)
+                g = body.dims.index("gripper")
+                self.assertTrue(spec.relative[g] and bool(np.all(spec.actions[:, g] == 0.0)), "the fallback moves the gripper")
+
+    def test_deterministic_and_within_its_time_budget(self: Any) -> None:
+        generator = self.make()
+        for body, status in self.cases():
+            a, b = generator.fallback(body, status, 0, 60_000 * MS), generator.fallback(body, status, 0, 60_000 * MS)
+            self.assertTrue(a.same_motion(b))
+        body, status = self.cases()[0]
+        _fast(self, lambda: generator.fallback(body, status, 0, 60_000 * MS))

@@ -1,8 +1,8 @@
 """The collaborator extension points: default implementations, and the
 registries configuration selects them from by id.
 
-To add an ObservationFilter, a Verifier, a RecoveryPolicy or an S2
-LatencyModel: write a class with `id`, `version` and the method its interface
+To add an ObservationFilter, a Verifier, a RecoveryPolicy, an S2
+LatencyModel or a capability's FallbackGenerator: write a class with `id`, `version` and the method its interface
 in contracts.py names, add it to the registry below, and select it in
 config/runtime.toml ([extensions]) or in a scenario's [extensions] table. The
 runtime core does not change. tests/contracts.py holds the contract tests a
@@ -20,8 +20,11 @@ import numpy as np
 from omarchy_runtime.belief import WorldState, free_spots
 from omarchy_runtime.contracts import (
     ActionChunk,
+    BodySpec,
     ChunkCorrector,
     ConfigError,
+    FallbackGenerator,
+    FallbackSpec,
     GiveUp,
     Goal,
     InferenceContext,
@@ -225,6 +228,57 @@ class LognormalLatency:
         return ns(float(rng.lognormal(math.log(self.median), self.spread)))
 
 
+class Hold:
+    """A capability's default fallback: hold where S0 is. Every dimension, the
+    gripper included, takes a relative row of zeros: S0 keeps the position it
+    has when it engages, so a held object stays held and an open gripper
+    stays open. It lasts its whole window. (A gripper moved by a fallback
+    could reopen on an object S1 was closing on: never.)"""
+
+    id = "hold"
+    version = "1"
+
+    def offsets(self, body: BodySpec, status: S0Status) -> list[float]:
+        return [0.0] * len(body.dims)
+
+    def fallback(self, body: BodySpec, status: S0Status, valid_from: Ns, valid_until: Ns) -> FallbackSpec:
+        source = f"default.{self.id}@{self.version}"
+        rows = [self.offsets(body, status)]
+        return FallbackSpec.make(
+            body.action_space,
+            body.dims,
+            FALLBACK_DT,
+            rows,
+            valid_from,
+            valid_until,
+            source,
+            max(valid_until - valid_from, FALLBACK_DT),  # all of its window
+            [True] * len(body.dims),
+        )
+
+
+class LiftHeld(Hold):
+    """Hold, and with the gripper closed (below the middle of its range) on a
+    body that has a "z" dimension, rise by `LIFT_M` first: a held object
+    leaves whatever it is near. On another body (an arm commanded in joint
+    space) it is Hold. Its motion changes with the grasp, so the runtime
+    renews it after a grasp and after a release."""
+
+    id = "lift"
+    version = "1"
+
+    def offsets(self, body: BodySpec, status: S0Status) -> list[float]:
+        row = super().offsets(body, status)
+        if "z" in body.dims and "gripper" in body.dims:
+            g = body.dims.index("gripper")
+            if status.position[g] < (body.lower[g] + body.upper[g]) / 2:
+                row[body.dims.index("z")] = LIFT_M
+        return row
+
+
+FALLBACK_DT = ns(0.2)  # the default fallback's one row, reached over this time
+LIFT_M = 0.02
+
 FILTERS: Mapping[str, Callable[[], ObservationFilter]] = {"identity": IdentityFilter}
 VERIFIERS: Mapping[str, Callable[[], Verifier]] = {"geometric": GeometricVerifier}
 RECOVERY: Mapping[str, Callable[[], RecoveryPolicy]] = {"retry_once": RetryOnce, "retry_elsewhere": RetryElsewhere}
@@ -237,6 +291,8 @@ INFERENCE_TRIGGERS: Mapping[str, Callable[[Json], InferenceTrigger]] = {
     "periodic": lambda p: Periodic(),
     "mismatch": lambda p: Mismatch(float(p["mismatch"])),
 }
+# A capability names its default fallback generator in capabilities.toml (default_fallback).
+DEFAULT_FALLBACKS: Mapping[str, Callable[[], FallbackGenerator]] = {"hold": Hold, "lift": LiftHeld}
 # Latency models take the median time to first token (s) and a spread (0 for fixed).
 LATENCY: Mapping[str, Callable[[float, float], LatencyModel]] = {"fixed": FixedLatency, "lognormal": LognormalLatency}
 

@@ -398,14 +398,22 @@ class FallbackSpec:
     """A short trajectory S0 runs instead of HOLD when its chunk expires, or
     when the execution fails (the runtime engages it then).
 
-    S2 may install one ahead of time, so S0 always has a safe behaviour and
-    never waits for a slower layer. Row k is the target at te + (k+1)*dt, where
-    te is the tick at which S0 engages the fallback: the trajectory starts from
-    wherever S0 is at te. S0 engages it at most once, only while
-    valid_from <= now <= valid_until, runs its rows, then holds the last row,
-    still in FALLBACK, until te + `lasts`: then the fallback has expired and S0
-    returns to HOLD. `lasts` is at least the rows' duration (the default: no
-    holding). A new valid chunk takes over at once.
+    S0 holds two: the base fallback (a capability's default, computed by the
+    runtime on the robot side) and S2's (predicted with the goal, or refined
+    later), which takes precedence while it is valid. So S0 always has a safe
+    behaviour and never waits for a slower layer.
+
+    Row k is the target at te + (k+1)*dt, where te is the tick at which S0
+    engages the fallback: the trajectory starts from wherever S0 is at te. A
+    dimension marked in `relative` takes its rows as offsets from S0's
+    position at te ("hold where you are" is a row of zeros); the others take
+    them as targets. S0 engages a fallback only while valid_from <= now <=
+    valid_until, runs its rows, then holds the last row, still in FALLBACK,
+    until te + `lasts`: then the fallback has expired, S0 drops it and runs the
+    next one (S2's expires into the base) or HOLD. `lasts` is at least the
+    rows' duration (the default: no holding). A new valid chunk takes over at
+    once; the fallback stays installed and engages again, from its start, the
+    next time S0 needs it.
     """
 
     action_space: str
@@ -416,6 +424,7 @@ class FallbackSpec:
     valid_until: Ns
     source: str
     lasts: Ns
+    relative: tuple[bool, ...]
 
     @staticmethod
     def make(
@@ -427,6 +436,7 @@ class FallbackSpec:
         valid_until: Ns,
         source: str,
         lasts: Ns | None = None,
+        relative: Sequence[bool] | None = None,
     ) -> FallbackSpec:
         if dt <= 0 or valid_until < valid_from:
             raise ChunkRejected(Rejection.SHAPE, f"fallback dt {dt} ns, window [{valid_from}, {valid_until}]")
@@ -434,7 +444,35 @@ class FallbackSpec:
         duration = int(actions.shape[0]) * dt
         if lasts is not None and lasts < duration:
             raise ChunkRejected(Rejection.SHAPE, f"fallback lasts {lasts} ns, shorter than its {duration} ns of rows")
-        return FallbackSpec(action_space, tuple(dims), dt, actions, valid_from, valid_until, source, duration if lasts is None else lasts)
+        rel = tuple(bool(r) for r in relative) if relative is not None else (False,) * len(dims)
+        if len(rel) != len(dims):
+            raise ChunkRejected(Rejection.SHAPE, f"fallback relative has {len(rel)} entries for {len(dims)} dims")
+        return FallbackSpec(
+            action_space, tuple(dims), dt, actions, valid_from, valid_until, source, duration if lasts is None else lasts, rel
+        )
+
+    def shifted(self, by: Ns) -> FallbackSpec:
+        """The same fallback with its window moved by `by` (a window relative to a start, made absolute)."""
+        return FallbackSpec(
+            self.action_space,
+            self.dims,
+            self.dt,
+            self.actions,
+            self.valid_from + by,
+            self.valid_until + by,
+            self.source,
+            self.lasts,
+            self.relative,
+        )
+
+    def same_motion(self, other: FallbackSpec) -> bool:
+        """The same rows, timing, frames and duration (the window and source aside)."""
+        return (
+            (self.action_space, self.dims, self.dt, self.lasts, self.relative)
+            == (other.action_space, other.dims, other.dt, other.lasts, other.relative)
+            and self.actions.shape == other.actions.shape
+            and bool(np.all(self.actions == other.actions))
+        )
 
     @property
     def duration(self) -> Ns:
@@ -450,6 +488,7 @@ class FallbackSpec:
             "valid_until": self.valid_until,
             "source": self.source,
             "lasts": self.lasts,
+            "relative": list(self.relative),
         }
 
     @staticmethod
@@ -464,6 +503,7 @@ class FallbackSpec:
                 int(value["valid_until"]),
                 str(value["source"]),
                 int(value["lasts"]),
+                [bool(r) for r in value["relative"]],
             )
         except (KeyError, TypeError, ValueError) as e:
             raise ContractError(f"not a fallback: {e}") from e
@@ -528,7 +568,8 @@ class S0Counters:
     late_ticks: int = 0
     max_interval_ns: Ns = 0
     max_step: float = 0.0
-    fallback_expiries: int = 0  # fallbacks whose time (lasts) ran out: S0 went from FALLBACK to HOLD
+    fallback_expiries: int = 0  # fallbacks whose time (lasts) ran out: S0 dropped them for the next one or HOLD
+    fallback_cover_ns: Ns = 0  # time a valid fallback (S2's or the base) was installed, tick by tick
 
     def since(self, start: S0Counters) -> S0Counters:
         """Counts accumulated after `start` (the maxima are running maxima)."""
@@ -544,6 +585,7 @@ class S0Counters:
             self.max_interval_ns,
             self.max_step,
             self.fallback_expiries - start.fallback_expiries,
+            self.fallback_cover_ns - start.fallback_cover_ns,
         )
 
     def to_json(self) -> Json:
@@ -559,6 +601,7 @@ class S0Counters:
             "max_interval_ns": self.max_interval_ns,
             "max_step": self.max_step,
             "fallback_expiries": self.fallback_expiries,
+            "fallback_cover_ns": self.fallback_cover_ns,
         }
 
 
@@ -566,7 +609,9 @@ class S0Counters:
 class S0Status:
     """S0 as of its last tick. Plain scalars, so another process can produce it.
     `active_seq` is the chunk being tracked (None unless TRACKING); `last_chunk`
-    the last one S0 accepted."""
+    the last one S0 accepted. `fallback_installed` says a valid fallback is
+    installed (S2's or the base); `fallback_source` names the one S0 would run
+    now, or the one it runs."""
 
     t: Ns
     mode: S0Mode
@@ -575,6 +620,7 @@ class S0Status:
     last_chunk: ChunkMeta | None
     fallback_installed: bool
     counters: S0Counters
+    fallback_source: str | None = None
 
     def to_json(self) -> Json:
         return {
@@ -584,6 +630,7 @@ class S0Status:
             "position": list(self.position),
             "last_chunk": self.last_chunk.to_json() if self.last_chunk else None,
             "fallback_installed": self.fallback_installed,
+            "fallback_source": self.fallback_source,
             "counters": self.counters.to_json(),
         }
 
@@ -635,13 +682,19 @@ class GiveUp:
 class GoalRequest:
     """Ask for a goal. Executions of one task share `task_id`; a retry names the
     execution it retries in `retry_of`. `conditioning` is passed to S1 as is.
-    `request_id` is the sender's, unique within a run."""
+    `request_id` is the sender's, unique within a run.
+
+    `fallback` is S2's predicted fallback, sent with the goal so that it is in
+    S0 from the execution's start, before S1's first chunk. Its window is
+    relative to that start (the runtime moves it onto its clock). S2 may
+    refine it later (InstallFallback)."""
 
     goal: Goal
     task_id: str
     request_id: str
     retry_of: str | None = None
     conditioning: Mapping[str, Any] = field(default_factory=dict, hash=False)
+    fallback: FallbackSpec | None = field(default=None, hash=False)
 
     def to_json(self) -> Json:
         return {
@@ -651,23 +704,29 @@ class GoalRequest:
             "task_id": self.task_id,
             "retry_of": self.retry_of,
             "conditioning": dict(self.conditioning),
+            "fallback": self.fallback.to_json() if self.fallback else None,
         }
 
     @staticmethod
     def from_json(value: Any) -> GoalRequest:
         what = "request"
+        fallback = _field(value, "fallback", (dict, NoneType), what)
         return GoalRequest(
             Goal.from_json(_field(value, "goal", dict, what)),
             _field(value, "task_id", str, what),
             _field(value, "request_id", str, what),
             _field(value, "retry_of", (str, NoneType), what),
             _field(value, "conditioning", dict, what),
+            FallbackSpec.from_json(fallback) if fallback is not None else None,
         )
 
 
 @dataclass(frozen=True)
 class InstallFallback:
-    """Install a fallback in S0 for a running execution; it is cleared when the execution stops running."""
+    """S2's refined fallback for a running execution. It replaces S2's fallback
+    in S0 (the predicted one, sent with the goal, if any): refined before
+    predicted, before the capability's default, before HOLD. After a failure
+    it stays while S0 waits for S2; success or an abort clears it."""
 
     execution_id: str
     spec: FallbackSpec
@@ -862,6 +921,23 @@ class InferenceContext:
     period: Ns
 
 
+class FallbackGenerator(Protocol):
+    """A capability's default fallback, computed by the runtime on the robot
+    side from S0's status: installed in S0 as its base fallback when an
+    execution starts, before S1's first chunk, and renewed whenever the
+    generator returns another motion (after a grasp, say). It must not block,
+    read ground truth or call S0; one that raises leaves the base fallback as
+    it was and records an error."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def version(self) -> str: ...
+
+    def fallback(self, body: BodySpec, status: S0Status, valid_from: Ns, valid_until: Ns) -> FallbackSpec: ...
+
+
 class ChunkCorrector(Protocol):
     """Applied on the robot side when S1's host hands a new chunk to S0:
     returns the chunk S0 executes. It receives the new chunk (computed from
@@ -911,9 +987,13 @@ class S1Host(Protocol):
 class S0(Protocol):
     """Real-time execution (S0): the only layer that commands actuators.
 
-    At every tick S0 executes a valid chunk, else a valid installed fallback,
-    else its built-in HOLD; it never waits for a slower layer, and it enforces
-    the body's position, velocity and workspace limits itself.
+    At every tick S0 executes a valid chunk, else a valid installed fallback
+    (S2's before the base), else its built-in HOLD; it never waits for a
+    slower layer, and it enforces the body's position, velocity and workspace
+    limits itself. A fallback engages when a chunk ran out with no successor,
+    or when the runtime asks (hold with `fallback`, after a failure); while an
+    execution awaits S1's first chunk, S0 holds. It counts, tick by tick, the time a valid fallback is
+    installed (`fallback_cover_ns`): the runtime's fallback coverage.
 
     Bounded steps, a safety contract for every implementation, hardware
     included: S0 never moves a dimension more in one tick than its velocity
@@ -928,14 +1008,16 @@ class S0(Protocol):
     def submit_chunk(self, chunk: ActionChunk, now: Ns) -> None:
         """Non-blocking. Raises ChunkRejected for another action space, an expired chunk or a stale one."""
 
-    def install_fallback(self, spec: FallbackSpec, now: Ns) -> None:
-        """Replace the installed fallback. Raises ChunkRejected if it does not fit the body."""
+    def install_fallback(self, spec: FallbackSpec, now: Ns, base: bool = False) -> None:
+        """Replace S2's fallback, or with `base` the base fallback, in one step:
+        the one replaced stays valid until then. Raises ChunkRejected if it
+        does not fit the body or has expired."""
 
     def hold(self, fallback: bool = False) -> None:
-        """Stop executing the active chunk. Without `fallback`, also drop the
-        installed fallback: HOLD from the next tick until a new chunk arrives.
-        With it, engage the installed fallback at the next tick if it is
-        valid (else HOLD). The runtime calls it when an execution stops
+        """Stop executing the active chunk. Without `fallback`, also drop both
+        installed fallbacks: HOLD from the next tick until a new chunk arrives.
+        With it, engage a valid installed fallback at the next tick (S2's, else
+        the base; else HOLD). The runtime calls it when an execution stops
         running: with `fallback` when the execution failed."""
 
     def status(self) -> S0Status: ...

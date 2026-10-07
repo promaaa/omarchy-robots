@@ -140,7 +140,11 @@ def capabilities(cfg: Json) -> list[Capability]:
         for p in strings(c, "preconditions", where):
             kind, _, param = p.partition(" ")
             pre.append((kind, param))
-        caps.append(Capability(cid, get(c, "achieves", str, where), strings(c, "params", where), strings(c, "requires", where), tuple(pre)))
+        default = c.get("default_fallback")
+        if default is not None and not isinstance(default, str):
+            raise ConfigError(f"{where}.default_fallback: expected a generator id, got {default!r}")
+        achieves, params, requires = get(c, "achieves", str, where), strings(c, "params", where), strings(c, "requires", where)
+        caps.append(Capability(cid, achieves, params, requires, tuple(pre), default))
     return caps
 
 

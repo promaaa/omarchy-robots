@@ -7,9 +7,11 @@ import unittest
 
 import numpy as np
 
+from omarchy_runtime import config
 from omarchy_runtime.contracts import (
     ChunkCorrector,
     ConfigError,
+    FallbackGenerator,
     GiveUp,
     Goal,
     InferenceTrigger,
@@ -17,6 +19,7 @@ from omarchy_runtime.contracts import (
     ObservationFilter,
     RecoveryPolicy,
     Retry,
+    S0Mode,
     Verifier,
     ns,
 )
@@ -30,7 +33,9 @@ from omarchy_runtime.extensions import (
     Blend,
     FixedLatency,
     GeometricVerifier,
+    Hold,
     IdentityFilter,
+    LiftHeld,
     LognormalLatency,
     Mismatch,
     NoCorrection,
@@ -39,6 +44,7 @@ from omarchy_runtime.extensions import (
 )
 from tests.contracts import (
     CorrectorContract,
+    FallbackGeneratorContract,
     FilterContract,
     LatencyContract,
     RecoveryContract,
@@ -160,6 +166,28 @@ class TestRegistries(unittest.TestCase):
         for key, make_trigger in INFERENCE_TRIGGERS.items():
             self.assertEqual(make_trigger(params).id, key)
         self.assertEqual(LATENCY["lognormal"](1.0, 0.5).id, "lognormal")
+
+
+class TestHold(FallbackGeneratorContract, unittest.TestCase):
+    def make(self) -> FallbackGenerator:
+        return Hold()
+
+
+class TestLiftHeld(FallbackGeneratorContract, unittest.TestCase):
+    def make(self) -> FallbackGenerator:
+        return LiftHeld()
+
+    def test_lifts_a_held_object_on_a_body_with_z_and_holds_otherwise(self) -> None:
+        arm = config.body(config.effective("nominal_a"))
+        z = GANTRY.dims.index("z")
+        for body, gripper, lift in ((GANTRY, 0.0, 0.02), (GANTRY, 1.0, 0.0), (arm, 0.0, None), (arm, 1.0, None)):
+            here = (*body.home[:-1], gripper)
+            spec = LiftHeld().fallback(body, s0_state(0, here, None, S0Mode.HOLD), 0, ns(60))
+            with self.subTest(body=body.id, gripper=gripper):
+                expected = np.zeros(len(body.dims))
+                if lift is not None:
+                    expected[z] = lift
+                self.assertTrue(np.array_equal(spec.actions[0], expected))  # relative: from where S0 is when it engages
 
 
 if __name__ == "__main__":

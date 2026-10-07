@@ -12,8 +12,9 @@ from typing import Any
 from omarchy_runtime import config
 from omarchy_runtime.evaluate import inference_markdown, inference_matrix, scenario_result
 from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
+from omarchy_runtime.placement import trace_fallbacks
 from omarchy_runtime.scenario import RunResult, run
-from omarchy_runtime.trace import validate_run
+from omarchy_runtime.trace import S0_MODES, validate_run
 from tests.helpers import IN_RACK, scenario, tmpdir
 
 
@@ -55,6 +56,10 @@ class TestSlotBlocked(unittest.TestCase):
         self.assertLessEqual(rec["recovery_s"], 0.25)  # S2 decides in 0.1 s, plus steps
         self.assertEqual(r.world.violations, [])
         self.assertTrue(r.world.truth(IN_RACK))
+        # The same from the trace alone, as placement-compare reads an older run: covered all along, no HOLD while S2 decided.
+        measured = trace_fallbacks(r.dir)
+        self.assertEqual(sorted(measured["coverage"].values()), [1.0, 1.0])
+        self.assertEqual([w["hold_s"] for w in measured["waits"]], [0.0])
 
 
 class TestNeighbourOffItsSpot(unittest.TestCase):
@@ -72,16 +77,16 @@ class TestNeighbourOffItsSpot(unittest.TestCase):
 
 
 class TestFallbackExpiry(unittest.TestCase):
-    def test_the_fallback_expires_before_s2_answers_and_s0_holds(self) -> None:
+    def test_s2_fallback_expires_into_the_base_before_s2_answers(self) -> None:
         r, res = scenario("fallback_expiry"), result("fallback_expiry")
         self.assertEqual(res["problems"], [])
         (rec,) = res["dynamics"]["recovery"]
-        self.assertTrue(rec["fallback_engaged"])
-        self.assertTrue(rec["fallback_expired"])
-        self.assertAlmostEqual(rec["fallback_s"], 1.5, places=2)  # its 1.5 s, then HOLD
+        self.assertEqual((rec["fallback_engaged"], rec["fallback"], rec["fallback_expired"]), (True, "s2", True))
         self.assertGreaterEqual(rec["recovery_s"], 2.0)  # S2 takes 2 s
-        modes = [(e["payload"]["from"], e["payload"]["to"]) for e in events(r) if e["type"] == "s0.mode"]
-        self.assertIn(("FALLBACK", "HOLD"), modes)  # the trace shows the expiry
+        self.assertAlmostEqual(rec["fallback_s"], rec["recovery_s"], places=2)  # in a fallback all along: S2's 1.5 s, then the base
+        failed, retry = r.summaries
+        waiting = r.record(failed["timing"]["ended"] + 1, retry["timing"]["started"])
+        self.assertEqual(set(waiting["mode"].tolist()), {S0_MODES.index("FALLBACK")})  # no HOLD while S2 decides
         self.assertEqual(r.world.held, None)
         self.assertEqual(r.world.violations, [])
         self.assertGreaterEqual(r.s0.c["fallback_expiries"], 1)

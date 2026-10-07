@@ -131,9 +131,14 @@ S2 installs a fallback ahead of time through the runtime. S0 uses it when
 chunks stop.
 
 S0 never waits: at every tick (1 kHz, simulated) it runs a valid chunk, else
-the fallback S2 installed, else HOLD, and it enforces the body's limits. Its
-steps are bounded: never more than the velocity limit times its nominal tick
-period, so a late tick never catches up with a jump.
+a fallback, else HOLD, and it enforces the body's limits. Its steps are
+bounded: never more than the velocity limit times its nominal tick period,
+so a late tick never catches up with a jump. Every execution holds a
+fallback from its start, before S1's first chunk: the capability's default
+(hold where S0 is and keep the grasp; on a gantry, holding an object, rise
+2 cm first), computed by the runtime on the robot, and S2's prediction,
+which travels with the goal and takes precedence. When S2's runs out, the
+default takes over in the same tick.
 
 ```sh
 nix run .#omarchy-runtime -- demo    # nominal_a, then slip_retry, told step by step
@@ -151,14 +156,14 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `occluded_long` | the rack is hidden for the whole run: the cup is there, nothing shows it | UNVERIFIED |
 | `occluded_short` | the rack is hidden for 2.5 s, within the verifier's budget | SUCCEEDED |
 | `s1_stall_short`, `s1_stall_long` | S1 stops for 1 s, or for good, while carrying the cup; S0 holds it | SUCCEEDED; FAILED/S1_STALL |
-| `fallback_installed` | S1 stalls; S0 runs S2's fallback, then HOLD, then S1 resumes | SUCCEEDED |
+| `fallback_installed` | S1 stalls; S0 runs S2's fallback (sent with the goal, then refined), then the capability's default, never HOLD; S1 resumes | SUCCEEDED |
 | `unsupported_clean` | `clean(cup_1)`: no capability, and the resolver's reasons | REJECTED/NO_CAPABILITY |
 | `s2_latency_0p1`, `_1`, `_5` | both cups, S2 taking 0.1 s, 1 s or 5 s per decision | same outcomes; longer task, more idle time |
 | `s2_placement` | both cups, for the S2 placement experiment below (S2 takes 1 s in one process) | SUCCEEDED twice |
 | `timing_observation_age`, `timing_pause_grasp` | observations 20 ms old; the whole robot stopped for 0.3 s during a descent: regressions for two S1 bugs CI met in v0.0.2 part 2 | SUCCEEDED |
 | `timing_s0_stall`, `timing_jitter` | S0 stalled for 0.3 s while carrying; S0 skipping 5 % of its ticks, jittery S1 latency and observation age | SUCCEEDED, steps within S0's bound |
 | `cup_moved` | a human moves the cup 6 cm during the approach; S1 plans the grasp again, without S2 | SUCCEEDED |
-| `slot_blocked`, `fallback_expiry` | a dish appears in the rack spot; S1 gives up, S0 runs S2's fallback, S2 chooses another spot; with a slow S2, the fallback expires first and S0 holds | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
+| `slot_blocked`, `fallback_expiry` | a dish appears in the rack spot; S1 gives up, S0 runs S2's fallback, S2 chooses another spot; with a slow S2, S2's fallback runs out first and the capability's default holds the cup | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,
@@ -177,8 +182,8 @@ each cell the robot VM runs one scenario with S2 in its own process, on the
 robot VM (`local`) or on a second VM (`edge`), over one network profile,
 with one S2 time to first token (TTFT). The scenarios: the two-cup task
 (`s2_placement`), and the three scenes that change (`cup_moved`, where S1
-reacts alone; `slot_blocked` and `fallback_expiry`, where S0 waits under
-the fallback until S2 chooses again). The S2 process's TTFT replaces the
+reacts alone; `slot_blocked` and `fallback_expiry`, where S0 waits under a
+fallback until S2 chooses again). The S2 process's TTFT replaces the
 scenario's S2 latency. A TTFT of 0.1 s, 1 s and 5 s stands in for a model
 on the robot, on an edge server and in the cloud. Delays are round trips, applied half on each VM; loss applies to
 every packet in each direction.
@@ -206,7 +211,9 @@ outage_long with 1 s. The last command writes the tables below, here and in
 the manual, from the results of a full run; CI runs the full matrix on demand (workflow
 dispatch, `placement`) and keeps its results as an artifact. Each cell must
 keep the safety invariants and stay within the stated tolerance of the
-same task in one process on simulated time.
+same task in one process on simulated time; every recovery must run under a
+fallback, and every execution must hold a valid fallback for at least 99 %
+of its running time.
 
 <!-- s2-placement:begin -->
 S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-06 with omarchy-runtime 0.0.2 (61dba14b4fc9), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S0 went from the fallback to HOLD before the retry's first chunk (the fallback lasts 3 s in slot_blocked, 1.5 s in fallback_expiry). S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37465247670 (https://github.com/promaaa/omarchy-robots/actions/runs/37465247670), the full matrix on 61dba14 alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
@@ -328,6 +335,13 @@ S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc n
 
 Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
 <!-- s2-placement:end -->
+
+Before and after the fallback design of v0.0.2 part 5, written by
+`omarchy-runtime placement-compare` from the full matrix of v0.0.2 part 4 and the
+one of this release (results and traces):
+
+<!-- s2-placement-compare:begin -->
+<!-- s2-placement-compare:end -->
 
 What these tables say so far (2026-10-06, emulated network, VMs, soft
 real-time; one run per cell). Safety held in all 84 cells: no limit
