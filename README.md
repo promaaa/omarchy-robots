@@ -216,120 +216,190 @@ fallback, and every execution must hold a valid fallback for at least 99 %
 of its running time.
 
 <!-- s2-placement:begin -->
-S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-07 with omarchy-runtime 0.0.2 (b40ec10ff96d), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S2's fallback (3 s in slot_blocked, 1.5 s in fallback_expiry) ran out before the retry started, and S0 went on under the capability's default. Fallback coverage, the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37589536784 (https://github.com/promaaa/omarchy-robots/actions/runs/37589536784), the full matrix on b40ec10 alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM; each VM 2 vCPUs.
+S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-07 with omarchy-runtime 0.0.2 (5c34345f5049), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Values: median of a cell's runs, and in brackets a distribution-free confidence interval for that median from order statistics: the narrowest pair (k-th smallest, k-th largest) whose binomial coverage is at least 95 % (with 6 runs, the smallest and the largest, 96.9 %); no interval below 6 runs. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S2's fallback (3 s in slot_blocked, 1.5 s in fallback_expiry) ran out before the retry started, and S0 went on under the capability's default. Fallback coverage, the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37603846510 (https://github.com/promaaa/omarchy-robots/actions/runs/37603846510), the repeated matrix on 5c34345, one scenario per job, each alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM, each VM 2 vCPUs; the four parts merged with placement-merge. The 6 runs of a cell use the scenario's seed, so S2 draws the same TTFTs from a measured distribution in each: the interval is the run-to-run variation of the wall clock and the emulated network, not the spread of the TTFT distribution (its p05 to p95 is in the TTFT table).
 
-| profile | TTFT s | two-cup task s | cup_moved reaction s | slot_blocked recovery s | fallback_expiry recovery s | S2 fallbacks expired | fallback coverage | violations | S0 starvations | cells within tolerance |
+| profile | TTFT s | two-cup task s | cup_moved reaction s | slot_blocked recovery s | fallback_expiry recovery s | S2 fallbacks expired | fallback coverage | violations | S0 starvations | runs within tolerance |
 |---|---|---|---|---|---|---|---|---|---|---|
-| local | 0.1 | 18.80 (18.45) | 0.10 (0.10) | 0.25 (0.15) | 0.15 (0.15) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| local | 1.0 | 20.40 (20.35) | 0.10 (0.10) | 1.05 (1.05) | 1.15 (1.05) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| local | 5.0 | 28.50 (28.30) | 0.09 (0.10) | 5.05 (5.05), expired | 5.20 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| lan | 0.1 | 18.75 (18.45) | 0.10 (0.10) | 0.15 (0.15) | 0.25 (0.15) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| lan | 1.0 | 20.55 (20.35) | 0.10 (0.10) | 1.15 (1.05) | 1.05 (1.05) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| lan | 5.0 | 28.40 (28.30) | 0.10 (0.10) | 5.15 (5.05), expired | 5.20 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wifi | 0.1 | 18.60 (18.45) | 0.10 (0.10) | 0.25 (0.15) | 0.35 (0.15) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wifi | 1.0 | 20.50 (20.35) | 0.10 (0.10) | 1.15 (1.05) | 1.05 (1.05) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wifi | 5.0 | 28.50 (28.30) | 0.10 (0.10) | 5.15 (5.05), expired | 5.15 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wan | 0.1 | 18.70 (18.45) | 0.10 (0.10) | 0.35 (0.15) | 0.25 (0.15) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wan | 1.0 | 20.55 (20.35) | 0.10 (0.10) | 1.25 (1.05) | 1.15 (1.05) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| wan | 5.0 | 28.75 (28.30) | 0.10 (0.10) | 5.25 (5.05), expired | 5.20 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| degraded | 0.1 | 19.05 (18.45) | 0.10 (0.10) | 1.00 (0.15) | 0.65 (0.15) | 0 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| degraded | 1.0 | 20.95 (20.35) | 0.10 (0.10) | 1.50 (1.05) | 1.85 (1.05), expired | 1 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| degraded | 5.0 | 29.45 (28.30) | 0.10 (0.10) | 5.85 (5.05), expired | 5.75 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage | 0.1 | 18.45 (18.45) | 0.10 (0.10) | 3.85 (0.15), expired | 4.55 (0.15), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage | 1.0 | 20.65 (20.35) | 0.10 (0.10) | 4.75 (1.05), expired | 4.85 (1.05), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage | 5.0 | 29.20 (28.30) | 0.10 (0.10) | 9.25 (5.05), expired | 9.50 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage_long | 0.1 | 36.45 (18.45) | 0.10 (0.10) | 21.70 (0.15), expired | 20.85 (0.15), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage_long | 1.0 | 38.45 (20.35) | 0.10 (0.10) | 22.45 (1.05), expired | 21.55 (1.05), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
-| outage_long | 5.0 | 45.90 (28.30) | 0.10 (0.10) | 26.25 (5.05), expired | 26.30 (5.10), expired | 2 of 2 | 100.0 % | 0 | 0 | 4 of 4 |
+| local | 0.1 | 18.60 [18.45, 18.80] (18.45) | 0.10 [0.10, 0.10] (0.10) | 0.25 [0.15, 0.25] (0.15) | 0.25 [0.15, 0.25] (0.15) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| local | 1.0 | 20.58 [20.40, 20.60] (20.35) | 0.10 [0.10, 0.10] (0.10) | 1.05 [1.05, 1.15] (1.05) | 1.10 [1.05, 1.15] (1.05) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| local | 5.0 | 28.50 [28.40, 28.70] (28.30) | 0.10 [0.10, 0.10] (0.10) | 5.15 [5.05, 5.20] (5.05) | 5.12 [5.05, 5.15] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| local | qwen2.5-1.5b-q4km-host (median 8.50 s) | 35.95 [35.95, 35.95] (35.75) | 0.10 [0.10, 0.10] (0.10) | 8.60 [8.60, 8.60] (8.55) | 8.55 [8.55, 8.55] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| local | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 25.45 [25.45, 25.45] (25.30) | 0.10 [0.10, 0.10] (0.10) | 3.85 [3.85, 3.90] (3.90) | 3.85 [3.85, 3.85] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| lan | 0.1 | 18.68 [18.45, 18.80] (18.45) | 0.10 [0.10, 0.10] (0.10) | 0.15 [0.15, 0.30] (0.15) | 0.25 [0.15, 0.25] (0.15) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| lan | 1.0 | 20.58 [20.40, 20.60] (20.35) | 0.10 [0.09, 0.10] (0.10) | 1.05 [1.05, 1.15] (1.05) | 1.15 [1.05, 1.15] (1.05) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| lan | 5.0 | 28.50 [28.35, 28.50] (28.30) | 0.10 [0.10, 0.10] (0.10) | 5.05 [5.05, 5.25] (5.05) | 5.15 [5.05, 5.20] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| lan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 35.90 [35.85, 35.95] (35.75) | 0.10 [0.09, 0.10] (0.10) | 8.60 [8.55, 8.60] (8.55) | 8.55 [8.55, 8.55] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| lan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 25.45 [25.30, 25.45] (25.30) | 0.10 [0.10, 0.10] (0.10) | 3.85 [3.85, 3.90] (3.90) | 3.85 [3.85, 3.85] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wifi | 0.1 | 18.70 [18.45, 18.90] (18.45) | 0.10 [0.10, 0.10] (0.10) | 0.23 [0.15, 0.30] (0.15) | 0.35 [0.25, 0.35] (0.15) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wifi | 1.0 | 20.55 [20.40, 20.65] (20.35) | 0.10 [0.10, 0.10] (0.10) | 1.15 [1.05, 1.20] (1.05) | 1.15 [1.15, 1.25] (1.05) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wifi | 5.0 | 28.50 [28.40, 28.70] (28.30) | 0.10 [0.10, 0.10] (0.10) | 5.05 [5.05, 5.20] (5.05) | 5.17 [5.05, 5.25] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wifi | qwen2.5-1.5b-q4km-host (median 8.50 s) | 35.95 [35.95, 36.10] (35.75) | 0.10 [0.10, 0.10] (0.10) | 8.65 [8.60, 8.70] (8.55) | 8.65 [8.55, 8.65] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wifi | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 25.45 [25.45, 25.45] (25.30) | 0.10 [0.10, 0.10] (0.10) | 3.90 [3.85, 3.90] (3.90) | 3.95 [3.85, 3.95] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wan | 0.1 | 18.63 [18.60, 18.80] (18.45) | 0.10 [0.10, 0.10] (0.10) | 0.32 [0.25, 0.35] (0.15) | 0.25 [0.25, 0.35] (0.15) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wan | 1.0 | 20.60 [20.55, 20.70] (20.35) | 0.10 [0.10, 0.10] (0.10) | 1.15 [1.15, 1.25] (1.05) | 1.25 [1.15, 1.35] (1.05) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wan | 5.0 | 28.58 [28.50, 28.65] (28.30) | 0.10 [0.10, 0.10] (0.10) | 5.25 [5.15, 5.30] (5.05) | 5.20 [5.15, 5.25] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 36.00 [35.95, 36.00] (35.75) | 0.10 [0.10, 0.10] (0.10) | 8.70 [8.70, 8.70] (8.55) | 8.65 [8.65, 8.75] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| wan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 25.55 [25.55, 25.55] (25.30) | 0.10 [0.10, 0.10] (0.10) | 3.97 [3.95, 4.00] (3.90) | 3.95 [3.95, 3.95] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| degraded | 0.1 | 19.70 [19.30, 20.35] (18.45) | 0.10 [0.10, 0.10] (0.10) | 0.95 [0.70, 1.35] (0.15) | 1.27 [0.90, 1.50] (0.15) | 0 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| degraded | 1.0 | 21.35 [20.95, 21.80] (20.35) | 0.10 [0.10, 0.10] (0.10) | 2.10 [1.60, 3.30] (1.05) | 1.75 [1.50, 1.95] (1.05) | 6 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| degraded | 5.0 | 29.23 [28.90, 29.70] (28.30) | 0.10 [0.10, 0.10] (0.10) | 5.57 [5.55, 7.00] (5.05) | 5.80 [5.50, 6.30] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| degraded | qwen2.5-1.5b-q4km-host (median 8.50 s) | 36.60 [36.35, 37.05] (35.75) | 0.10 [0.10, 0.10] (0.10) | 9.55 [9.10, 9.80] (8.55) | 9.40 [9.20, 10.95] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| degraded | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 26.23 [26.05, 26.75] (25.30) | 0.10 [0.10, 0.10] (0.10) | 4.62 [4.30, 5.15] (3.90) | 4.52 [4.25, 5.10] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage | 0.1 | 18.53 [18.45, 18.60] (18.45) | 0.10 [0.10, 0.10] (0.10) | 3.75 [3.65, 3.85] (0.15) | 4.35 [3.95, 4.45] (0.15) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage | 1.0 | 20.70 [20.55, 21.50] (20.35) | 0.10 [0.10, 0.10] (0.10) | 4.85 [4.75, 4.95] (1.05) | 5.25 [5.15, 5.45] (1.05) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage | 5.0 | 29.05 [29.00, 29.20] (28.30) | 0.10 [0.10, 0.10] (0.10) | 9.40 [9.30, 9.65] (5.05) | 8.60 [8.45, 8.70] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage | qwen2.5-1.5b-q4km-host (median 8.50 s) | 36.25 [36.20, 36.60] (35.75) | 0.10 [0.10, 0.10] (0.10) | 12.75 [12.40, 12.80] (8.55) | 12.80 [12.75, 12.95] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 25.75 [25.55, 26.30] (25.30) | 0.10 [0.10, 0.10] (0.10) | 8.27 [8.05, 8.40] (3.90) | 8.15 [7.35, 8.25] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage_long | 0.1 | 36.35 [35.45, 36.70] (18.45) | 0.10 [0.09, 0.10] (0.10) | 21.10 [20.65, 21.70] (0.15) | 21.10 [20.65, 21.35] (0.15) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage_long | 1.0 | 37.93 [37.30, 38.35] (20.35) | 0.10 [0.10, 0.10] (0.10) | 21.60 [21.45, 22.65] (1.05) | 22.05 [21.85, 22.35] (1.05) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage_long | 5.0 | 45.75 [45.65, 46.10] (28.30) | 0.10 [0.10, 0.10] (0.10) | 26.15 [25.95, 26.40] (5.05) | 25.77 [25.65, 26.55] (5.10) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage_long | qwen2.5-1.5b-q4km-host (median 8.50 s) | 53.00 [52.90, 53.25] (35.75) | 0.10 [0.10, 0.10] (0.10) | 29.35 [29.10, 29.80] (8.55) | 29.75 [29.45, 29.85] (8.55) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
+| outage_long | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 42.75 [42.30, 43.30] (25.30) | 0.10 [0.10, 0.10] (0.10) | 24.87 [24.75, 24.95] (3.90) | 24.80 [24.15, 25.25] (3.85) | 12 of 12 | 100.0 % | 0 | 0 | 24 of 24 |
 
-<details markdown="1"><summary>Every cell (84)</summary>
+<details markdown="1"><summary>Every cell (840)</summary>
 
-| scenario | profile | TTFT s | outcomes | violations | S0 starvations | fallback s | HOLD s | task s | simulated s | S2 RTT p50/p99/max ms | outages | S0 interval p99/max ms | S0 overruns | reaction s | recovery s | fallback coverage |
+| scenario | profile | TTFT s | runs | outcomes | violations | S0 starvations | task s (simulated) | reaction s | recovery s | fallback engaged | S2 fallbacks expired | fallback coverage | S2 RTT p50 ms | long outage s | S0 overruns, most | runs within tolerance |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| s2_placement | local | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.44 | 18.80 | 18.45 | 1.0/4.1/7.4 | none | 6.17/12.31 | 2 of 3775 | - | - | 100.0 % |
-| s2_placement | local | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 2.99 | 20.40 | 20.35 | 1.0/2.4/4.0 | none | 5.50/6.75 | 0 of 4096 | - | - | 100.0 % |
-| s2_placement | local | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 1.0/2.0/4.0 | none | 5.48/7.44 | 0 of 5718 | - | - | 100.0 % |
-| cup_moved | local | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 2.0/2.3/3.0 | none | 5.51/7.11 | 0 of 1860 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | local | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.50 | 10.05 | 10.00 | 2.0/3.0/3.0 | none | 5.66/6.69 | 0 of 2036 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | local | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 2.0/2.3/3.0 | none | 5.48/7.39 | 0 of 2853 | 0.09 (0.10) | - | 100.0 % |
-| slot_blocked | local | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.69 | 8.25 | 8.10 | 1.0/2.1/2.2 | none | 5.51/6.67 | 0 of 1679 | - | 0.25 (0.15) | 100.0 % |
-| slot_blocked | local | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.05 | 1.59 | 10.20 | 10.15 | 2.0/2.9/3.0 | none | 5.60/7.40 | 0 of 2053 | - | 1.05 (1.05) | 100.0 % |
-| slot_blocked | local | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.05 | 5.60 | 18.30 | 18.25 | 1.0/1.9/2.0 | none | 5.57/6.69 | 0 of 3681 | - | 5.05 (5.05), expired | 100.0 % |
-| fallback_expiry | local | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.15 | 0.69 | 8.10 | 8.05 | 2.0/2.4/3.0 | none | 5.59/6.87 | 0 of 1639 | - | 0.15 (0.15) | 100.0 % |
-| fallback_expiry | local | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.69 | 10.40 | 10.15 | 1.0/2.8/2.9 | none | 5.69/7.59 | 0 of 2094 | - | 1.15 (1.05) | 100.0 % |
-| fallback_expiry | local | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.20 | 5.59 | 18.40 | 18.25 | 1.0/2.4/4.0 | none | 5.53/7.12 | 0 of 3699 | - | 5.20 (5.10), expired | 100.0 % |
-| s2_placement | lan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.34 | 18.75 | 18.45 | 4.0/6.6/8.1 | none | 5.72/7.76 | 0 of 3766 | - | - | 100.0 % |
-| s2_placement | lan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.14 | 20.55 | 20.35 | 3.0/5.1/7.0 | none | 5.51/7.03 | 0 of 4140 | - | - | 100.0 % |
-| s2_placement | lan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.04 | 28.40 | 28.30 | 3.6/5.9/8.9 | none | 5.62/6.59 | 0 of 5694 | - | - | 100.0 % |
-| cup_moved | lan | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.59 | 9.20 | 9.15 | 4.0/5.9/6.3 | none | 5.90/10.20 | 1 of 1852 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | lan | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 3.4/5.8/7.6 | none | 5.62/6.63 | 0 of 2085 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | lan | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 3.0/5.9/6.1 | none | 5.65/7.55 | 0 of 2855 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | lan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.15 | 0.69 | 8.15 | 8.10 | 3.1/6.4/6.5 | none | 5.84/7.01 | 0 of 1670 | - | 0.15 (0.15) | 100.0 % |
-| slot_blocked | lan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.69 | 10.40 | 10.15 | 3.0/5.0/5.1 | none | 5.62/6.81 | 0 of 2098 | - | 1.15 (1.05) | 100.0 % |
-| slot_blocked | lan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.15 | 5.59 | 18.40 | 18.25 | 3.9/6.1/8.2 | none | 5.70/9.05 | 0 of 3705 | - | 5.15 (5.05), expired | 100.0 % |
-| fallback_expiry | lan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.74 | 8.30 | 8.05 | 4.0/6.6/6.9 | none | 5.66/7.17 | 0 of 1690 | - | 0.25 (0.15) | 100.0 % |
-| fallback_expiry | lan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.05 | 1.69 | 10.30 | 10.15 | 3.9/6.2/7.0 | none | 5.74/8.21 | 0 of 2075 | - | 1.05 (1.05) | 100.0 % |
-| fallback_expiry | lan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.20 | 5.79 | 18.60 | 18.25 | 3.0/5.3/7.0 | none | 5.51/6.80 | 0 of 3744 | - | 5.20 (5.10), expired | 100.0 % |
-| s2_placement | wifi | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.29 | 18.60 | 18.45 | 23.0/148.2/151.1 | none | 5.68/7.90 | 0 of 3740 | - | - | 100.0 % |
-| s2_placement | wifi | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.09 | 20.50 | 20.35 | 23.1/140.4/190.0 | none | 5.68/12.39 | 1 of 4127 | - | - | 100.0 % |
-| s2_placement | wifi | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.14 | 28.50 | 28.30 | 23.0/142.3/153.9 | none | 5.73/7.56 | 0 of 5743 | - | - | 100.0 % |
-| cup_moved | wifi | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.70 | 9.30 | 9.15 | 22.1/32.0/32.0 | none | 5.65/7.56 | 0 of 1874 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | wifi | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 22.2/133.9/139.0 | none | 5.74/6.94 | 0 of 2074 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | wifi | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 23.0/145.0/153.3 | none | 5.67/6.95 | 0 of 2865 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | wifi | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.69 | 8.25 | 8.10 | 24.0/63.0/145.0 | none | 5.82/7.24 | 0 of 1680 | - | 0.25 (0.15) | 100.0 % |
-| slot_blocked | wifi | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.59 | 10.30 | 10.15 | 23.3/150.3/195.9 | none | 5.83/8.68 | 0 of 2088 | - | 1.15 (1.05) | 100.0 % |
-| slot_blocked | wifi | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.15 | 5.69 | 18.50 | 18.25 | 22.9/34.5/146.7 | none | 5.81/7.86 | 0 of 3714 | - | 5.15 (5.05), expired | 100.0 % |
-| fallback_expiry | wifi | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.35 | 0.84 | 8.50 | 8.05 | 22.0/67.1/151.1 | none | 5.52/8.32 | 0 of 1723 | - | 0.35 (0.15) | 100.0 % |
-| fallback_expiry | wifi | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.05 | 1.69 | 10.30 | 10.15 | 22.8/147.3/148.0 | none | 5.86/7.97 | 0 of 2094 | - | 1.05 (1.05) | 100.0 % |
-| fallback_expiry | wifi | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.15 | 5.74 | 18.50 | 18.25 | 22.8/141.3/146.2 | none | 5.55/8.34 | 0 of 3722 | - | 5.15 (5.10), expired | 100.0 % |
-| s2_placement | wan | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.40 | 18.70 | 18.45 | 101.1/118.4/121.2 | none | 5.87/10.66 | 1 of 3775 | - | - | 100.0 % |
-| s2_placement | wan | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.09 | 20.55 | 20.35 | 102.2/120.3/122.1 | none | 5.83/10.04 | 1 of 4156 | - | - | 100.0 % |
-| s2_placement | wan | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.39 | 28.75 | 28.30 | 102.2/119.3/121.0 | none | 5.59/7.55 | 0 of 5782 | - | - | 100.0 % |
-| cup_moved | wan | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.60 | 9.20 | 9.15 | 102.0/116.3/117.6 | none | 5.79/8.87 | 0 of 1875 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | wan | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.60 | 10.25 | 10.00 | 101.9/117.1/117.1 | none | 5.54/6.53 | 0 of 2093 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | wan | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.50 | 14.10 | 14.05 | 103.0/120.5/122.9 | none | 5.67/7.66 | 0 of 2852 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | wan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.35 | 0.69 | 8.40 | 8.10 | 103.1/119.4/121.0 | none | 5.88/7.28 | 0 of 1718 | - | 0.35 (0.15) | 100.0 % |
-| slot_blocked | wan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.25 | 1.59 | 10.45 | 10.15 | 101.3/120.9/121.9 | none | 5.71/7.65 | 0 of 2136 | - | 1.25 (1.05) | 100.0 % |
-| slot_blocked | wan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.25 | 5.59 | 18.50 | 18.25 | 103.5/121.2/122.2 | none | 5.64/8.28 | 0 of 3732 | - | 5.25 (5.05), expired | 100.0 % |
-| fallback_expiry | wan | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.25 | 0.69 | 8.25 | 8.05 | 101.0/120.0/120.3 | none | 5.86/7.01 | 0 of 1700 | - | 0.25 (0.15) | 100.0 % |
-| fallback_expiry | wan | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.15 | 1.59 | 10.30 | 10.15 | 103.0/119.1/119.2 | none | 5.72/6.85 | 0 of 2093 | - | 1.15 (1.05) | 100.0 % |
-| fallback_expiry | wan | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.20 | 5.60 | 18.40 | 18.25 | 102.0/119.2/120.9 | none | 5.71/7.94 | 0 of 3716 | - | 5.20 (5.10), expired | 100.0 % |
-| s2_placement | degraded | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.74 | 19.05 | 18.45 | 493.0/1099.0/1139.1 | short 0.6 s, short 0.6 s, short 0.8 s, short 0.8 s | 5.91/8.17 | 0 of 3916 | - | - | 100.0 % |
-| s2_placement | degraded | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.54 | 20.95 | 20.35 | 491.5/1543.3/1646.7 | short 0.5 s, short 0.8 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.7 s, short 0.7 s, short 0.6 s, short 0.8 s | 5.70/9.15 | 0 of 4410 | - | - | 100.0 % |
-| s2_placement | degraded | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 12.04 | 29.45 | 28.30 | 671.6/1929.0/2121.0 | short 0.7 s, short 0.6 s, short 0.5 s, short 0.6 s, short 0.7 s, short 0.6 s, short 0.8 s, short 1.4 s, short 0.9 s, short 0.7 s, short 0.7 s, short 0.8 s, short 0.8 s, short 0.8 s | 5.68/7.54 | 0 of 6061 | - | - | 100.0 % |
-| cup_moved | degraded | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.50 | 9.10 | 9.15 | 670.5/1511.0/1604.0 | short 0.6 s, short 1.4 s, short 0.7 s, short 0.8 s | 5.61/6.81 | 0 of 1951 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | degraded | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 2.10 | 10.75 | 10.00 | 905.6/1803.0/1849.9 | short 0.7 s, short 0.7 s, short 0.8 s, short 0.6 s, short 0.6 s, short 0.8 s | 5.76/7.69 | 0 of 2410 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | degraded | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.75 | 14.40 | 14.05 | 687.5/2391.8/2541.3 | short 0.7 s, short 0.8 s, short 0.6 s, short 0.6 s, short 0.6 s, short 0.7 s | 5.66/8.73 | 0 of 3177 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | degraded | 0.1 | FAILED SUCCEEDED | 0 | 0 | 1.00 | 0.69 | 9.20 | 8.10 | 443.0/1123.0/1217.8 | short 0.7 s | 5.59/6.79 | 0 of 2015 | - | 1.00 (0.15) | 100.0 % |
-| slot_blocked | degraded | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.50 | 1.10 | 10.25 | 10.15 | 459.0/1400.0/1500.0 | short 1.2 s, short 0.6 s | 5.79/9.36 | 0 of 2154 | - | 1.50 (1.05) | 100.0 % |
-| slot_blocked | degraded | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.85 | 5.54 | 19.05 | 18.25 | 569.4/1163.1/1351.0 | short 0.6 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.7 s, short 0.6 s | 5.68/8.28 | 0 of 3995 | - | 5.85 (5.05), expired | 100.0 % |
-| fallback_expiry | degraded | 0.1 | FAILED SUCCEEDED | 0 | 0 | 0.65 | 0.64 | 8.70 | 8.05 | 466.1/1521.9/1608.0 | short 0.6 s, short 0.7 s, short 0.6 s, short 1.0 s | 5.74/7.08 | 0 of 2035 | - | 0.65 (0.15) | 100.0 % |
-| fallback_expiry | degraded | 1.0 | FAILED SUCCEEDED | 0 | 0 | 1.85 | 1.74 | 11.25 | 10.15 | 535.0/1898.2/2013.2 | short 0.7 s, short 0.6 s, short 0.7 s, short 1.2 s, short 1.2 s | 5.90/8.04 | 0 of 2672 | - | 1.85 (1.05), expired | 100.0 % |
-| fallback_expiry | degraded | 5.0 | FAILED SUCCEEDED | 0 | 0 | 5.75 | 5.64 | 19.05 | 18.25 | 623.0/1337.0/1393.1 | short 0.7 s, short 0.6 s, short 0.6 s, short 0.5 s, short 0.7 s, short 0.6 s, short 0.6 s, short 0.6 s | 5.75/7.92 | 0 of 3995 | - | 5.75 (5.10), expired | 100.0 % |
-| s2_placement | outage | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 1.19 | 18.45 | 18.45 | 3.0/5.9/6.2 | long 5.8 s | 5.58/6.91 | 0 of 3714 | - | - | 100.0 % |
-| s2_placement | outage | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 3.29 | 20.65 | 20.35 | 3.3/5.9/16.1 | long 5.8 s | 5.85/9.63 | 0 of 4162 | - | - | 100.0 % |
-| s2_placement | outage | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 11.84 | 29.20 | 28.30 | 3.1/6.5/7.9 | long 5.8 s | 5.83/8.08 | 0 of 5868 | - | - | 100.0 % |
-| cup_moved | outage | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.65 | 9.30 | 9.15 | 3.1/5.3/5.4 | long 5.7 s | 5.92/8.78 | 0 of 1881 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | outage | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.50 | 10.05 | 10.00 | 3.1/7.0/7.9 | long 5.8 s | 5.87/8.15 | 0 of 2036 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | outage | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 3.9/6.2/6.3 | long 5.7 s | 5.87/9.19 | 1 of 2852 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | outage | 0.1 | FAILED SUCCEEDED | 0 | 0 | 3.85 | 0.69 | 12.20 | 8.10 | 4.0/6.2/7.1 | long 5.7 s | 5.77/8.43 | 0 of 2469 | - | 3.85 (0.15), expired | 100.0 % |
-| slot_blocked | outage | 1.0 | FAILED SUCCEEDED | 0 | 0 | 4.75 | 1.69 | 14.10 | 10.15 | 3.2/7.0/7.0 | long 5.7 s | 5.63/30.01 | 1 of 2828 | - | 4.75 (1.05), expired | 100.0 % |
-| slot_blocked | outage | 5.0 | FAILED SUCCEEDED | 0 | 0 | 9.25 | 5.74 | 22.65 | 18.25 | 3.2/6.1/7.2 | long 5.7 s | 5.73/20.07 | 2 of 4539 | - | 9.25 (5.05), expired | 100.0 % |
-| fallback_expiry | outage | 0.1 | FAILED SUCCEEDED | 0 | 0 | 4.55 | 0.69 | 12.90 | 8.05 | 4.0/10.2/16.2 | long 5.7 s | 5.69/7.97 | 0 of 2591 | - | 4.55 (0.15), expired | 100.0 % |
-| fallback_expiry | outage | 1.0 | FAILED SUCCEEDED | 0 | 0 | 4.85 | 1.59 | 14.10 | 10.15 | 4.0/5.6/5.9 | long 5.7 s | 5.62/7.46 | 0 of 2844 | - | 4.85 (1.05), expired | 100.0 % |
-| fallback_expiry | outage | 5.0 | FAILED SUCCEEDED | 0 | 0 | 9.50 | 5.59 | 22.70 | 18.25 | 3.9/5.9/6.8 | long 5.8 s | 5.76/7.64 | 0 of 4565 | - | 9.50 (5.10), expired | 100.0 % |
-| s2_placement | outage_long | 0.1 | 2x SUCCEEDED | 0 | 0 | 0.00 | 19.14 | 36.45 | 18.45 | 3.9/6.1/6.4 | long 22.8 s | 5.57/8.52 | 0 of 7302 | - | - | 100.0 % |
-| s2_placement | outage_long | 1.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 21.04 | 38.45 | 20.35 | 3.0/6.0/10.8 | long 22.7 s | 5.43/9.33 | 0 of 7716 | - | - | 100.0 % |
-| s2_placement | outage_long | 5.0 | 2x SUCCEEDED | 0 | 0 | 0.00 | 28.54 | 45.90 | 28.30 | 3.9/6.0/7.0 | long 22.8 s | 5.58/15.76 | 1 of 9190 | - | - | 100.0 % |
-| cup_moved | outage_long | 0.1 | 1x SUCCEEDED | 0 | 0 | 0.00 | 0.70 | 9.30 | 9.15 | 3.5/5.4/5.6 | long 22.7 s | 5.55/8.88 | 0 of 5262 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | outage_long | 1.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 1.50 | 10.05 | 10.00 | 4.0/5.7/6.1 | long 22.7 s | 5.45/7.20 | 0 of 5217 | 0.10 (0.10) | - | 100.0 % |
-| cup_moved | outage_long | 5.0 | 1x SUCCEEDED | 0 | 0 | 0.00 | 5.60 | 14.20 | 14.05 | 3.2/5.1/5.2 | long 22.7 s | 5.49/14.39 | 1 of 6190 | 0.10 (0.10) | - | 100.0 % |
-| slot_blocked | outage_long | 0.1 | FAILED SUCCEEDED | 0 | 0 | 21.70 | 0.74 | 30.05 | 8.10 | 3.9/5.5/5.6 | long 22.8 s | 5.60/8.38 | 0 of 6021 | - | 21.70 (0.15), expired | 100.0 % |
-| slot_blocked | outage_long | 1.0 | FAILED SUCCEEDED | 0 | 0 | 22.45 | 1.69 | 31.80 | 10.15 | 4.0/5.1/6.1 | long 22.7 s | 5.55/14.07 | 4 of 6368 | - | 22.45 (1.05), expired | 100.0 % |
-| slot_blocked | outage_long | 5.0 | FAILED SUCCEEDED | 0 | 0 | 26.25 | 5.74 | 39.65 | 18.25 | 4.0/6.5/7.2 | long 22.7 s | 5.61/21.41 | 1 of 7964 | - | 26.25 (5.05), expired | 100.0 % |
-| fallback_expiry | outage_long | 0.1 | FAILED SUCCEEDED | 0 | 0 | 20.85 | 0.69 | 29.20 | 8.05 | 3.1/6.2/7.5 | long 22.8 s | 5.50/7.06 | 0 of 5857 | - | 20.85 (0.15), expired | 100.0 % |
-| fallback_expiry | outage_long | 1.0 | FAILED SUCCEEDED | 0 | 0 | 21.55 | 1.74 | 30.95 | 10.15 | 4.0/6.0/6.2 | long 22.7 s | 5.59/8.70 | 0 of 6210 | - | 21.55 (1.05), expired | 100.0 % |
-| fallback_expiry | outage_long | 5.0 | FAILED SUCCEEDED | 0 | 0 | 26.30 | 5.74 | 39.65 | 18.25 | 4.0/6.3/7.9 | long 22.8 s | 5.59/9.60 | 1 of 7968 | - | 26.30 (5.10), expired | 100.0 % |
+| cup_moved | local | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.20 [9.15, 9.20] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 1.01 [0.98, 1.57] | - | 2 | 6 of 6 |
+| fallback_expiry | local | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.25 [8.10, 8.25] (8.05) | - | 0.25 [0.15, 0.25] | 6 of 6 | 0 of 6 | 100.0 % | 1.01 [0.98, 2.00] | - | 1 | 6 of 6 |
+| s2_placement | local | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.60 [18.45, 18.80] (18.45) | - | - | - | - | 100.0 % | 1.05 [1.01, 2.00] | - | 2 | 6 of 6 |
+| slot_blocked | local | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.25 [8.25, 8.26] (8.10) | - | 0.25 [0.15, 0.25] | 6 of 6 | 0 of 6 | 100.0 % | 1.10 [1.01, 2.00] | - | 10 | 6 of 6 |
+| cup_moved | local | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.25 [10.05, 10.25] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 1.07 [0.99, 2.00] | - | 0 | 6 of 6 |
+| fallback_expiry | local | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.30 [10.30, 10.40] (10.15) | - | 1.10 [1.05, 1.15] | 6 of 6 | 0 of 6 | 100.0 % | 1.19 [1.01, 2.01] | - | 0 | 6 of 6 |
+| s2_placement | local | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 20.58 [20.40, 20.60] (20.35) | - | - | - | - | 100.0 % | 1.05 [1.01, 1.87] | - | 0 | 6 of 6 |
+| slot_blocked | local | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.30 [10.30, 10.40] (10.15) | - | 1.05 [1.05, 1.15] | 6 of 6 | 0 of 6 | 100.0 % | 1.51 [1.01, 2.01] | - | 0 | 6 of 6 |
+| cup_moved | local | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.20 [14.20, 14.20] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 1.48 [1.01, 2.00] | - | 0 | 6 of 6 |
+| fallback_expiry | local | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.45 [18.30, 18.50] (18.25) | - | 5.12 [5.05, 5.15] | 6 of 6 | 6 of 6 | 100.0 % | 1.52 [0.98, 2.00] | - | 0 | 6 of 6 |
+| s2_placement | local | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 28.50 [28.40, 28.70] (28.30) | - | - | - | - | 100.0 % | 1.03 [0.98, 2.00] | - | 0 | 6 of 6 |
+| slot_blocked | local | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.40 [18.30, 18.50] (18.25) | - | 5.15 [5.05, 5.20] | 6 of 6 | 6 of 6 | 100.0 % | 1.52 [0.97, 2.00] | - | 0 | 6 of 6 |
+| cup_moved | local | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.65 [17.60, 17.65] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 1.48 [0.99, 2.00] | - | 0 | 6 of 6 |
+| fallback_expiry | local | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.30 [25.30, 25.30] (25.25) | - | 8.55 [8.55, 8.55] | 6 of 6 | 6 of 6 | 100.0 % | 1.01 [0.99, 2.00] | - | 1 | 6 of 6 |
+| s2_placement | local | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 35.95 [35.95, 35.95] (35.75) | - | - | - | - | 100.0 % | 1.02 [1.01, 1.82] | - | 0 | 6 of 6 |
+| slot_blocked | local | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.40 [25.40, 25.40] (25.25) | - | 8.60 [8.60, 8.60] | 6 of 6 | 6 of 6 | 100.0 % | 1.02 [1.00, 2.01] | - | 0 | 6 of 6 |
+| cup_moved | local | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [13.05, 13.05] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 1.52 [1.03, 2.00] | - | 4 | 6 of 6 |
+| fallback_expiry | local | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.00 [16.00, 16.00] (15.95) | - | 3.85 [3.85, 3.85] | 6 of 6 | 6 of 6 | 100.0 % | 1.01 [1.01, 2.00] | - | 0 | 6 of 6 |
+| s2_placement | local | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 25.45 [25.45, 25.45] (25.30) | - | - | - | - | 100.0 % | 1.04 [1.02, 2.01] | - | 1 | 6 of 6 |
+| slot_blocked | local | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.00 [16.00, 16.00] (15.95) | - | 3.85 [3.85, 3.90] | 6 of 6 | 6 of 6 | 100.0 % | 1.52 [1.02, 2.01] | - | 0 | 6 of 6 |
+| cup_moved | lan | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.35 [9.30, 9.45] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.18 [3.14, 3.99] | - | 1 | 6 of 6 |
+| fallback_expiry | lan | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.25 [8.10, 8.35] (8.05) | - | 0.25 [0.15, 0.25] | 6 of 6 | 0 of 6 | 100.0 % | 3.62 [3.01, 4.01] | - | 0 | 6 of 6 |
+| s2_placement | lan | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.68 [18.45, 18.80] (18.45) | - | - | - | - | 100.0 % | 3.47 [3.05, 4.00] | - | 0 | 6 of 6 |
+| slot_blocked | lan | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.15 [8.10, 8.45] (8.10) | - | 0.15 [0.15, 0.30] | 6 of 6 | 0 of 6 | 100.0 % | 3.57 [3.05, 3.99] | - | 0 | 6 of 6 |
+| cup_moved | lan | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.25 [10.05, 10.30] (10.00) | 0.10 [0.09, 0.10] | - | - | - | 100.0 % | 3.46 [3.04, 3.98] | - | 1 | 6 of 6 |
+| fallback_expiry | lan | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.40 [10.30, 10.40] (10.15) | - | 1.15 [1.05, 1.15] | 6 of 6 | 0 of 6 | 100.0 % | 3.02 [3.00, 4.00] | - | 0 | 6 of 6 |
+| s2_placement | lan | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 20.58 [20.40, 20.60] (20.35) | - | - | - | - | 100.0 % | 3.69 [3.13, 4.00] | - | 0 | 6 of 6 |
+| slot_blocked | lan | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.30 [10.20, 10.45] (10.15) | - | 1.05 [1.05, 1.15] | 6 of 6 | 0 of 6 | 100.0 % | 3.95 [3.17, 4.01] | - | 1 | 6 of 6 |
+| cup_moved | lan | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.20 [14.10, 14.25] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.57 [3.13, 3.98] | - | 0 | 6 of 6 |
+| fallback_expiry | lan | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.45 [18.30, 18.50] (18.25) | - | 5.15 [5.05, 5.20] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [3.01, 3.03] | - | 0 | 6 of 6 |
+| s2_placement | lan | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 28.50 [28.35, 28.50] (28.30) | - | - | - | - | 100.0 % | 3.84 [3.11, 4.00] | - | 1 | 6 of 6 |
+| slot_blocked | lan | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.43 [18.40, 18.55] (18.25) | - | 5.05 [5.05, 5.25] | 6 of 6 | 6 of 6 | 100.0 % | 3.23 [3.12, 4.00] | - | 1 | 6 of 6 |
+| cup_moved | lan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.60 [17.60, 17.65] (17.60) | 0.10 [0.09, 0.10] | - | - | - | 100.0 % | 3.50 [3.10, 3.98] | - | 1 | 6 of 6 |
+| fallback_expiry | lan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.30 [25.30, 25.30] (25.25) | - | 8.55 [8.55, 8.55] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [2.99, 3.03] | - | 0 | 6 of 6 |
+| s2_placement | lan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 35.90 [35.85, 35.95] (35.75) | - | - | - | - | 100.0 % | 4.00 [3.04, 4.00] | - | 1 | 6 of 6 |
+| slot_blocked | lan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.40 [25.35, 25.40] (25.25) | - | 8.60 [8.55, 8.60] | 6 of 6 | 6 of 6 | 100.0 % | 3.25 [3.06, 4.00] | - | 1 | 6 of 6 |
+| cup_moved | lan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [13.00, 13.05] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.95 [3.08, 3.98] | - | 1 | 6 of 6 |
+| fallback_expiry | lan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.00 [16.00, 16.00] (15.95) | - | 3.85 [3.85, 3.85] | 6 of 6 | 6 of 6 | 100.0 % | 3.02 [3.00, 3.97] | - | 0 | 6 of 6 |
+| s2_placement | lan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 25.45 [25.30, 25.45] (25.30) | - | - | - | - | 100.0 % | 3.58 [3.07, 4.00] | - | 2 | 6 of 6 |
+| slot_blocked | lan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.00 [16.00, 16.00] (15.95) | - | 3.85 [3.85, 3.90] | 6 of 6 | 6 of 6 | 100.0 % | 3.94 [3.15, 4.01] | - | 0 | 6 of 6 |
+| cup_moved | wifi | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.20 [9.20, 9.30] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 23.18 [21.81, 24.01] | - | 1 | 6 of 6 |
+| fallback_expiry | wifi | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.35 [8.25, 8.35] (8.05) | - | 0.35 [0.25, 0.35] | 6 of 6 | 0 of 6 | 100.0 % | 23.01 [21.95, 24.00] | - | 0 | 6 of 6 |
+| s2_placement | wifi | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.70 [18.45, 18.90] (18.45) | - | - | - | - | 100.0 % | 22.98 [22.02, 23.28] | - | 2 | 6 of 6 |
+| slot_blocked | wifi | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.20 [8.05, 8.30] (8.10) | - | 0.23 [0.15, 0.30] | 6 of 6 | 0 of 6 | 100.0 % | 23.03 [22.15, 23.21] | - | 0 | 6 of 6 |
+| cup_moved | wifi | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.25 [10.05, 10.30] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 23.03 [22.12, 23.97] | - | 0 | 6 of 6 |
+| fallback_expiry | wifi | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.40 [10.40, 10.55] (10.15) | - | 1.15 [1.15, 1.25] | 6 of 6 | 0 of 6 | 100.0 % | 22.50 [21.01, 23.04] | - | 0 | 6 of 6 |
+| s2_placement | wifi | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 20.55 [20.40, 20.65] (20.35) | - | - | - | - | 100.0 % | 22.97 [22.22, 24.00] | - | 0 | 6 of 6 |
+| slot_blocked | wifi | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.33 [10.30, 10.40] (10.15) | - | 1.15 [1.05, 1.20] | 6 of 6 | 0 of 6 | 100.0 % | 22.98 [22.73, 23.36] | - | 0 | 6 of 6 |
+| cup_moved | wifi | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.20 [14.10, 14.20] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 22.97 [22.06, 23.12] | - | 1 | 6 of 6 |
+| fallback_expiry | wifi | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.50 [18.40, 18.60] (18.25) | - | 5.17 [5.05, 5.25] | 6 of 6 | 6 of 6 | 100.0 % | 22.98 [22.02, 23.03] | - | 0 | 6 of 6 |
+| s2_placement | wifi | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 28.50 [28.40, 28.70] (28.30) | - | - | - | - | 100.0 % | 22.69 [22.09, 23.03] | - | 3 | 6 of 6 |
+| slot_blocked | wifi | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.40 [18.40, 18.50] (18.25) | - | 5.05 [5.05, 5.20] | 6 of 6 | 6 of 6 | 100.0 % | 23.03 [22.08, 23.97] | - | 0 | 6 of 6 |
+| cup_moved | wifi | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.65 [17.60, 17.65] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 23.01 [22.15, 23.25] | - | 1 | 6 of 6 |
+| fallback_expiry | wifi | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.40 [25.30, 25.40] (25.25) | - | 8.65 [8.55, 8.65] | 6 of 6 | 6 of 6 | 100.0 % | 22.96 [22.01, 22.99] | - | 0 | 6 of 6 |
+| s2_placement | wifi | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 35.95 [35.95, 36.10] (35.75) | - | - | - | - | 100.0 % | 22.95 [22.68, 23.01] | - | 3 | 6 of 6 |
+| slot_blocked | wifi | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.45 [25.40, 25.50] (25.25) | - | 8.65 [8.60, 8.70] | 6 of 6 | 6 of 6 | 100.0 % | 23.01 [22.18, 23.16] | - | 1 | 6 of 6 |
+| cup_moved | wifi | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [12.95, 13.05] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 23.01 [22.09, 24.24] | - | 1 | 6 of 6 |
+| fallback_expiry | wifi | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.10 [16.00, 16.10] (15.95) | - | 3.95 [3.85, 3.95] | 6 of 6 | 6 of 6 | 100.0 % | 22.94 [22.04, 23.00] | - | 1 | 6 of 6 |
+| s2_placement | wifi | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 25.45 [25.45, 25.45] (25.30) | - | - | - | - | 100.0 % | 23.00 [22.45, 23.12] | - | 1 | 6 of 6 |
+| slot_blocked | wifi | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.00 [16.00, 16.00] (15.95) | - | 3.90 [3.85, 3.90] | 6 of 6 | 6 of 6 | 100.0 % | 23.01 [22.03, 24.64] | - | 0 | 6 of 6 |
+| cup_moved | wan | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.20 [9.20, 9.20] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 102.54 [101.25, 104.01] | - | 2 | 6 of 6 |
+| fallback_expiry | wan | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.25 [8.25, 8.45] (8.05) | - | 0.25 [0.25, 0.35] | 6 of 6 | 0 of 6 | 100.0 % | 103.05 [103.00, 106.04] | - | 0 | 6 of 6 |
+| s2_placement | wan | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.63 [18.60, 18.80] (18.45) | - | - | - | - | 100.0 % | 102.67 [101.99, 103.00] | - | 0 | 6 of 6 |
+| slot_blocked | wan | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 8.40 [8.25, 8.40] (8.10) | - | 0.32 [0.25, 0.35] | 6 of 6 | 0 of 6 | 100.0 % | 103.08 [101.10, 104.08] | - | 0 | 6 of 6 |
+| cup_moved | wan | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.05 [10.05, 10.05] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 103.04 [101.96, 104.15] | - | 1 | 6 of 6 |
+| fallback_expiry | wan | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.45 [10.40, 10.55] (10.15) | - | 1.25 [1.15, 1.35] | 6 of 6 | 0 of 6 | 100.0 % | 101.97 [100.93, 104.02] | - | 2 | 6 of 6 |
+| s2_placement | wan | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 20.60 [20.55, 20.70] (20.35) | - | - | - | - | 100.0 % | 102.10 [101.00, 104.00] | - | 0 | 6 of 6 |
+| slot_blocked | wan | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 10.30 [10.30, 10.45] (10.15) | - | 1.15 [1.15, 1.25] | 6 of 6 | 0 of 6 | 100.0 % | 102.23 [102.02, 104.03] | - | 1 | 6 of 6 |
+| cup_moved | wan | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.10 [14.10, 14.20] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 103.08 [101.17, 104.66] | - | 2 | 6 of 6 |
+| fallback_expiry | wan | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.55 [18.50, 18.60] (18.25) | - | 5.20 [5.15, 5.25] | 6 of 6 | 6 of 6 | 100.0 % | 102.02 [101.93, 103.99] | - | 0 | 6 of 6 |
+| s2_placement | wan | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 28.58 [28.50, 28.65] (28.30) | - | - | - | - | 100.0 % | 102.22 [102.03, 103.01] | - | 1 | 6 of 6 |
+| slot_blocked | wan | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.50 [18.40, 18.60] (18.25) | - | 5.25 [5.15, 5.30] | 6 of 6 | 6 of 6 | 100.0 % | 103.07 [102.03, 103.91] | - | 2 | 6 of 6 |
+| cup_moved | wan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.60 [17.60, 17.65] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 103.06 [101.59, 104.77] | - | 2 | 6 of 6 |
+| fallback_expiry | wan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.40 [25.40, 25.50] (25.25) | - | 8.65 [8.65, 8.75] | 6 of 6 | 6 of 6 | 100.0 % | 102.02 [101.22, 103.06] | - | 2 | 6 of 6 |
+| s2_placement | wan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 36.00 [35.95, 36.00] (35.75) | - | - | - | - | 100.0 % | 102.26 [102.02, 102.79] | - | 1 | 6 of 6 |
+| slot_blocked | wan | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 25.50 [25.50, 25.50] (25.25) | - | 8.70 [8.70, 8.70] | 6 of 6 | 6 of 6 | 100.0 % | 103.00 [102.01, 104.01] | - | 1 | 6 of 6 |
+| cup_moved | wan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [13.05, 13.05] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 103.01 [102.20, 104.07] | - | 1 | 6 of 6 |
+| fallback_expiry | wan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.10 [16.10, 16.10] (15.95) | - | 3.95 [3.95, 3.95] | 6 of 6 | 6 of 6 | 100.0 % | 103.03 [102.04, 104.00] | - | 1 | 6 of 6 |
+| s2_placement | wan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 25.55 [25.55, 25.55] (25.30) | - | - | - | - | 100.0 % | 102.62 [101.96, 102.99] | - | 1 | 6 of 6 |
+| slot_blocked | wan | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.10 [16.10, 16.10] (15.95) | - | 3.97 [3.95, 4.00] | 6 of 6 | 6 of 6 | 100.0 % | 102.59 [102.01, 103.00] | - | 1 | 6 of 6 |
+| cup_moved | degraded | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.25 [9.20, 9.30] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 531.55 [417.89, 754.09] | - | 1 | 6 of 6 |
+| fallback_expiry | degraded | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 9.58 [9.05, 9.85] (8.05) | - | 1.27 [0.90, 1.50] | 6 of 6 | 0 of 6 | 100.0 % | 526.28 [433.97, 732.51] | - | 0 | 6 of 6 |
+| s2_placement | degraded | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 19.70 [19.30, 20.35] (18.45) | - | - | - | - | 100.0 % | 601.02 [571.06, 809.75] | - | 0 | 6 of 6 |
+| slot_blocked | degraded | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 9.28 [8.85, 10.05] (8.10) | - | 0.95 [0.70, 1.35] | 6 of 6 | 0 of 6 | 100.0 % | 502.16 [425.58, 621.97] | - | 1 | 6 of 6 |
+| cup_moved | degraded | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.20 [10.05, 10.45] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 483.46 [455.16, 583.05] | - | 1 | 6 of 6 |
+| fallback_expiry | degraded | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 11.05 [10.80, 11.40] (10.15) | - | 1.75 [1.50, 1.95] | 6 of 6 | 5 of 6 | 100.0 % | 500.36 [429.02, 589.54] | - | 0 | 6 of 6 |
+| s2_placement | degraded | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 21.35 [20.95, 21.80] (20.35) | - | - | - | - | 100.0 % | 548.21 [485.04, 718.31] | - | 1 | 6 of 6 |
+| slot_blocked | degraded | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 11.55 [10.95, 12.55] (10.15) | - | 2.10 [1.60, 3.30] | 6 of 6 | 1 of 6 | 100.0 % | 695.99 [507.03, 742.02] | - | 0 | 6 of 6 |
+| cup_moved | degraded | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.23 [14.10, 14.75] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 612.20 [428.05, 808.03] | - | 0 | 6 of 6 |
+| fallback_expiry | degraded | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 19.15 [18.80, 19.60] (18.25) | - | 5.80 [5.50, 6.30] | 6 of 6 | 6 of 6 | 100.0 % | 516.24 [474.04, 686.99] | - | 0 | 6 of 6 |
+| s2_placement | degraded | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 29.23 [28.90, 29.70] (28.30) | - | - | - | - | 100.0 % | 586.03 [545.02, 676.01] | - | 1 | 6 of 6 |
+| slot_blocked | degraded | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 18.88 [18.35, 20.35] (18.25) | - | 5.57 [5.55, 7.00] | 6 of 6 | 6 of 6 | 100.0 % | 460.16 [441.99, 617.72] | - | 1 | 6 of 6 |
+| cup_moved | degraded | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.65 [17.60, 17.90] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 596.85 [461.35, 694.84] | 2.05 | 2 | 6 of 6 |
+| fallback_expiry | degraded | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 26.25 [26.10, 27.80] (25.25) | - | 9.40 [9.20, 10.95] | 6 of 6 | 6 of 6 | 100.0 % | 594.74 [465.00, 707.08] | - | 0 | 6 of 6 |
+| s2_placement | degraded | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 36.60 [36.35, 37.05] (35.75) | - | - | - | - | 100.0 % | 551.02 [489.09, 711.84] | - | 0 | 6 of 6 |
+| slot_blocked | degraded | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 26.63 [25.35, 27.10] (25.25) | - | 9.55 [9.10, 9.80] | 6 of 6 | 6 of 6 | 100.0 % | 547.84 [487.92, 731.13] | - | 0 | 6 of 6 |
+| cup_moved | degraded | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [12.95, 13.90] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 509.12 [421.41, 628.10] | - | 1 | 6 of 6 |
+| fallback_expiry | degraded | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.68 [16.40, 17.40] (15.95) | - | 4.52 [4.25, 5.10] | 6 of 6 | 6 of 6 | 100.0 % | 512.51 [472.52, 598.00] | - | 0 | 6 of 6 |
+| s2_placement | degraded | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 26.23 [26.05, 26.75] (25.30) | - | - | - | - | 100.0 % | 528.02 [440.67, 643.60] | - | 0 | 6 of 6 |
+| slot_blocked | degraded | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 16.80 [16.00, 17.75] (15.95) | - | 4.62 [4.30, 5.15] | 6 of 6 | 6 of 6 | 100.0 % | 545.10 [444.93, 629.10] | - | 0 | 6 of 6 |
+| cup_moved | outage | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.30 [9.20, 9.35] (9.15) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.37 [3.05, 3.99] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| fallback_expiry | outage | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 12.70 [12.40, 12.80] (8.05) | - | 4.35 [3.95, 4.45] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [3.01, 3.12] | 5.75 [5.75, 5.80] | 0 | 6 of 6 |
+| s2_placement | outage | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.53 [18.45, 18.60] (18.45) | - | - | - | - | 100.0 % | 3.27 [3.01, 4.00] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| slot_blocked | outage | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 12.10 [12.10, 12.20] (8.10) | - | 3.75 [3.65, 3.85] | 6 of 6 | 6 of 6 | 100.0 % | 3.29 [3.04, 3.97] | 5.75 [5.75, 5.80] | 0 | 6 of 6 |
+| cup_moved | outage | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.25 [10.05, 10.30] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.33 [3.04, 3.99] | 5.75 [5.75, 5.80] | 0 | 6 of 6 |
+| fallback_expiry | outage | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 14.60 [14.50, 14.70] (10.15) | - | 5.25 [5.15, 5.45] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [3.00, 3.04] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| s2_placement | outage | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 20.70 [20.55, 21.50] (20.35) | - | - | - | - | 100.0 % | 3.87 [3.06, 4.00] | 5.75 [5.75, 5.75] | 1 | 6 of 6 |
+| slot_blocked | outage | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 14.20 [14.10, 14.25] (10.15) | - | 4.85 [4.75, 4.95] | 6 of 6 | 6 of 6 | 100.0 % | 3.61 [3.08, 4.00] | 5.75 [5.75, 5.75] | 0 | 6 of 6 |
+| cup_moved | outage | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.20 [14.10, 14.25] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.53 [3.07, 3.99] | 5.77 [5.75, 5.80] | 1 | 6 of 6 |
+| fallback_expiry | outage | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 21.90 [21.80, 22.00] (18.25) | - | 8.60 [8.45, 8.70] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [3.01, 3.92] | 5.75 [5.75, 5.75] | 3 | 6 of 6 |
+| s2_placement | outage | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 29.05 [29.00, 29.20] (28.30) | - | - | - | - | 100.0 % | 3.44 [3.11, 4.00] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| slot_blocked | outage | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 22.65 [22.60, 22.90] (18.25) | - | 9.40 [9.30, 9.65] | 6 of 6 | 6 of 6 | 100.0 % | 3.95 [3.05, 4.00] | 5.75 [5.75, 5.80] | 0 | 6 of 6 |
+| cup_moved | outage | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.65 [17.60, 17.65] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.80 [3.32, 3.99] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| fallback_expiry | outage | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 29.55 [29.50, 29.70] (25.25) | - | 12.80 [12.75, 12.95] | 6 of 6 | 6 of 6 | 100.0 % | 3.88 [3.01, 4.01] | 5.75 [5.75, 5.80] | 7 | 6 of 6 |
+| s2_placement | outage | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 36.25 [36.20, 36.60] (35.75) | - | - | - | - | 100.0 % | 3.25 [3.09, 3.96] | 5.75 [5.75, 5.80] | 0 | 6 of 6 |
+| slot_blocked | outage | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 29.55 [29.20, 29.60] (25.25) | - | 12.75 [12.40, 12.80] | 6 of 6 | 6 of 6 | 100.0 % | 3.66 [3.07, 4.00] | 5.75 [5.75, 5.80] | 1 | 6 of 6 |
+| cup_moved | outage | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.03 [13.00, 13.05] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.53 [3.03, 3.96] | 5.75 [5.75, 5.80] | 2 | 6 of 6 |
+| fallback_expiry | outage | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 20.30 [19.50, 20.40] (15.95) | - | 8.15 [7.35, 8.25] | 6 of 6 | 6 of 6 | 100.0 % | 3.62 [3.07, 4.00] | 5.75 [5.75, 5.75] | 3 | 6 of 6 |
+| s2_placement | outage | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 25.75 [25.55, 26.30] (25.30) | - | - | - | - | 100.0 % | 3.14 [3.07, 3.99] | 5.75 [5.75, 5.75] | 1 | 6 of 6 |
+| slot_blocked | outage | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 20.40 [20.20, 20.50] (15.95) | - | 8.27 [8.05, 8.40] | 6 of 6 | 6 of 6 | 100.0 % | 3.99 [3.95, 4.00] | 5.75 [5.75, 5.75] | 0 | 6 of 6 |
+| cup_moved | outage_long | 0.1 | 6 | SUCCEEDED | 0 | 0 | 9.20 [9.20, 9.30] (9.15) | 0.10 [0.09, 0.10] | - | - | - | 100.0 % | 3.98 [3.90, 4.02] | 22.75 [22.75, 22.75] | 1 | 6 of 6 |
+| fallback_expiry | outage_long | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 29.45 [29.10, 29.70] (8.05) | - | 21.10 [20.65, 21.35] | 6 of 6 | 6 of 6 | 100.0 % | 3.99 [3.13, 4.01] | 22.77 [22.75, 22.80] | 19 | 6 of 6 |
+| s2_placement | outage_long | 0.1 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 36.35 [35.45, 36.70] (18.45) | - | - | - | - | 100.0 % | 3.93 [3.25, 4.01] | 22.75 [22.75, 22.80] | 2 | 6 of 6 |
+| slot_blocked | outage_long | 0.1 | 6 | FAILED SUCCEEDED | 0 | 0 | 29.45 [29.00, 30.05] (8.10) | - | 21.10 [20.65, 21.70] | 6 of 6 | 6 of 6 | 100.0 % | 3.30 [3.06, 4.00] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
+| cup_moved | outage_long | 1.0 | 6 | SUCCEEDED | 0 | 0 | 10.25 [10.05, 10.25] (10.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.82 [3.11, 4.00] | 22.75 [22.75, 22.80] | 2 | 6 of 6 |
+| fallback_expiry | outage_long | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 31.40 [31.20, 31.70] (10.15) | - | 22.05 [21.85, 22.35] | 6 of 6 | 6 of 6 | 100.0 % | 3.96 [3.01, 4.01] | 22.75 [22.75, 22.75] | 0 | 6 of 6 |
+| s2_placement | outage_long | 1.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 37.93 [37.30, 38.35] (20.35) | - | - | - | - | 100.0 % | 3.53 [3.01, 3.99] | 22.75 [22.75, 22.75] | 1 | 6 of 6 |
+| slot_blocked | outage_long | 1.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 30.93 [30.70, 32.05] (10.15) | - | 21.60 [21.45, 22.65] | 6 of 6 | 6 of 6 | 100.0 % | 3.14 [3.03, 3.25] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
+| cup_moved | outage_long | 5.0 | 6 | SUCCEEDED | 0 | 0 | 14.23 [14.10, 14.25] (14.05) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.45 [3.09, 3.97] | 22.77 [22.75, 22.80] | 1 | 6 of 6 |
+| fallback_expiry | outage_long | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 39.05 [39.00, 39.90] (18.25) | - | 25.77 [25.65, 26.55] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [2.99, 3.05] | 22.75 [22.75, 22.80] | 1 | 6 of 6 |
+| s2_placement | outage_long | 5.0 | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 45.75 [45.65, 46.10] (28.30) | - | - | - | - | 100.0 % | 3.10 [3.01, 4.00] | 22.77 [22.75, 22.80] | 2 | 6 of 6 |
+| slot_blocked | outage_long | 5.0 | 6 | FAILED SUCCEEDED | 0 | 0 | 39.40 [39.30, 39.70] (18.25) | - | 26.15 [25.95, 26.40] | 6 of 6 | 6 of 6 | 100.0 % | 3.94 [3.18, 4.00] | 22.80 [22.75, 22.80] | 0 | 6 of 6 |
+| cup_moved | outage_long | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED | 0 | 0 | 17.65 [17.60, 17.65] (17.60) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.65 [3.19, 3.98] | 22.75 [22.75, 22.75] | 1 | 6 of 6 |
+| fallback_expiry | outage_long | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 46.50 [46.20, 46.60] (25.25) | - | 29.75 [29.45, 29.85] | 6 of 6 | 6 of 6 | 100.0 % | 3.01 [3.00, 3.01] | 22.77 [22.75, 22.80] | 1 | 6 of 6 |
+| s2_placement | outage_long | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 53.00 [52.90, 53.25] (35.75) | - | - | - | - | 100.0 % | 3.34 [3.05, 4.01] | 22.77 [22.75, 22.80] | 1 | 6 of 6 |
+| slot_blocked | outage_long | qwen2.5-1.5b-q4km-host (median 8.50 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 46.15 [45.90, 46.60] (25.25) | - | 29.35 [29.10, 29.80] | 6 of 6 | 6 of 6 | 100.0 % | 3.92 [3.06, 4.00] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
+| cup_moved | outage_long | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED | 0 | 0 | 13.05 [13.00, 13.10] (13.00) | 0.10 [0.10, 0.10] | - | - | - | 100.0 % | 3.15 [3.06, 3.95] | 22.75 [22.75, 22.80] | 1 | 6 of 6 |
+| fallback_expiry | outage_long | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 36.95 [36.30, 37.40] (15.95) | - | 24.80 [24.15, 25.25] | 6 of 6 | 6 of 6 | 100.0 % | 2.61 [2.04, 3.01] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
+| s2_placement | outage_long | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | SUCCEEDED SUCCEEDED | 0 | 0 | 42.75 [42.30, 43.30] (25.30) | - | - | - | - | 100.0 % | 3.16 [3.06, 3.99] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
+| slot_blocked | outage_long | qwen2.5-1.5b-q4km-host-avx2 (median 3.80 s) | 6 | FAILED SUCCEEDED | 0 | 0 | 37.00 [36.90, 37.15] (15.95) | - | 24.87 [24.75, 24.95] | 6 of 6 | 6 of 6 | 100.0 % | 3.50 [3.04, 4.01] | 22.75 [22.75, 22.80] | 0 | 6 of 6 |
 
 </details>
 
@@ -369,32 +439,26 @@ Before and after, each cell "before → after". Before: v0.0.2 part 4, CI run 37
 <!-- s2-placement-compare:end -->
 
 What these tables say so far (2026-10-07, emulated network, VMs, soft
-real-time; one run per cell). Safety held in all 84 cells: no limit
-violation in ground truth, no S0 starvation, S0 never without a chunk, a
-fallback or HOLD. Every execution held a valid fallback for all of its
-running time (coverage 100 % in every cell; v0.0.2 part 4: 0 % to 93 %, 0 % with a
-TTFT of 5 s).
+real-time; 6 runs per cell, the median with its interval). Safety held in
+all 840 runs: no limit violation in ground truth, no S0 starvation, S0
+never without a chunk, a fallback or HOLD. Every execution held a valid
+fallback for all of its running time, and a fallback engaged in all 420
+recoveries, S2's first.
 
-The two-cup task measures latency. Its time follows S2's time to first
-token: about 18.7 s, 20.5 s and 28.5 s for 0.1 s, 1 s and 5 s. local, lan,
-wifi and wan (up to about 100 ms) take 0.05 to 0.45 s longer than the same
-task in one process on simulated time, the degraded link 0.6 to 1.15 s. A
-20 s outage costs the task 17.6 to 18.1 s: the robot waits for S2's next
-goal.
-
-The scenes that change measure recovery. S1 reacts to a moved cup alone, in
-0.09 to 0.10 s in every cell. When a dish takes the rack spot, S0 waits
-under a fallback until S2 chooses another spot, and the recovery time is
-S2's time to first token plus the network: 0.15 to 0.35 s, 1.05 to 1.25 s
-and 5.05 to 5.25 s for 0.1 s, 1 s and 5 s up to wan; 0.65 to 1.0 s, 1.5 to
-1.85 s and 5.75 to 5.85 s on the degraded link; an outage adds itself
-(3.85 to 4.85 s with the 5 s outage, 20.85 to 22.45 s with the 20 s one,
-for a TTFT of 1 s or less). A fallback engaged in all 42 recoveries (v0.0.2 part 4:
-28), S2's first: it now arrives with the goal. When S2 takes longer than
-its fallback lasts (3 s, 1.5 s), S2's runs out and the capability's default
-holds the cup where it is: S0 spent no time in HOLD while S2 decided (v0.0.2 part 4:
-up to 26 s). So far, for recovery: where S2 lives still sets how long the
-robot waits, and no longer whether it waits under a fallback.
+The measured model changes the picture. Qwen2.5-1.5B-Instruct on the
+development host's CPU answers in 3.80 s (median TTFT, llama.cpp built for
+AVX2) or 8.50 s (as nixpkgs packages it). With it, recovering from a taken
+rack spot takes 3.85 to 3.97 s (AVX2) or 8.55 to 8.70 s (as packaged) on
+every link up to wan, each interval at most 0.1 s wide; 4.5 to 4.6 s or 9.4
+to 9.6 s on the degraded link, where the intervals widen to as much as 1.75
+s; the 5 s and 20 s outages add themselves. The two-cup task takes 25.5 s or
+36.0 s. Both TTFTs are longer than S2's fallbacks last (3 s, 1.5 s): in
+every one of those recoveries S2's fallback ran out and the capability's
+default held the cup, so the robot waited safely, never in HOLD, but for as
+long as the model took. S1's local reaction to a moved cup stayed at 0.10 s
+[0.09, 0.10] in every cell. So far: a model of this size on a desktop CPU is
+too slow for S2 to answer within its fallback; where S2 lives matters less
+than what it runs on, and the network adds little up to wan.
 
 ### Measured S2 latency
 
