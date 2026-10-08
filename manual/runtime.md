@@ -204,14 +204,15 @@ The first table has one row for each profile and TTFT: the two-cup task time, `c
 
 ```sh
 nix build .#checks.x86_64-linux.vm-s2-placement   # in nix flake check: 14 cells (below)
-nix build .#s2-placement                          # every scenario x profile x TTFT 0.1, 1, 5 s; wants KVM
+nix build .#s2-placement                          # every scenario x profile x TTFT 0.1, 1, 5 s; hours without KVM
 nix run .#omarchy-runtime -- placement-docs result/placement/results.json README.md manual/runtime.md \
-  --source "CI run <id>, ..."      # writes the table below
+  --source "local run <start>, <commit>, <host>"   # writes the table below
 ```
 
-In `nix flake check`, the two-cup task runs on lan, degraded, outage and outage_long with a TTFT of 0.1 s and 1 s, and each scene that changes on lan and outage_long with 1 s: 14 cells. `result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. CI runs the full matrix on demand (workflow dispatch with `placement`), alone on its runner, and keeps the results as an artifact.
+In `nix flake check`, the two-cup task runs on lan, degraded, outage and outage_long with a TTFT of 0.1 s and 1 s, and each scene that changes on lan and outage_long with 1 s: 14 cells. `result/placement` holds `results.json`, `table.txt` and `table.md`; `result/runs` the robot's traces; `result/s2-edge` and `result/s2-robot` the S2 processes' own reports. The last command writes the table below from a full run's results. The experiments run locally (AGENTS.md, "Checks and releases"): on the development host, without KVM, their numbers are labelled "measured in VMs on the host, without KVM (QEMU TCG)", and a wall-clock tolerance that fails only because of the emulation is reported, not changed. The tables below come from earlier runs on GitHub Actions with KVM, as their captions say.
 
 <!-- s2-placement:begin -->
+
 S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc netem), VMs, soft real-time). Measured 2026-10-07 with omarchy-runtime 0.0.2 (5c34345f5049), Omarchy Robots 0.0.2 (board vm), S0 at 200 Hz; soft real-time, Python, wall-clock in an Omarchy Robots VM (0.0.2, Python 3.13.15, 2 CPUs, virtualization kvm). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Values: median of a cell's runs, and in brackets a distribution-free confidence interval for that median from order statistics: the narrowest pair (k-th smallest, k-th largest) whose binomial coverage is at least 95 % (with 6 runs, the smallest and the largest, 96.9 %); no interval below 6 runs. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S2's fallback (3 s in slot_blocked, 1.5 s in fallback_expiry) ran out before the retry started, and S0 went on under the capability's default. Fallback coverage, the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end. Source: CI run 37603846510 (https://github.com/promaaa/omarchy-robots/actions/runs/37603846510), the repeated matrix on 5c34345, one scenario per job, each alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM, each VM 2 vCPUs; the four parts merged with placement-merge. The 6 runs of a cell use the scenario's seed, so S2 draws the same TTFTs from a measured distribution in each: the interval is the run-to-run variation of the wall clock and the emulated network, not the spread of the TTFT distribution (its p05 to p95 is in the TTFT table).
 
 | profile | TTFT s | two-cup task s | cup_moved reaction s | slot_blocked recovery s | fallback_expiry recovery s | S2 fallbacks expired | fallback coverage | violations | S0 starvations | runs within tolerance |
@@ -400,11 +401,13 @@ S2 placement, the two-cup task and the dynamic scenarios (emulated network (tc n
 </details>
 
 Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines; every execution's fallback coverage at least 99 %. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
+
 <!-- s2-placement:end -->
 
 Before and after the fallback design of v0.0.2 part 5 (the full matrix of v0.0.2 part 4 against the one of this release), written by `omarchy-runtime placement-compare BEFORE AFTER --docs ...` from both runs' results and traces:
 
 <!-- s2-placement-compare:begin -->
+
 Before and after, each cell "before → after". Before: v0.0.2 part 4, CI run 37465247670 (https://github.com/promaaa/omarchy-robots/actions/runs/37465247670), the full matrix on 61dba14. After: v0.0.2 part 5, CI run 37589536784 (https://github.com/promaaa/omarchy-robots/actions/runs/37589536784), the full matrix on b40ec10; both alone on a GitHub ubuntu-24.04 runner, 2 CPUs, KVM, each VM 2 vCPUs. Coverage: the least, over the row's executions, of the fraction of S0's status samples (the supervisor's, 20 Hz) taken while an execution ran that report a fallback installed; HOLD while S2 decides: the longest time S0 spent in HOLD from a failure to the next execution's start, from S0's mode changes as the supervisor saw them; both from the traces, the same way for both runs. Engaged, expired and recovery: from each run's results (expired: before, S0 went from S2's fallback to HOLD; after, S2's ran out and the capability's default took over).
 
 | profile | TTFT s | fallback coverage | fallback engaged in recoveries | S2 fallbacks expired | HOLD while S2 decides s | slot_blocked recovery s | fallback_expiry recovery s |
@@ -430,6 +433,7 @@ Before and after, each cell "before → after". Before: v0.0.2 part 4, CI run 37
 | outage_long | 0.1 | 90.9 % → 100.0 % | 2 of 2 → 2 of 2 | 2 of 2 → 2 of 2 | 20.05 → 0.00 | 21.35 → 21.70 | 21.60 → 20.85 |
 | outage_long | 1.0 | 63.6 % → 100.0 % | 2 of 2 → 2 of 2 | 2 of 2 → 2 of 2 | 20.00 → 0.00 | 21.45 → 22.45 | 21.55 → 21.55 |
 | outage_long | 5.0 | 0.0 % → 100.0 % | 0 of 2 → 2 of 2 | 0 of 2 → 2 of 2 | 26.40 → 0.00 | 26.25 → 26.25 | 26.45 → 26.30 |
+
 <!-- s2-placement-compare:end -->
 
 ## Extension points
@@ -474,12 +478,14 @@ nix run .#omarchy-runtime -- ttft-docs --docs README.md manual/runtime.md   # wr
 The model is Qwen2.5-1.5B-Instruct, quantized Q4_K_M, from its publisher's repository on Hugging Face (`Qwen/Qwen2.5-1.5B-Instruct-GGUF`, revision 91cad511, Apache-2.0); the file's SHA-256 is in each distribution's provenance. The weights are not in this repository. `--no-prompt-cache` makes llama-server process the whole prompt every time, as a fresh S2 decision would. A cloud backend takes the same command with its URL and a key from an environment variable (`OMARCHY_S2_API_KEY` by default) or a file outside the repository (`--api-key-file`); the key is sent only to the backend and never printed or written. None has been measured: no key was provided.
 
 <!-- s2-ttft:begin -->
+
 S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host, never on a robot.
 
 | distribution | label | backend | model | TTFT median s | p05 s | p95 s | n | failures | network path | date |
 |---|---|---|---|---|---|---|---|---|---|---|
 | qwen2.5-1.5b-q4km-host | measured on host | llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 8.505 | 8.354 | 8.889 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
 | qwen2.5-1.5b-q4km-host-avx2 | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock), built with AVX2, FMA, F16C, BMI2 (flake output llama-cpp-avx2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 3.804 | 3.539 | 3.945 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+
 <!-- s2-ttft:end -->
 
 The placement experiment draws S2's TTFT from these files as well (`omarchy-runtime s2 --ttft-file NAME`: each decision takes one of the measured TTFTs, drawn at random with replacement from the run's seed). The repeated matrix runs every cell 6 times, with both measured distributions (llama.cpp as packaged, and built for AVX2) besides 0.1, 1 and 5 s, one scenario per CI job (`nix build .#s2-placement-repeated-<scenario>`; workflow dispatch with `repeated`), and `omarchy-runtime placement-merge` joins the four parts into one table. Each value is the median of a cell's runs, with a distribution-free confidence interval for that median from order statistics: the narrowest pair of the k-th smallest and k-th largest runs whose binomial coverage is at least 95 %; with 6 runs, the smallest and the largest, 96.9 %.
@@ -498,6 +504,7 @@ Each call returns within about 0.5 ms (the contract tests measure it): a correct
 `omarchy-runtime inference-matrix --docs manual/runtime.md` runs S1's inference delay (50, 150, 300 ms) x every registered corrector x every registered trigger on `nominal_a` and `cup_moved`, in simulated time, and writes the table below. A new corrector or trigger joins the matrix once it is registered. A baseline, not a claim about which method is best.
 
 <!-- inference-matrix:begin -->
+
 Inference matrix (simulated time; a baseline for asynchronous inference, not a claim about which method is best).
 
 | scenario | inference s | corrector | trigger | outcomes | violations | task s | starvations | inferences | jump | velocity jump /s | reaction s | freeze s |
@@ -528,6 +535,7 @@ Inference matrix (simulated time; a baseline for asynchronous inference, not a c
 | cup_moved | 0.30 | blend | mismatch | SUCCEEDED | 0 | 12.05 | 32 | 34 | - | - | 0.45 | 0.40 |
 
 jump: the largest jump of S0's desired position at a chunk switch (rad for the arm's joints); velocity jump: of its desired velocity. reaction: from the cup's move to S0 executing a chunk computed after it; freeze: from the first observation after the move reaching S1 to that tick.
+
 <!-- inference-matrix:end -->
 
 ## What is not here

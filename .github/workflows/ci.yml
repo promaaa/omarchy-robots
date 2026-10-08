@@ -1,22 +1,11 @@
 name: CI
 
-# What runs when, to spend runner minutes where they check something new
-# (no check is removed; every one still runs on main):
-# - a push to a branch other than main: lint (with the runtime's tests) and
-#   eval; the VM tests wait for the pull request, main or the nightly run;
-# - a push to main, a pull request: everything, but a change to
-#   documentation only (README, CHANGELOG, AGENTS.md, manual/, branding/,
-#   *.md) skips the VM tests: none of them reads it;
-# - nightly: everything on main, unless main's commit already passed its
-#   VM tests;
-# - a tag: nothing; its commit was checked when it was pushed;
-# - workflow dispatch: everything, and the experiments chosen below.
+# Manual only: nothing runs on a push, a pull request or a schedule. The
+# checks, the Jetson builds, the experiments and the release checks run
+# locally (AGENTS.md, "Checks and releases"); this workflow stays for a
+# later use, by workflow dispatch. Its plan job still knows the rules it
+# had for pushes (documentation only, another branch, nightly), unused now.
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-  schedule:
-    - cron: "30 17 * * *" # 02:30 in Seoul
   workflow_dispatch:
     inputs:
       check:

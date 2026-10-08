@@ -1,9 +1,8 @@
 name: Manual
 
+# Manual only: the manual is built and checked locally (nix flake check, the
+# `manual` check); this deploys it to GitHub Pages when dispatched.
 on:
-  push:
-    branches: [main]
-    paths: [manual/**, branding/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:

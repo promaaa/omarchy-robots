@@ -203,7 +203,36 @@ replacement, from the run's seed; it never invents or fits a distribution.
 ## Hosts
 
 VM tests want KVM; without it QEMU emulates (TCG) and the full check takes
-over an hour instead of about 25 min in CI. Building a Jetson system on an
-x86_64 host needs aarch64 emulation (the Tegra kernel takes hours). For long
-runs, check a committed revision (`git+file://$PWD?rev=...`) so that edits do
-not disturb the evaluation.
+75 to 85 min on the development host instead of about 25 min with KVM.
+Building a Jetson system on an x86_64 host needs aarch64 emulation (the
+Tegra kernel takes hours; the development host has qemu-aarch64 in
+binfmt_misc and `extra-platforms = aarch64-linux`). For long runs, check a
+committed revision (`git+file://$PWD?rev=...`) so that edits do not disturb
+the evaluation.
+
+## Checks and releases
+
+Everything runs locally, on the development host; nothing relies on GitHub
+Actions. The workflows in `.github/workflows` are manual-only
+(`workflow_dispatch`) and stay so: do not add push, pull request or schedule
+triggers, and do not change repository or billing settings.
+
+- After each change: the relevant checks, `nix build -L
+  .#checks.x86_64-linux.<check>` (the runtime's tests: `omarchy-runtime`;
+  formatting: `format`, `statix`, `deadnix`; the manual: `manual`; each VM
+  test the change touches).
+- Before every release: the full `nix flake check -L --keep-going --max-jobs
+  1 "git+file://$PWD?rev=<commit>"` on the commit to tag. Tag only when it
+  passes.
+- Release evidence replaces CI links, in the release notes and the docs:
+  the commit, the command, the start time and duration, the host (CPU, RAM,
+  KVM or not) and the result. The logs stay outside the repository, in
+  `~/src/omarchy-robots-evidence/<version>/`, with a README listing the runs.
+- Jetson builds: locally, by aarch64 emulation, in the background (hours).
+- Experiments (the placement and inference matrices): locally. Label every
+  number from VMs on this host "measured in VMs on the host, without KVM
+  (QEMU TCG)". When a wall-clock tolerance fails only because of the
+  emulation, report it and ask before changing the tolerance.
+- The manual: `nix build .#checks.x86_64-linux.manual` builds it and fails
+  if a page keeps Markdown as text; check it renders (`result/index.html`)
+  without depending on the website.

@@ -7,21 +7,32 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-### Changed (CI)
+### Changed (checks and releases)
 
-- CI spends runner minutes where they check something new; no check is
-  removed. A push to `main` and a pull request run every check; a push to
-  another branch runs `lint` (with the runtime's tests) and the evaluations
-  only; a change to documentation only skips the VM tests; a nightly run
-  checks `main` unless its commit already passed its VM tests; a tag runs
-  nothing (its commit was checked when pushed); a newer push or pull
-  request update cancels the run it supersedes. The jobs whose closures fit
-  in a runner's free 14 GB no longer delete its toolchains first (1 to 5 min
-  each); every job prints its disk use. Billed minutes per push, the sum of
-  all jobs, from six runs of 2026-10-07: 68 to 96 (median 76.5) before; 55 to
-  84 (median 64.5) for a code change on `main`, 22 to 49 (median 26) for a
-  branch or a documentation change, 0 for a tag. No Nix store cache: the
-  jobs spend their time running VMs and evaluating, not downloading.
+- Every check, build, experiment and release check runs locally on the
+  development host; GitHub Actions runs nothing by itself. The workflows
+  are manual-only (`workflow_dispatch`): CI (it keeps the rules of a
+  push-time plan, unused) and the manual's deployment. AGENTS.md ("Checks
+  and releases") holds the rules: the relevant checks after each change,
+  the full `nix flake check` before every release, release evidence (commit,
+  command, start and duration, host, result) instead of CI links, logs kept
+  outside the repository (`~/src/omarchy-robots-evidence/`), Jetson builds by
+  aarch64 emulation, experiments labelled "measured in VMs on the host,
+  without KVM (QEMU TCG)".
+
+### Added
+
+- A `manual` check: the manual built with Jekyll and kramdown's GFM parser,
+  as GitHub Pages builds it; it fails when a chapter has no page or a page
+  keeps Markdown as text.
+
+### Fixed
+
+- Two generated tables did not render in the manual (the before-and-after
+  comparison and the TTFT distributions): kramdown does not end a table on
+  an HTML comment, and each block's end marker followed its last row at
+  once. The generated blocks now have blank lines around their text; the
+  README rendered them on GitHub before as well.
 
 ## [0.0.2] - 2026-10-07
 
@@ -32,6 +43,12 @@ time to first token measured on the development host, committed with its
 provenance; the placement matrix run 6 times per cell with those measured
 TTFTs, each value a median with a 95 % interval. Measured on the host and
 in VMs: not hardware-tested, and nothing is real-time.
+
+Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
+on d05f84a, started 2026-10-07 22:46 KST, 4703 s, on an Intel i7-9700 with
+62.7 GiB RAM and no KVM (QEMU TCG): every check passed. Log:
+`~/src/omarchy-robots-evidence/v0.0.9/release-check/` on the development
+host. GitHub Actions could not run (account billing).
 
 #### Fixed
 

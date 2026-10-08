@@ -112,6 +112,25 @@ in
   statix = check "statix" [ pkgs.statix ] "statix check .";
   deadnix = check "deadnix" [ pkgs.deadnix ] "deadnix --fail .";
 
+  # The manual builds with Jekyll and kramdown's GFM parser, as GitHub Pages
+  # builds it; every chapter is a page, and no page keeps Markdown as text (a
+  # table kramdown did not read shows its pipes: one followed at once by an
+  # HTML comment, say). The output is the site: open $out/index.html.
+  manual = pkgs.runCommand "check-manual" { nativeBuildInputs = [ pkgs.jekyll ]; } ''
+    export LC_ALL=C.UTF-8
+    cp -r ${self}/manual manual
+    chmod -R u+w manual
+    cp ${self}/branding/*.svg manual/assets/
+    jekyll build --source manual --destination $out
+    for url in $(sed -n 's|^  url: /\(.*\)/$|\1|p' manual/_data/chapters.yml); do
+      test -s "$out/$url/index.html" || { echo "manual: no page for /$url/"; exit 1; }
+    done
+    if grep -nE '^\|.*\|$' $(find $out -name '*.html'); then
+      echo "manual: Markdown left as text, above"
+      exit 1
+    fi
+  '';
+
   omarchy-robot =
     check "omarchy-robot"
       [

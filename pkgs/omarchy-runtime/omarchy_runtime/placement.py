@@ -542,7 +542,8 @@ def write_block(files: Sequence[Path], name: str, text: str) -> None:
         start, stop = old.find(begin), old.find(end)
         if start < 0 or stop < start:
             raise ConfigError(f"{path}: no {begin} ... {end} section")
-        path.write_text(old[:start] + f"{begin}\n{text}\n{end}" + old[stop + len(end) :])
+        # Blank lines around the text: kramdown (the manual) does not end a table on an HTML comment.
+        path.write_text(old[:start] + f"{begin}\n\n{text}\n\n{end}" + old[stop + len(end) :])
 
 
 def write_docs(results: Json, files: Sequence[Path], source: str | None = None) -> None:
