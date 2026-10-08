@@ -26,8 +26,8 @@ system, the runtime's simulated scenarios (on a laptop and inside an Omarchy
 Robots VM), the runtime on the wall clock with S2 in its own process on a
 second VM over an emulated network (the S2 placement experiment), and the
 installation of a generic PC onto an emulated disk. The Jetson and pc
-targets evaluate and are partly built; none has run on hardware yet (see the
-[support matrix](#support-matrix)).
+targets build (system, installer image and, on a Jetson, flash script); none
+has run on hardware yet (see the [support matrix](#support-matrix)).
 
 ## One file
 
@@ -506,12 +506,12 @@ flash script and installer image evaluate, with the per-board assertions of
 |---|---|---|---|---|
 | `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots); the runtime's reduced scenario set inside the VM, traces carrying its identity; the runtime on the wall clock with S2 in its own process, on the VM or on a second VM over an emulated network (`vm-s2-placement`) | 1.1 GiB; 1.33 GiB with `runtime.enable` (+230 MiB: Python 3, numpy and its BLAS) | system, VM, installer image (1.5 GiB) | 2026-10-06 |
 | `pc` | builds: system, installer image; install path VM-tested: the installer image onto an emulated NVMe drive, boot, validate. Not hardware-tested | 1.9 GiB (all redistributable firmware) | system, installer image (1.5 GiB) | 2026-10-04 |
-| `orin-agx-devkit` | builds: system, flash script | 1.4 GiB | system (natively, GitHub arm64 runner), flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nx-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nx-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nano-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `orin-nano-super-devkit` | builds: flash script | | flash script (1.7 GiB closure) | 2026-10-02 |
-| `thor-agx-devkit` | builds: flash script | | flash script (1.2 GiB closure; JetPack 7, built in 71 min) | 2026-10-02 |
+| `orin-agx-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation; the system also natively, on a GitHub arm64 runner (2026-10-02) | 2026-10-08 |
+| `orin-nx-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.73 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
+| `orin-nx-super-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.73 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
+| `orin-nano-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
+| `orin-nano-super-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
+| `thor-agx-devkit` | builds: system, installer image, flash script | 1.32 GiB | system, installer image (1.56 GiB), flash script (1.15 GiB closure; JetPack 7), on the development host under aarch64 emulation | 2026-10-08 |
 
 Pinned: nixpkgs nixos-26.05 (`4feb8eb`), jetpack-nixos `825dfea` (JetPack
 6.2.3 / L4T 36.5.2 on Orin, JetPack 7.2.1 / L4T 39.2.1 on Thor), disko
@@ -535,6 +535,10 @@ The `orin-agx-devkit` system built natively on a GitHub `ubuntu-24.04-arm`
 runner in about an hour from an empty store, Tegra kernel included (the
 1.4 GiB closure predates the rc.2 closure reductions); once the Orin kernel
 and firmware were built, each further Orin flash script took 70 to 82 s.
+At v0.0.2 (2026-10-08) every Jetson target (system, installer image and
+flash script of the six boards, 18 outputs) built on the development host in
+7 h 33 min, the Thor kernel compiled in about 4 h under aarch64 emulation;
+the Orin kernel came from an earlier build on this host.
 With the Omarchy Robots boot screen, the `orin-agx-devkit` flash script rebuilt
 in under 8 min (EDK2 again); its firmware shows the Omarchy Robots wordmark.
 Boot time, rc.1 against rc.2 (vm board, QEMU TCG, other builds paused, five

@@ -19,6 +19,9 @@ All notable changes to this project are documented here. The format follows
   outside the repository (`~/src/omarchy-robots-evidence/`), Jetson builds by
   aarch64 emulation, experiments labelled "measured in VMs on the host,
   without KVM (QEMU TCG)".
+- Support matrix: every Jetson target builds (system, installer image and
+  flash script of the six boards), built on the development host at v0.0.2
+  under aarch64 emulation (2026-10-08, 7 h 33 min).
 
 ### Added
 
