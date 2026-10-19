@@ -7,11 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+## [0.0.3] - 2026-10-19
+
+### Part 3 (2026-10-19)
+
 Milestone R6, part 3: S0 backends for the lab's arms, a Franka Emika Panda
 and an AgileX PiPER, tested against fakes only. No connection to a real
 robot was opened.
 
-### Added
+#### Added
 
 - `arms.py`: the Panda as an S0 backend behind a libfranka-like interface
   (torque control in libfranka's 1 kHz loop, Cartesian motion and contact
@@ -39,7 +43,7 @@ robot was opened.
   state (untested); the questions to answer in the lab; the lab GPU
   server's experiment, prepared, with what it needs.
 
-### Changed
+#### Changed
 
 - The guard starts a torque from zero and bounds its change by the rate
   limit times the time since the last tick: the first torque command is
@@ -47,7 +51,6 @@ robot was opened.
 - `contracts.matrix_quat` (rotation matrix to quaternion), exact near half
   turns.
 
-## [0.0.3] - 2026-10-19
 
 ### Part 2 (2026-10-19)
 
