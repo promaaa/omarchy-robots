@@ -1,4 +1,4 @@
-"""Run directories: writing them, and checking them (trace schema 3).
+"""Run directories: writing them, and checking them (trace schema 6).
 
 A run directory holds:
   run.json          header: schema, runtime and OS identity, config hash, seed, clock, extensions
@@ -25,6 +25,7 @@ from typing import Any, TextIO
 import numpy as np
 
 from omarchy_runtime import __version__
+from omarchy_runtime.attribution import ATTRIBUTIONS
 from omarchy_runtime.contracts import (
     OUTCOME_CATEGORIES,
     SECOND,
@@ -38,7 +39,7 @@ from omarchy_runtime.contracts import (
 )
 from omarchy_runtime.wallclock import perf_ns, wall_ns
 
-TRACE_SCHEMA = 5
+TRACE_SCHEMA = 6
 BUILD_JSON = Path("/etc/omarchy-robot/build.json")
 NO_OS = "no Omarchy Robots identity: /etc/omarchy-robot/build.json not found"
 
@@ -54,6 +55,7 @@ EVENT_TYPES = frozenset(
         "s0.mode",
         "s0.status",
         "chunk",
+        "chunk.rejected",
         "fallback.install",
         "fallback.rejected",
         "s0.hold",
@@ -63,6 +65,7 @@ EVENT_TYPES = frozenset(
         "error",
         "s2.link",
         "s0.late",
+        "s0.guard",
     }
 )
 # The per-tick S0 record never enters the event stream: at most this many
@@ -202,6 +205,7 @@ HEADER = {
     "seed": int,
     "clock": str,
     "body": str,
+    "s0": dict,
     "extensions": dict,
     "rates_hz": dict,
     "s2": dict,
@@ -232,6 +236,8 @@ SUMMARY = {
     "wall": dict,
     "s0": dict,
     "fallbacks": list,
+    "fidelity": (dict, NULL),
+    "attribution": (dict, NULL),
     "config_hash": str,
     "seed": int,
 }
@@ -289,6 +295,11 @@ def _check_summary(s: Json, where: str, errors: list[str]) -> None:
             errors.append(f"{where}: {outcome} without evidence")
     if outcome is State.REJECTED and (claim is not None or verdict is not None):
         errors.append(f"{where}: a rejected execution has a claim or a verdict")
+    blamed = s["attribution"]
+    if (blamed is not None) != (outcome in (State.FAILED, State.UNVERIFIED) and s["timing"]["started"] is not None):
+        errors.append(f"{where}: {outcome} with attribution {blamed}: only an execution that ran and did not succeed has one")
+    elif blamed is not None and (blamed.get("category") not in ATTRIBUTIONS or not isinstance(blamed.get("reason"), str)):
+        errors.append(f"{where}: attribution {blamed} is not one of {', '.join(ATTRIBUTIONS)} with a reason")
 
 
 def _check_s0_record(path: Path, errors: list[str]) -> None:
@@ -308,7 +319,7 @@ def _check_s0_record(path: Path, errors: list[str]) -> None:
 
 
 def validate_run(run_dir: Path) -> TraceCheck:
-    """Check a run directory against trace schema 3. `complete` means the run
+    """Check a run directory against trace schema 6 (TRACE_SCHEMA). `complete` means the run
     ended normally and every execution it started has a terminal summary."""
     check = TraceCheck()
     errors = check.errors

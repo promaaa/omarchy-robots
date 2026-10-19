@@ -26,6 +26,7 @@ from omarchy_runtime.contracts import (
     GoalRequest,
     Heartbeat,
     InstallFallback,
+    IntentChunk,
     Json,
     Ns,
     Observation,
@@ -62,7 +63,7 @@ class FakeS0:
         self.t: Ns = 0
         self.position = tuple(GANTRY.home)  # the gripper open
 
-    def submit_chunk(self, chunk: ActionChunk, now: Ns) -> None:
+    def submit_chunk(self, chunk: ActionChunk | IntentChunk, now: Ns) -> None:
         raise AssertionError("the runtime never submits chunks")
 
     def install_fallback(self, spec: FallbackSpec, now: Ns, base: bool = False) -> None:
@@ -149,7 +150,7 @@ class Rig:
             capabilities=config.capabilities(GANTRY_CFG),
             bindings=config.bindings(GANTRY_CFG),
             implementations={"pick_place.arm3": FakePolicy, "pick_place.gantry": factory or (lambda: self.policy)},
-            params=Params(**{k: ns(v) for k, v in p.items()}),
+            params=Params(**{k: ns(v) for k, v in p.items()}),  # type: ignore[arg-type]  # the fidelity limits keep their default
             belief=belief(),
             s0=self.s0,
             s1_host=self.host,

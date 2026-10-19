@@ -57,7 +57,12 @@ class TestValidate(unittest.TestCase):
 
     def test_header_names_extensions_and_identity(self) -> None:
         header = json.loads((scenario("nominal_a").dir / "run.json").read_text())
-        self.assertEqual(header["trace_schema"], 5)
+        self.assertEqual(header["trace_schema"], 6)
+        s0 = header["s0"]  # the S0 controller and what it honours
+        self.assertEqual(
+            (s0["id"], s0["command"], s0["motion"], s0["contact"], s0["degraded"]),
+            ("motion_tracker", "position", ["planar_arm3.joint_position.v1"], None, []),
+        )
         self.assertEqual(header["extensions"]["default_fallbacks"], {"place_in": {"id": "lift", "version": "1"}})
         shown = io.StringIO()
         with contextlib.redirect_stdout(shown):

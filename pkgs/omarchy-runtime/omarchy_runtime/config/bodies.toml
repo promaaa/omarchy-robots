@@ -2,6 +2,14 @@
 # this description; the simulator and the scripted policy also use
 # `kinematics`. Positions: radians for joints, metres for axes; the gripper
 # dimension goes from 0 (closed) to 1 (open).
+#
+# [<body>.s0] declares the body's S0 controller (controllers.py) and what it
+# honours (contracts.ControllerCapability): the command it returns, its rate,
+# the spacing of intent rows it accepts, the motion action spaces (the body's
+# own by default) and Cartesian frames, object intent forms, contact, the
+# sensor streams it consumes, and the degraded modes allowed
+# (contracts.DEGRADED_MODES; none by default: anything it does not honour is
+# refused with UNSUPPORTED_INTENT).
 
 [arm3]  # body A: a planar arm with three revolute joints and a gripper pointing down
 kind = "planar_arm"
@@ -19,6 +27,11 @@ safe_pose = [1.4883, -1.9156, -1.1434, 0.0]  # gripper at (0.55, 1.12), closed
 base = [0.0, 0.90]
 links = [0.60, 0.55, 0.15]
 
+[arm3.s0]
+controller = "motion_tracker"
+command = "position"
+dt_s = [0.001, 10.0]
+
 [gantry]  # body B: a Cartesian gantry moving the gripper in x and z
 kind = "gantry"
 action_space = "gantry_xz.cartesian_position.v1"
@@ -32,3 +45,8 @@ home = [0.60, 1.10, 1.0]
 safe_pose = [0.55, 1.20, 0.0]
 
 [gantry.kinematics]
+
+[gantry.s0]
+controller = "motion_tracker"
+command = "position"
+dt_s = [0.001, 10.0]

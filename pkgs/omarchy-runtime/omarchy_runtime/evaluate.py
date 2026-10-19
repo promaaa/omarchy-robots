@@ -68,6 +68,8 @@ def _expected(r: RunResult) -> list[str]:
             "verdict": s["verdict"] and s["verdict"]["kind"],
             "truth": truth,
         }
+        if "attribution" in e:  # scenarios written before contract v2 do not state one
+            actual["attribution"] = s["attribution"] and s["attribution"]["category"]
         for key, value in actual.items():
             if e.get(key) != value:
                 problems.append(f"execution {n}: {key} is {value}, expected {e.get(key)}")
@@ -179,6 +181,8 @@ def scenario_result(r: RunResult, check: TraceCheck) -> Json:
                 "fallback_s": seconds(timing["fallback_ns"]),
                 "hold_s": seconds(timing["hold_ns"]),
                 "fallback_coverage": s["fallback_coverage"],
+                "fidelity": s["fidelity"],
+                "attribution": s["attribution"] and s["attribution"]["category"],
                 "violations": len(r.violations(timing["requested"], timing["ended"])),
                 "trace_complete": check.complete and s["execution_id"] in traced,
                 "wall": s["wall"],
@@ -317,6 +321,7 @@ def report(results: Json) -> str:
             r["verdict"],
             r["truth"],
             r["agreement"],
+            r["attribution"],
             r["duration_s"],
             f"{r['fallback_s']:.2f}/{r['hold_s']:.2f}",
             "-" if r["fallback_coverage"] is None else f"{100 * r['fallback_coverage']:.1f} %",
@@ -335,6 +340,7 @@ def report(results: Json) -> str:
         "verdict",
         "truth",
         "agreement",
+        "attribution",
         "duration s",
         "fallback/hold s",
         "fallback coverage",

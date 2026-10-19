@@ -6,7 +6,9 @@
 - an injected slip detaches the held cup;
 - injected scene changes: a "human" moves an object that is not held by
   some centimetres (`move`), or an object that was absent appears (`appear`),
-  settling on the support below; each is a ground-truth event.
+  settling on the support below; each is a ground-truth event;
+- an injected actuator fault: while a `stuck` window lasts, the gripper does
+  not move, whatever S0 commands.
 
 Cups do not collide with each other or with the arm's links. Only simulator
 components and the evaluation harness read this; the runtime never does.
@@ -54,7 +56,13 @@ class Change:
 
 class World:
     def __init__(
-        self, scene: Scene, positions: dict[str, float], body: BodySpec, slips: Sequence[Trigger] = (), changes: Sequence[Change] = ()
+        self,
+        scene: Scene,
+        positions: dict[str, float],
+        body: BodySpec,
+        slips: Sequence[Trigger] = (),
+        changes: Sequence[Change] = (),
+        stuck: Sequence[Trigger] = (),
     ) -> None:
         self.scene = scene
         self.body = body
@@ -70,6 +78,7 @@ class World:
         self._offset = (0.0, 0.0)
         self._slips = list(slips)
         self._changes = list(changes)
+        self._stuck = list(stuck)
         self.first: dict[str, Ns] = {"start": 0}
         self.events: list[tuple[Ns, str, str]] = []
         self.violations: list[tuple[Ns, str]] = []
@@ -103,8 +112,9 @@ class World:
             self._note(now, c.kind, f"{c.entity} at ({self.cups[c.entity][0]:.3f}, {self.cups[c.entity][1]:.3f})")
 
     def apply(self, now: Ns, command: Sequence[float]) -> None:
-        """S0's command reaches the actuators (ideal tracking). Checks every
-        limit against ground truth and records any violation."""
+        """S0's command reaches the actuators (ideal tracking, but for a stuck
+        gripper). Checks every limit against ground truth and records any
+        violation."""
         if self._changes:
             self._change(now)
         b = self.body
@@ -117,7 +127,10 @@ class World:
         was_open = self.q[self.gripper] >= 0.5
         if "moving" not in self.first and any(abs(v - q) > 1e-6 for v, q in zip(command, self.q, strict=True)):
             self.first["moving"] = now  # the body's first motion: S0 executing a first chunk
+        gripper = self.q[self.gripper]
         self.q = list(command)
+        if any(t.active(self, now) for t in self._stuck):
+            self.q[self.gripper] = gripper
         self._last = now
         x, z = self.ee = self.kin.ee(self.q)
         if not b.reaches(x, z, TOLERANCE):

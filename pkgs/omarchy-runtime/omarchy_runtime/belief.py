@@ -92,10 +92,12 @@ class Estimate:
     observation: str
     t: Ns
     source: str
+    y: float = 0.0
 
     def to_json(self) -> Json:
         return {
             "x": self.x,
+            "y": self.y,
             "z": self.z,
             "confidence": self.confidence,
             "observation": self.observation,
@@ -114,20 +116,58 @@ class Evaluation:
 class WorldState:
     """Belief about the world. Estimates older than `since`, or less confident
     than `min_confidence`, count as no estimate. Positions within `margin` of
-    a boundary are UNKNOWN rather than guessed."""
+    a boundary are UNKNOWN rather than guessed.
 
-    def __init__(self, scene: Scene, *, margin: float, min_confidence: float, grasp_radius: float) -> None:
+    The belief is contradictory when two sources see one entity, both
+    confidently, at most `contradiction_s` apart, more than `contradiction_m`
+    apart: each such pair goes into `contradictions` (the latest estimate,
+    whichever source gave it, stays the one predicates use)."""
+
+    def __init__(
+        self,
+        scene: Scene,
+        *,
+        margin: float,
+        min_confidence: float,
+        grasp_radius: float,
+        contradiction_m: float = 0.05,
+        contradiction_s: float = 0.1,
+    ) -> None:
         self.scene = scene
         self.margin = margin
         self.min_confidence = min_confidence
         self.grasp_radius = grasp_radius
+        self.contradiction_m = contradiction_m
+        self.contradiction_ns = round(contradiction_s * 1e9)
         self.version = 0
         self._estimates: dict[str, Estimate] = {}
+        self._by_source: dict[tuple[str, str], Estimate] = {}
         self._proprio: tuple[Proprioception, str, Ns] | None = None
+        self.contradictions: list[Json] = []
+
+    def _contradicted(self, entity: str, e: Estimate) -> None:
+        if e.confidence < self.min_confidence:
+            return
+        for (name, source), other in self._by_source.items():
+            if name != entity or source == e.source or other.confidence < self.min_confidence:
+                continue
+            distance = math.dist((e.x, e.y, e.z), (other.x, other.y, other.z))
+            if abs(e.t - other.t) <= self.contradiction_ns and distance > self.contradiction_m and len(self.contradictions) < 1000:
+                self.contradictions.append(
+                    {
+                        "t": e.t,
+                        "entity": entity,
+                        "sources": [other.source, e.source],
+                        "observations": [other.observation, e.observation],
+                        "distance_m": distance,
+                    }
+                )
 
     def update(self, observation: Observation) -> None:
         for d in observation.detections:
-            self._estimates[d.entity] = Estimate(d.x, d.z, d.confidence, observation.id, observation.t, observation.source)
+            e = Estimate(d.x, d.z, d.confidence, observation.id, observation.t, observation.source, d.y)
+            self._contradicted(d.entity, e)
+            self._estimates[d.entity] = self._by_source[(d.entity, observation.source)] = e
         if observation.proprio is not None:
             self._proprio = (observation.proprio, observation.id, observation.t)
         self.version += 1

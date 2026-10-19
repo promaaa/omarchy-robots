@@ -7,12 +7,15 @@ data.
 
 Time is an integer number of nanoseconds (`Ns`) on the clock the scheduler
 injects into every step; in R1 it is simulated time. Positions are metres in
-the vertical x-z plane (x to the right, z up).
+the vertical x-z plane (x to the right, z up), or in 3D (y as well) for a body
+that declares a 3D frame.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import enum
+import functools
 import math
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -91,14 +94,22 @@ class Rejection(Name):
     NOT_FINITE = enum.auto()
     EXPIRED = enum.auto()
     STALE = enum.auto()
+    BOUNDS = enum.auto()  # a contact channel's target outside its own bounds, or bounds the wrong way round
+    UNSUPPORTED_INTENT = enum.auto()  # a channel, frame or range the S0 controller does not declare
 
 
 class ChunkRejected(ContractError):
-    """S0 refused an action chunk or a fallback; `code` says why."""
+    """S0 refused an action chunk, an intent chunk or a fallback; `code` says
+    why, `channel` which channel (motion, object, contact) when one did."""
 
-    def __init__(self, code: Rejection, detail: str) -> None:
-        super().__init__(f"{code}: {detail}")
+    def __init__(self, code: Rejection, detail: str, channel: str | None = None) -> None:
+        super().__init__(f"{code}{f' ({channel})' if channel else ''}: {detail}")
         self.code = code
+        self.channel = channel
+        self.detail = detail
+
+    def to_json(self) -> Json:
+        return {"code": self.code, "channel": self.channel, "detail": self.detail}
 
 
 class Truth(Name):
@@ -209,15 +220,18 @@ class Goal:
 
 @dataclass(frozen=True)
 class Detection:
-    """One entity seen by a sensor: its estimated position and the detector's confidence (0 to 1)."""
+    """One entity seen by a sensor: its estimated position and the detector's
+    confidence (0 to 1). `y` is the third axis of a 3D scene; the planar
+    scenes leave it at 0."""
 
     entity: str
     x: float
     z: float
     confidence: float
+    y: float = 0.0
 
     def to_json(self) -> Json:
-        return {"entity": self.entity, "x": self.x, "z": self.z, "confidence": self.confidence}
+        return {"entity": self.entity, "x": self.x, "y": self.y, "z": self.z, "confidence": self.confidence}
 
 
 @dataclass(frozen=True)
@@ -264,9 +278,10 @@ class BodySpec:
     """A robot body as the runtime sees it, from configuration.
 
     `dims` names the action space's dimensions; "gripper" is one of them (0 is
-    closed, 1 is open). `lower`, `upper` and `max_velocity` are per dimension.
-    `workspace` (x0, x1, z0, z1) is where the gripper's reference point may go.
-    `kinematics` holds the kind-specific parameters as plain data.
+    closed, 1 is open) on a body with a gripper. `lower`, `upper` and
+    `max_velocity` are per dimension. `workspace` (x0, x1, z0, z1), or (x0,
+    x1, y0, y1, z0, z1) in 3D, is where the end-effector's reference point
+    may go. `kinematics` holds the kind-specific parameters as plain data.
     """
 
     id: str
@@ -276,15 +291,20 @@ class BodySpec:
     lower: tuple[float, ...]
     upper: tuple[float, ...]
     max_velocity: tuple[float, ...]
-    workspace: tuple[float, float, float, float]
+    workspace: tuple[float, ...]
     features: tuple[str, ...]
     home: tuple[float, ...]
     safe_pose: tuple[float, ...]
     kinematics: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def reaches(self, x: float, z: float, tolerance: float = 0.0) -> bool:
-        x0, x1, z0, z1 = self.workspace
+        x0, x1, z0, z1 = self.workspace[:2] + self.workspace[-2:]
         return x0 - tolerance <= x <= x1 + tolerance and z0 - tolerance <= z <= z1 + tolerance
+
+    def inside(self, point: Sequence[float] | Array, tolerance: float = 0.0) -> bool:
+        """Whether a point, (x, z) or (x, y, z) as the workspace has it, is in the workspace."""
+        w = self.workspace
+        return all(w[2 * i] - tolerance <= v <= w[2 * i + 1] + tolerance for i, v in enumerate(point))
 
     def to_json(self) -> Json:
         return {
@@ -308,8 +328,8 @@ class BodySpec:
             return _floats(_field(value, key, list, "body"), f"body {key}")
 
         workspace = numbers("workspace")
-        if len(workspace) != 4:
-            raise ContractError(f"body workspace has {len(workspace)} values, not 4")
+        if len(workspace) not in (4, 6):
+            raise ContractError(f"body workspace has {len(workspace)} values, not 4 or 6")
         return BodySpec(
             id=_field(value, "id", str, "body"),
             kind=_field(value, "kind", str, "body"),
@@ -318,7 +338,7 @@ class BodySpec:
             lower=numbers("lower"),
             upper=numbers("upper"),
             max_velocity=numbers("max_velocity"),
-            workspace=(workspace[0], workspace[1], workspace[2], workspace[3]),
+            workspace=workspace,
             features=_strings(_field(value, "features", list, "body"), "body features"),
             home=numbers("home"),
             safe_pose=numbers("safe_pose"),
@@ -393,10 +413,452 @@ class ActionChunk:
         return int(self.actions.shape[0])
 
 
+# Intent contract v2: an intent chunk carries optional channels, each validated
+# alone and each a timed trajectory with an ActionChunk's semantics. A v1
+# ActionChunk is an intent with a motion channel only (IntentChunk.from_v1).
+
+
+class ContactMode(Name):
+    FREE = enum.auto()  # no contact wanted: track the motion
+    MAKE = enum.auto()  # establish contact along the normal (a transition)
+    MAINTAIN = enum.auto()  # stay in contact, the force at its target, within bounds
+    BREAK = enum.auto()  # leave contact along the normal (a transition)
+
+
+CARTESIAN = ("x", "y", "z", "qw", "qx", "qy", "qz")  # a pose: position (m) and orientation (unit quaternion, w first)
+WRENCH = ("fx", "fy", "fz", "tx", "ty", "tz")  # N and Nm
+
+
+@dataclass(frozen=True)
+class Timing:
+    """When a channel's rows apply, as for an ActionChunk: row k is the target
+    at t_start + k*dt, rows are interpolated linearly (contact modes step),
+    the last row holds until valid_until, and nothing is executed after it.
+    `observed_at` is when the observation behind the rows was taken,
+    `inference_ns` how long computing them took, `source` who computed them."""
+
+    t_start: Ns
+    dt: Ns
+    valid_until: Ns
+    source: str
+    observed_at: Ns
+    inference_ns: Ns = 0
+
+    def check(self, channel: str) -> None:
+        if self.dt <= 0:
+            raise ChunkRejected(Rejection.SHAPE, f"dt is {self.dt} ns", channel)
+
+    def index(self, horizon: int, now: Ns) -> tuple[int, float]:
+        """The row in force at `now`, and how far towards the next one (0 to 1)."""
+        f = min(max((now - self.t_start) / self.dt, 0.0), horizon - 1.0)
+        return int(f), f - int(f)
+
+    def shifted(self, by: Ns) -> Timing:
+        return Timing(self.t_start + by, self.dt, self.valid_until + by, self.source, self.observed_at + by, self.inference_ns)
+
+
+def sample(rows: Array, timing: Timing, now: Ns) -> Array:
+    """Rows (H x ...) interpolated at `now`, as S0 tracks a chunk."""
+    i, frac = timing.index(rows.shape[0], now)
+    out: Array = rows[i] if i == rows.shape[0] - 1 else rows[i] + (rows[i + 1] - rows[i]) * frac
+    return out
+
+
+def _rows(rows: Any, tail: tuple[int, ...], channel: str, what: str) -> Array:
+    """Rows of shape (H >= 1, *tail), finite and read-only; -1 in `tail` takes any size."""
+    a = np.array(rows, dtype=np.float64)
+    if a.ndim != 1 + len(tail) or a.shape[0] < 1 or any(t not in (-1, n) for t, n in zip(tail, a.shape[1:], strict=True)):
+        raise ChunkRejected(Rejection.SHAPE, f"{what} are {a.shape}, expected (H >= 1, {', '.join(map(str, tail))})", channel)
+    if not np.all(np.isfinite(a)):
+        raise ChunkRejected(Rejection.NOT_FINITE, f"{what} contain NaN or infinity", channel)
+    a.setflags(write=False)
+    return a
+
+
+def _unit(q: Array, channel: str, what: str) -> None:
+    if np.any(np.abs(np.linalg.norm(q, axis=-1) - 1.0) > 1e-3):
+        raise ChunkRejected(Rejection.SHAPE, f"{what} are not unit vectors", channel)
+
+
+@dataclass(frozen=True, eq=False)
+class MotionIntent:
+    """Robot motion: targets over `dims` of `action_space`. With no `frame`,
+    the body's own action space (joint targets, as a v1 chunk); with a frame,
+    Cartesian end-effector poses in it: dims start with CARTESIAN (others,
+    such as a gripper, may follow)."""
+
+    timing: Timing
+    action_space: str
+    dims: tuple[str, ...]
+    rows: Array
+    frame: str | None = None
+
+    @staticmethod
+    def make(timing: Timing, action_space: str, dims: Sequence[str], rows: Any, frame: str | None = None) -> MotionIntent:
+        timing.check("motion")
+        a = _rows(rows, (len(dims),), "motion", "motion rows")
+        if frame is not None:
+            if tuple(dims[: len(CARTESIAN)]) != CARTESIAN:
+                raise ChunkRejected(Rejection.SHAPE, f"Cartesian dims are {list(dims)}, expected {list(CARTESIAN)} first", "motion")
+            _unit(a[:, 3:7], "motion", "orientations")
+        return MotionIntent(timing, action_space, tuple(dims), a, frame)
+
+
+@dataclass(frozen=True, eq=False)
+class ObjectIntent:
+    """The intended motion of one object, in `frame`: target poses (H x 7,
+    CARTESIAN), or sparse 3D points (P x 3, where they are at
+    timing.observed_at) and their future positions (flow, H x P x 3)."""
+
+    timing: Timing
+    entity: str
+    frame: str
+    poses: Array | None = None
+    points: Array | None = None
+    flow: Array | None = None
+
+    @property
+    def form(self) -> str:
+        return "pose" if self.poses is not None else "flow"
+
+    @staticmethod
+    def make(timing: Timing, entity: str, frame: str, *, poses: Any = None, points: Any = None, flow: Any = None) -> ObjectIntent:
+        timing.check("object")
+        if (poses is None) == (points is None or flow is None) or (poses is not None and (points, flow) != (None, None)):
+            raise ChunkRejected(Rejection.SHAPE, "give poses, or points and their flow", "object")
+        if poses is not None:
+            p = _rows(poses, (7,), "object", "object poses")
+            _unit(p[:, 3:], "object", "object orientations")
+            return ObjectIntent(timing, entity, frame, poses=p)
+        pts = _rows(points, (3,), "object", "object points")
+        f = _rows(flow, (len(pts), 3), "object", "object flow")
+        return ObjectIntent(timing, entity, frame, points=pts, flow=f)
+
+
+@dataclass(frozen=True, eq=False)
+class ContactIntent:
+    """Contact for one end-effector `ee`: per row a mode, and a target, a
+    normal force (H x 1, N, pressing positive) or a wrench (H x 6, WRENCH),
+    with `lower` and `upper` bounds (1 or 6 values) that MAKE and MAINTAIN
+    rows must respect; the surface normal (unit, out of the surface) in
+    `frame`; and the stiffness along each Cartesian axis of `frame` (N/m,
+    then Nm/rad), the compliance S0 keeps while it executes the channel."""
+
+    timing: Timing
+    ee: str
+    frame: str
+    normal: tuple[float, float, float]
+    modes: tuple[ContactMode, ...]
+    target: Array
+    lower: tuple[float, ...]
+    upper: tuple[float, ...]
+    stiffness: tuple[float, ...]
+
+    @property
+    def kind(self) -> str:
+        return "normal_force" if self.target.shape[1] == 1 else "wrench"
+
+    def mode(self, now: Ns) -> ContactMode:
+        return self.modes[self.timing.index(len(self.modes), now)[0]]
+
+    def to_json(self) -> Json:
+        t = self.timing
+        return {
+            "timing": {"t_start": t.t_start, "dt": t.dt, "valid_until": t.valid_until, "source": t.source, "observed_at": t.observed_at},
+            "ee": self.ee,
+            "frame": self.frame,
+            "normal": list(self.normal),
+            "modes": list(self.modes),
+            "target": self.target.tolist(),
+            "lower": list(self.lower),
+            "upper": list(self.upper),
+            "stiffness": list(self.stiffness),
+        }
+
+    @staticmethod
+    def from_json(value: Any) -> ContactIntent:
+        t = _field(value, "timing", dict, "contact")
+        start, dt, until, seen = (_field(t, k, int, "contact timing") for k in ("t_start", "dt", "valid_until", "observed_at"))
+        timing = Timing(start, dt, until, _field(t, "source", str, "contact timing"), seen)
+        return ContactIntent.make(
+            timing,
+            _field(value, "ee", str, "contact"),
+            _field(value, "frame", str, "contact"),
+            _floats(_field(value, "normal", list, "contact"), "contact normal"),
+            _strings(_field(value, "modes", list, "contact"), "contact modes"),
+            _field(value, "target", list, "contact"),
+            _floats(_field(value, "lower", list, "contact"), "contact lower"),
+            _floats(_field(value, "upper", list, "contact"), "contact upper"),
+            _floats(_field(value, "stiffness", list, "contact"), "contact stiffness"),
+        )
+
+    @staticmethod
+    def make(
+        timing: Timing,
+        ee: str,
+        frame: str,
+        normal: Sequence[float],
+        modes: Sequence[ContactMode | str],
+        target: Any,
+        lower: Sequence[float],
+        upper: Sequence[float],
+        stiffness: Sequence[float],
+    ) -> ContactIntent:
+        c = "contact"
+        timing.check(c)
+        try:
+            ms = tuple(ContactMode(m) for m in modes)
+        except ValueError as e:
+            raise ChunkRejected(Rejection.SHAPE, str(e), c) from e
+        t = _rows(target, (-1,), c, "contact targets")
+        width = t.shape[1]
+        if width not in (1, len(WRENCH)) or len(ms) != t.shape[0]:
+            raise ChunkRejected(Rejection.SHAPE, f"{len(ms)} modes and targets {t.shape}: expected H modes and (H, 1 or 6)", c)
+        n, lo, hi, k = (
+            _rows([v], (want,), c, what)[0]
+            for v, want, what in (
+                (normal, 3, "normal"),
+                (lower, width, "lower bounds"),
+                (upper, width, "upper bounds"),
+                (stiffness, 6, "stiffness"),
+            )
+        )
+        _unit(n, c, "normal")
+        if np.any(lo > hi) or (width == 1 and lo[0] < 0) or np.any(k < 0):
+            raise ChunkRejected(Rejection.BOUNDS, f"bounds [{list(lo)}, {list(hi)}], stiffness {list(k)}", c)
+        pressing = np.array([m in (ContactMode.MAKE, ContactMode.MAINTAIN) for m in ms])
+        if np.any((t[pressing] < lo) | (t[pressing] > hi)):
+            raise ChunkRejected(Rejection.BOUNDS, f"a MAKE or MAINTAIN target outside [{list(lo)}, {list(hi)}]", c)
+        lows, highs, ks = (tuple(float(v) for v in a) for a in (lo, hi, k))
+        return ContactIntent(timing, ee, frame, (float(n[0]), float(n[1]), float(n[2])), ms, t, lows, highs, ks)
+
+
+CHANNELS = ("motion", "object", "contact")
+
+
+@dataclass(frozen=True, eq=False)
+class IntentChunk:
+    """What S1 sends S0 in contract v2: optional channels, at least one. The
+    chunk replaces the active one and is stale under the same rules as an
+    ActionChunk (seq per source); it is executed only while every channel it
+    carries is valid (its valid_until is the earliest). Without a motion
+    channel S0 keeps the pose it had when the chunk took over."""
+
+    seq: int
+    source: str
+    motion: MotionIntent | None = None
+    object: ObjectIntent | None = None
+    contact: tuple[ContactIntent, ...] = ()
+
+    @staticmethod
+    def make(
+        seq: int, source: str, motion: MotionIntent | None = None, object: ObjectIntent | None = None, contact: Sequence[ContactIntent] = ()
+    ) -> IntentChunk:
+        chunk = IntentChunk(seq, source, motion, object, tuple(contact))
+        if not chunk.channels:
+            raise ChunkRejected(Rejection.SHAPE, "an intent chunk carries at least one channel")
+        if len({c.ee for c in chunk.contact}) != len(chunk.contact):
+            raise ChunkRejected(Rejection.SHAPE, "two contact channels for one end-effector", "contact")
+        return chunk
+
+    @staticmethod
+    def from_v1(chunk: ActionChunk) -> IntentChunk:
+        """A v1 chunk as a motion-only intent, timing and rows unchanged."""
+        timing = Timing(chunk.t_start, chunk.dt, chunk.valid_until, chunk.source, chunk.observed_at, chunk.inference_ns)
+        return IntentChunk(chunk.seq, chunk.source, MotionIntent(timing, chunk.action_space, chunk.dims, chunk.actions))
+
+    @functools.cached_property
+    def channels(self) -> tuple[str, ...]:
+        return tuple(c for c, present in zip(CHANNELS, (self.motion, self.object, self.contact), strict=True) if present)
+
+    @functools.cached_property
+    def timings(self) -> list[Timing]:
+        return [c.timing for c in (self.motion, self.object, *self.contact) if c is not None]
+
+    @functools.cached_property
+    def valid_until(self) -> Ns:
+        return min(t.valid_until for t in self.timings)
+
+    @functools.cached_property
+    def t_start(self) -> Ns:
+        return min(t.t_start for t in self.timings)
+
+    @functools.cached_property
+    def observed_at(self) -> Ns:
+        return min(t.observed_at for t in self.timings)
+
+    @functools.cached_property
+    def inference_ns(self) -> Ns:
+        return max(t.inference_ns for t in self.timings)
+
+    @property
+    def lead(self) -> tuple[Timing, int]:
+        """The first channel's timing and horizon (the motion's when there is one), for metadata."""
+        c = next(c for c in (self.motion, self.object, *self.contact) if c is not None)
+        rows = (
+            c.rows
+            if isinstance(c, MotionIntent)
+            else c.target
+            if isinstance(c, ContactIntent)
+            else c.poses
+            if c.poses is not None
+            else c.flow
+        )
+        assert rows is not None
+        return c.timing, int(rows.shape[0])
+
+
+# What an S0 controller declares it honours. An intent outside it is refused
+# (UNSUPPORTED_INTENT), unless its configuration names a degraded mode that
+# covers it: then S0 executes the degraded intent and records the degradation.
+DEGRADED_MODES: Mapping[str, str] = {
+    "drop_object": "the object channel is dropped: this controller does not honour it",
+    "drop_contact": "the contact channel is dropped: the motion runs without it",
+    "clamp_force": "force targets and bounds above the controller's maximum are clamped to it",
+    "clamp_stiffness": "stiffness outside the controller's ranges is clamped into them",
+}
+COMMANDS = ("position", "velocity", "torque")
+
+
+@dataclass(frozen=True)
+class ContactCapability:
+    """The contact a controller honours: end-effectors, frames, modes, the
+    largest force (N), the stiffness range of each Cartesian axis, and
+    whether it takes 6D wrench targets besides normal forces."""
+
+    ees: tuple[str, ...]
+    frames: tuple[str, ...]
+    max_force: float
+    stiffness: tuple[tuple[float, float], ...]
+    wrench: bool = False
+    modes: tuple[ContactMode, ...] = tuple(ContactMode)
+
+    def to_json(self) -> Json:
+        return {
+            "ees": list(self.ees),
+            "frames": list(self.frames),
+            "max_force": self.max_force,
+            "stiffness": [list(r) for r in self.stiffness],
+            "wrench": self.wrench,
+            "modes": list(self.modes),
+        }
+
+
+@dataclass(frozen=True)
+class ControllerCapability:
+    """What an S0 controller honours: the command it returns, its rate, the
+    row spacing it accepts, the motion action spaces and Cartesian frames
+    (which also frame object intents), object intent forms ("pose",
+    "flow"), contact, the sensor streams it consumes (`scene`), and the
+    degraded modes (DEGRADED_MODES) its configuration allows."""
+
+    id: str
+    version: str
+    command: str
+    rate_hz: int
+    dt: tuple[Ns, Ns]
+    motion: tuple[str, ...]
+    frames: tuple[str, ...] = ()
+    object: tuple[str, ...] = ()
+    contact: ContactCapability | None = None
+    scene: tuple[str, ...] = ()
+    degraded: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        unknown = set(self.degraded) - set(DEGRADED_MODES)
+        if self.command not in COMMANDS or unknown or not 0 < self.dt[0] <= self.dt[1]:
+            raise ConfigError(f"controller {self.id}: command {self.command!r}, degraded modes {sorted(unknown)}, dt {self.dt}")
+
+    def to_json(self) -> Json:
+        return {
+            "id": self.id,
+            "version": self.version,
+            "command": self.command,
+            "rate_hz": self.rate_hz,
+            "dt": list(self.dt),
+            "motion": list(self.motion),
+            "frames": list(self.frames),
+            "object": list(self.object),
+            "contact": self.contact.to_json() if self.contact else None,
+            "scene": list(self.scene),
+            "degraded": list(self.degraded),
+        }
+
+    def _refuse(self, channel: str, detail: str) -> ChunkRejected:
+        return ChunkRejected(Rejection.UNSUPPORTED_INTENT, f"{detail} (controller {self.id}@{self.version})", channel)
+
+    def admit(self, intent: IntentChunk) -> tuple[IntentChunk, tuple[str, ...]]:
+        """The intent this controller executes, and the degradations applied
+        (each "<mode>: <detail>"); ChunkRejected UNSUPPORTED_INTENT when a
+        channel, frame or range is outside the declaration and no allowed
+        degraded mode covers it. Nothing is ever dropped silently."""
+        degraded: list[str] = []
+        named = [("motion", intent.motion), ("object", intent.object), *(("contact", c) for c in intent.contact)]
+        for name, channel in named:
+            if channel is not None and not self.dt[0] <= channel.timing.dt <= self.dt[1]:
+                raise self._refuse(name, f"rows {channel.timing.dt} ns apart, accepted {self.dt[0]} to {self.dt[1]} ns")
+        m = intent.motion
+        if m is not None and (m.action_space not in self.motion or (m.frame is not None and m.frame not in self.frames)):
+            raise self._refuse("motion", f"motion in {m.action_space}" + (f", frame {m.frame}" if m.frame else ""))
+        obj = intent.object
+        if obj is not None and (obj.form not in self.object or obj.frame not in self.frames):
+            if "drop_object" not in self.degraded:
+                raise self._refuse("object", f"object intent as {obj.form} in frame {obj.frame}")
+            degraded.append(f"drop_object: {obj.form} of {obj.entity} in {obj.frame}")
+            obj = None
+        contact = list(intent.contact)
+        cap = self.contact
+        if contact and cap is None:
+            if "drop_contact" not in self.degraded:
+                raise self._refuse("contact", "contact intent")
+            degraded.append(f"drop_contact: {', '.join(c.ee for c in contact)}")
+            contact = []
+        for n, given in enumerate(contact):
+            assert cap is not None
+            c = given
+            if c.ee not in cap.ees or c.frame not in cap.frames or (c.kind == "wrench" and not cap.wrench) or set(c.modes) - set(cap.modes):
+                raise self._refuse("contact", f"{c.kind} for {c.ee} in {c.frame}, modes {sorted(set(c.modes))}")
+            force = np.abs(c.target[:, :3]).max() if c.kind == "wrench" else c.target.max()
+            limit = max(abs(v) for v in (c.upper[:3] if c.kind == "wrench" else c.upper))
+            if max(force, limit) > cap.max_force:
+                if "clamp_force" not in self.degraded:
+                    raise self._refuse("contact", f"force up to {max(force, limit):.1f} N, at most {cap.max_force:.1f} N")
+                degraded.append(f"clamp_force: {c.ee} to {cap.max_force:.1f} N")
+                c = _clamp_force(c, cap.max_force)
+            k = np.array(c.stiffness)
+            lo, hi = np.array([r[0] for r in cap.stiffness]), np.array([r[1] for r in cap.stiffness])
+            if np.any((k < lo) | (k > hi)):
+                if "clamp_stiffness" not in self.degraded:
+                    raise self._refuse("contact", f"stiffness {list(k)} outside {[list(r) for r in cap.stiffness]}")
+                degraded.append(f"clamp_stiffness: {c.ee}")
+                c = dataclasses.replace(c, stiffness=tuple(float(v) for v in np.clip(k, lo, hi)))
+            contact[n] = c
+        if not degraded:
+            return intent, ()
+        if m is None and obj is None and not contact:
+            raise self._refuse(intent.channels[0], "nothing left once degraded: " + "; ".join(degraded))
+        return IntentChunk(intent.seq, intent.source, m, obj, tuple(contact)), tuple(degraded)
+
+
+def _clamp_force(c: ContactIntent, most: float) -> ContactIntent:
+    if c.kind == "normal_force":
+        target, lower, upper = np.minimum(c.target, most), np.minimum(c.lower, most), np.minimum(c.upper, most)
+    else:
+        f = slice(0, 3)
+        target = c.target.copy()
+        target[:, f] = np.clip(target[:, f], -most, most)
+        lower, upper = np.array(c.lower), np.array(c.upper)
+        lower[f], upper[f] = np.clip(lower[f], -most, most), np.clip(upper[f], -most, most)
+    target.setflags(write=False)
+    return dataclasses.replace(c, target=target, lower=tuple(float(v) for v in lower), upper=tuple(float(v) for v in upper))
+
+
 @dataclass(frozen=True, eq=False)
 class FallbackSpec:
     """A short trajectory S0 runs instead of HOLD when its chunk expires, or
-    when the execution fails (the runtime engages it then).
+    when the execution fails (the runtime engages it then), expressed in the
+    intent language: a motion, and optionally a contact channel ("become
+    compliant along z", "leave contact upwards").
 
     S0 holds two: the base fallback (a capability's default, computed by the
     runtime on the robot side) and S2's (predicted with the goal, or refined
@@ -407,7 +869,10 @@ class FallbackSpec:
     engages the fallback: the trajectory starts from wherever S0 is at te. A
     dimension marked in `relative` takes its rows as offsets from S0's
     position at te ("hold where you are" is a row of zeros); the others take
-    them as targets. S0 engages a fallback only while valid_from <= now <=
+    them as targets. With a `frame` the rows are Cartesian poses (CARTESIAN
+    first): relative positions add, a relative orientation composes with the
+    one at te (the identity quaternion keeps it). `contact`, if any, has its
+    timing relative to te. S0 engages a fallback only while valid_from <= now <=
     valid_until, runs its rows, then holds the last row, still in FALLBACK,
     until te + `lasts`: then the fallback has expired, S0 drops it and runs the
     next one (S2's expires into the base) or HOLD. `lasts` is at least the
@@ -427,6 +892,8 @@ class FallbackSpec:
     source: str
     lasts: Ns
     relative: tuple[bool, ...]
+    frame: str | None = None
+    contact: ContactIntent | None = None
 
     @staticmethod
     def make(
@@ -439,6 +906,8 @@ class FallbackSpec:
         source: str,
         lasts: Ns | None = None,
         relative: Sequence[bool] | None = None,
+        frame: str | None = None,
+        contact: ContactIntent | None = None,
     ) -> FallbackSpec:
         if dt <= 0 or valid_until < valid_from:
             raise ChunkRejected(Rejection.SHAPE, f"fallback dt {dt} ns, window [{valid_from}, {valid_until}]")
@@ -449,36 +918,53 @@ class FallbackSpec:
         rel = tuple(bool(r) for r in relative) if relative is not None else (False,) * len(dims)
         if len(rel) != len(dims):
             raise ChunkRejected(Rejection.SHAPE, f"fallback relative has {len(rel)} entries for {len(dims)} dims")
+        if frame is not None:
+            MotionIntent.make(Timing(0, dt, 0, source, 0), action_space, dims, actions, frame)  # the Cartesian checks
         return FallbackSpec(
-            action_space, tuple(dims), dt, actions, valid_from, valid_until, source, duration if lasts is None else lasts, rel
+            action_space,
+            tuple(dims),
+            dt,
+            actions,
+            valid_from,
+            valid_until,
+            source,
+            duration if lasts is None else lasts,
+            rel,
+            frame,
+            contact,
         )
 
     def shifted(self, by: Ns) -> FallbackSpec:
         """The same fallback with its window moved by `by` (a window relative to a start, made absolute)."""
-        return FallbackSpec(
-            self.action_space,
-            self.dims,
-            self.dt,
-            self.actions,
-            self.valid_from + by,
-            self.valid_until + by,
-            self.source,
-            self.lasts,
-            self.relative,
-        )
+        return dataclasses.replace(self, valid_from=self.valid_from + by, valid_until=self.valid_until + by)
 
     def same_motion(self, other: FallbackSpec) -> bool:
-        """The same rows, timing, frames and duration (the window and source aside)."""
+        """The same rows, timing, frames, contact and duration (the window and source aside)."""
         return (
-            (self.action_space, self.dims, self.dt, self.lasts, self.relative)
-            == (other.action_space, other.dims, other.dt, other.lasts, other.relative)
+            (self.action_space, self.dims, self.dt, self.lasts, self.relative, self.frame)
+            == (other.action_space, other.dims, other.dt, other.lasts, other.relative, other.frame)
             and self.actions.shape == other.actions.shape
             and bool(np.all(self.actions == other.actions))
+            and (self.contact.to_json() if self.contact else None) == (other.contact.to_json() if other.contact else None)
         )
 
     @property
     def duration(self) -> Ns:
         return int(self.actions.shape[0]) * self.dt
+
+    def engage(self, te: Ns, p0: Array) -> IntentChunk:
+        """The fallback as the intent S0 executes from tick `te`, where S0's
+        position (a pose, with a frame) was `p0`: row 0 is p0 at te, then the
+        targets, the last held until te + lasts."""
+        rel = np.array(self.relative)
+        targets = np.where(rel, p0 + self.actions, self.actions)
+        if self.frame is not None and rel[3:7].all():
+            targets[:, 3:7] = [quat_mul(q, p0[3:7]) for q in self.actions[:, 3:7]]
+        rows = np.vstack([p0, targets])
+        rows.setflags(write=False)
+        timing = Timing(te, self.dt, te + self.lasts, self.source, te)
+        contact = (dataclasses.replace(self.contact, timing=self.contact.timing.shifted(te)),) if self.contact else ()
+        return IntentChunk(0, self.source, MotionIntent(timing, self.action_space, self.dims, rows, self.frame), None, contact)
 
     def to_json(self) -> Json:
         return {
@@ -491,11 +977,14 @@ class FallbackSpec:
             "source": self.source,
             "lasts": self.lasts,
             "relative": list(self.relative),
+            "frame": self.frame,
+            "contact": self.contact.to_json() if self.contact else None,
         }
 
     @staticmethod
     def from_json(value: Any) -> FallbackSpec:
         try:
+            contact = value.get("contact")
             return FallbackSpec.make(
                 str(value["action_space"]),
                 _strings(value["dims"], "fallback dims"),
@@ -506,14 +995,45 @@ class FallbackSpec:
                 str(value["source"]),
                 int(value["lasts"]),
                 [bool(r) for r in value["relative"]],
+                None if value.get("frame") is None else str(value["frame"]),
+                None if contact is None else ContactIntent.from_json(contact),
             )
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ContractError(f"not a fallback: {e}") from e
+
+
+def quat_matrix(q: Array) -> Array:
+    """The rotation matrix of a unit quaternion, w first."""
+    w, x, y, z = q
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
+
+
+def quat_mul(a: Array, b: Array) -> Array:
+    """The Hamilton product a b of two quaternions, w first."""
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
 
 
 @dataclass(frozen=True)
 class ChunkMeta:
-    """An action chunk without its actions: what the runtime may know and log."""
+    """A chunk without its rows: what the runtime may know and log. `dt` and
+    `horizon` are its first channel's (the motion's when it has one);
+    `channels` the channels it carried, `degraded` the degradations S0
+    applied to it (ControllerCapability.admit)."""
 
     seq: int
     source: str
@@ -524,6 +1044,25 @@ class ChunkMeta:
     received: Ns
     observed_at: Ns = 0
     inference_ns: Ns = 0
+    channels: tuple[str, ...] = ("motion",)
+    degraded: tuple[str, ...] = ()
+
+    @staticmethod
+    def of(chunk: IntentChunk, received: Ns, degraded: tuple[str, ...] = ()) -> ChunkMeta:
+        timing, horizon = chunk.lead
+        return ChunkMeta(
+            chunk.seq,
+            chunk.source,
+            chunk.t_start,
+            timing.dt,
+            horizon,
+            chunk.valid_until,
+            received,
+            chunk.observed_at,
+            chunk.inference_ns,
+            chunk.channels,
+            degraded,
+        )
 
     def to_json(self) -> Json:
         return {
@@ -536,6 +1075,8 @@ class ChunkMeta:
             "received": self.received,
             "observed_at": self.observed_at,
             "inference_ns": self.inference_ns,
+            "channels": list(self.channels),
+            "degraded": list(self.degraded),
         }
 
 
@@ -551,6 +1092,67 @@ class S0History:
     desired: Array
 
 
+@dataclass(frozen=True, eq=False)
+class RobotState:
+    """What the body reports at one tick, as plain arrays: `position` and
+    `velocity` over its dims, measured joint `torque`s, the end-effector's
+    pose `ee` (CARTESIAN, in the body's base frame; (x, z) on a planar body)
+    and `twist` (6), the external `wrench` on the end-effector (6, WRENCH,
+    applied by the environment, base frame: pressing down on a table gives
+    a positive fz), and the model terms a torque controller needs: the
+    end-effector `jacobian` (6 x n) and `coriolis` torques. The robot (or
+    its model library) computes them; a field it does not have is None."""
+
+    t: Ns
+    position: Array
+    velocity: Array | None = None
+    torque: Array | None = None
+    ee: Array | None = None
+    twist: Array | None = None
+    wrench: Array | None = None
+    jacobian: Array | None = None
+    coriolis: Array | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class Command:
+    """A controller's output for tick `t`: one value per joint, of the `kind`
+    its capability declares (position, velocity or torque). The guard checks
+    it before anything reaches the actuators."""
+
+    t: Ns
+    kind: str
+    values: Array
+
+
+class RobotIO(Protocol):
+    """The body as S0 reaches it: its state at a tick, the scene inputs (sensor
+    streams on the data plane, by name, as the controller's capability
+    declares them), and the actuators, which take the guarded command. A
+    simulator, a vendor library (libfranka) or a CAN bus behind an adapter."""
+
+    def state(self, now: Ns) -> RobotState: ...
+
+    def scene(self, now: Ns) -> Mapping[str, Array]: ...
+
+    def apply(self, now: Ns, command: Array) -> None: ...
+
+
+class S0Controller(Protocol):
+    """The S0 controller (the guard's other half): at each tick it gets the
+    active intent (S1's chunk, or the fallback the guard engaged), the robot
+    state and the scene inputs its capability declares, and returns a
+    command. It must not block, read ground truth or touch the actuators:
+    the guard sits between its output and them, whatever it returns. A
+    classical controller today, a learned one later: the contract is the
+    same."""
+
+    @property
+    def capability(self) -> ControllerCapability: ...
+
+    def command(self, intent: IntentChunk, state: RobotState, scene: Mapping[str, Array], now: Ns) -> Command: ...
+
+
 @dataclass(frozen=True)
 class S0Counters:
     """Cumulative since S0 started. A starvation event is S0 leaving TRACKING
@@ -558,7 +1160,22 @@ class S0Counters:
     came longer than S0's late threshold after the one before; `max_interval_ns`
     is the longest real interval between two ticks, and `max_step` the largest
     step S0 commanded, as a fraction of its bound (velocity limit times the
-    nominal tick period, per dimension): never above 1."""
+    nominal tick period, per dimension): never above 1.
+
+    The guard: `limit_clamps` counts ticks whose command it clamped (a limit,
+    the bounded step, the workspace), `guard_replacements` ticks whose command
+    it replaced by its own safe one (not finite, stale, a breach no clamp
+    fixes); `degraded_chunks` chunks executed in a degraded mode.
+
+    Fidelity, what S0 achieved against the intent it executed from S1 (never
+    a fallback), as sums so that an execution's share is a difference:
+    `motion_error_sum` over `motion_ticks` (the tracking error in the motion's
+    units, rad or m; along a contact normal in MAINTAIN, force rules instead
+    of position); `contact_mode_ticks` of `contact_ticks` (ticks of a steady
+    mode, FREE or MAINTAIN, in the mode requested: in contact for MAINTAIN,
+    out of it for FREE); `force_in_bounds_ticks` of `force_ticks` (MAINTAIN
+    ticks); `object_error_sum` over `object_ticks` (m). The maxima
+    (`max_*`, `force_peak`) run since S0 started."""
 
     ticks: int = 0
     starvation_events: int = 0
@@ -572,39 +1189,28 @@ class S0Counters:
     max_step: float = 0.0
     fallback_expiries: int = 0  # fallbacks whose time (lasts) ran out: S0 dropped them for the next one or HOLD
     fallback_cover_ns: Ns = 0  # time a valid fallback (S2's or the base) was installed, tick by tick
+    guard_replacements: int = 0
+    degraded_chunks: int = 0
+    motion_ticks: int = 0
+    motion_error_sum: float = 0.0
+    contact_ticks: int = 0
+    contact_mode_ticks: int = 0
+    force_ticks: int = 0
+    force_in_bounds_ticks: int = 0
+    force_peak: float = 0.0
+    object_ticks: int = 0
+    object_error_sum: float = 0.0
+
+    RUNNING = frozenset({"max_tracking_error", "max_interval_ns", "max_step", "force_peak"})
 
     def since(self, start: S0Counters) -> S0Counters:
         """Counts accumulated after `start` (the maxima are running maxima)."""
         return S0Counters(
-            self.ticks - start.ticks,
-            self.starvation_events - start.starvation_events,
-            self.limit_clamps - start.limit_clamps,
-            self.rejected_chunks - start.rejected_chunks,
-            self.fallback_ns - start.fallback_ns,
-            self.hold_ns - start.hold_ns,
-            self.max_tracking_error,
-            self.late_ticks - start.late_ticks,
-            self.max_interval_ns,
-            self.max_step,
-            self.fallback_expiries - start.fallback_expiries,
-            self.fallback_cover_ns - start.fallback_cover_ns,
+            **{f.name: getattr(self, f.name) - (0 if f.name in self.RUNNING else getattr(start, f.name)) for f in dataclasses.fields(self)}
         )
 
     def to_json(self) -> Json:
-        return {
-            "ticks": self.ticks,
-            "starvation_events": self.starvation_events,
-            "limit_clamps": self.limit_clamps,
-            "rejected_chunks": self.rejected_chunks,
-            "fallback_ns": self.fallback_ns,
-            "hold_ns": self.hold_ns,
-            "max_tracking_error": self.max_tracking_error,
-            "late_ticks": self.late_ticks,
-            "max_interval_ns": self.max_interval_ns,
-            "max_step": self.max_step,
-            "fallback_expiries": self.fallback_expiries,
-            "fallback_cover_ns": self.fallback_cover_ns,
-        }
+        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
 
 
 @dataclass(frozen=True)
@@ -613,7 +1219,8 @@ class S0Status:
     `active_seq` is the chunk being tracked (None unless TRACKING); `last_chunk`
     the last one S0 accepted. `fallback_installed` says a valid fallback is
     installed (S2's or the base); `fallback_source` names the one S0 would run
-    now, or the one it runs."""
+    now, or the one it runs. `rejection` is the last chunk S0 refused: its
+    seq, source, when, and the structured error (ChunkRejected.to_json)."""
 
     t: Ns
     mode: S0Mode
@@ -623,6 +1230,7 @@ class S0Status:
     fallback_installed: bool
     counters: S0Counters
     fallback_source: str | None = None
+    rejection: Json | None = field(default=None, hash=False)
 
     def to_json(self) -> Json:
         return {
@@ -633,6 +1241,7 @@ class S0Status:
             "last_chunk": self.last_chunk.to_json() if self.last_chunk else None,
             "fallback_installed": self.fallback_installed,
             "fallback_source": self.fallback_source,
+            "rejection": self.rejection,
             "counters": self.counters.to_json(),
         }
 
@@ -1011,8 +1620,11 @@ class S0(Protocol):
     (S0Counters).
     """
 
-    def submit_chunk(self, chunk: ActionChunk, now: Ns) -> None:
-        """Non-blocking. Raises ChunkRejected for another action space, an expired chunk or a stale one."""
+    def submit_chunk(self, chunk: ActionChunk | IntentChunk, now: Ns) -> None:
+        """Non-blocking. A v1 chunk is a motion-only intent. Raises
+        ChunkRejected for an intent the controller does not honour
+        (UNSUPPORTED_INTENT, unless a degraded mode its configuration allows
+        covers it), an expired chunk or a stale one."""
 
     def install_fallback(self, spec: FallbackSpec, now: Ns, base: bool = False) -> None:
         """Replace S2's fallback, or with `base` the base fallback, in one step:

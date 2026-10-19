@@ -101,6 +101,10 @@ def cmd_show(args: argparse.Namespace) -> int:
     print(f"filter  {named['filter']}  recovery {named['recovery']}  S2 latency {named['s2_latency']}  verifiers {verifiers}")
     defaults = ", ".join(f"{c} {v['id']}@{v['version']}" for c, v in ext.get("default_fallbacks", {}).items())
     print(f"default fallbacks  {defaults or 'none'}")
+    c = header["s0"]
+    honours = ["motion"] + (["object"] if c["object"] else []) + (["contact"] if c["contact"] else [])
+    degraded = ", ".join(c["degraded"]) or "none"
+    print(f"s0      {c['id']}@{c['version']} ({c['command']}), honours {', '.join(honours)}; degraded modes {degraded}")
     truths = {}
     if (run / "results.json").exists():
         truths = {r["execution"]: r["truth"] for r in json.loads((run / "results.json").read_text())["executions"]}
@@ -120,6 +124,18 @@ def cmd_show(args: argparse.Namespace) -> int:
             f"{seconds(t['duration_ns']):.2f} s simulated, fallback {seconds(t['fallback_ns']):.2f} s, hold {seconds(t['hold_ns']):.2f} s"
         )
         print(f"  {times}, implementation {s['implementation'] or '-'}")
+        f = s["fidelity"]
+        if f is not None:
+            shown = {
+                "tracking": f["tracking_error"],
+                "contact mode": f["contact_mode_share"],
+                "force": f["force_share"],
+                "object": f["object_error"],
+            }
+            measured = ", ".join(f"{k} {v:.3f}" for k, v in shown.items() if v is not None)
+            print(f"  fidelity {'faithful' if f['faithful'] else 'not faithful'}: {measured or 'nothing measured'}")
+        if s["attribution"] is not None:
+            print(f"  attribution {s['attribution']['category']}: {s['attribution']['reason']}")
     counts = Counter(e["type"] for e in events)
     print("\nevents  " + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
     return 0

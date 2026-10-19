@@ -10,14 +10,15 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from omarchy_runtime.attribution import FidelityLimits
 from omarchy_runtime.belief import ObjectSpec, Region, Scene, Surface
-from omarchy_runtime.contracts import BodySpec, ConfigError, Goal, Json, ns
+from omarchy_runtime.contracts import BodySpec, ConfigError, ContactCapability, ControllerCapability, Goal, Json, ns
 from omarchy_runtime.runtime import Binding, Capability, Params
 
 HERE = Path(__file__).parent
 CONFIG = HERE / "config"
 SCENARIOS = HERE / "scenarios"
-OVERRIDABLE = ("runtime", "verification", "extensions", "s2_link", "s1_host")  # scenario tables merged into runtime.toml
+OVERRIDABLE = ("runtime", "verification", "extensions", "s2_link", "s1_host", "fidelity")  # scenario tables merged into runtime.toml
 
 
 def load(path: Path) -> Json:
@@ -112,10 +113,13 @@ def scene(cfg: Json) -> Scene:
 def body(cfg: Json) -> BodySpec:
     b, where = cfg["body"], f"bodies.{cfg['body']['id']}"
     dims = strings(b, "dims", where)
-    if "gripper" not in dims:
-        raise ConfigError(f"{where}: dims must include gripper")
+    features = strings(b, "features", where)
+    if ("gripper" in features) != ("gripper" in dims):
+        raise ConfigError(f"{where}: a body with the gripper feature has a gripper dimension, and only then")
     n = len(dims)
-    ws = floats(b, "workspace", where, 4)
+    ws = floats(b, "workspace", where)
+    if len(ws) not in (4, 6):
+        raise ConfigError(f"{where}.workspace: 4 values (x0, x1, z0, z1) or 6 (x0, x1, y0, y1, z0, z1)")
     return BodySpec(
         id=b["id"],
         kind=get(b, "kind", str, where),
@@ -124,12 +128,51 @@ def body(cfg: Json) -> BodySpec:
         lower=floats(b, "lower", where, n),
         upper=floats(b, "upper", where, n),
         max_velocity=floats(b, "max_velocity", where, n),
-        workspace=(ws[0], ws[1], ws[2], ws[3]),
-        features=strings(b, "features", where),
+        workspace=ws,
+        features=features,
         home=floats(b, "home", where, n),
         safe_pose=floats(b, "safe_pose", where, n),
         kinematics=get(b, "kinematics", dict, where),
     )
+
+
+def controller(cfg: Json) -> tuple[str, ControllerCapability]:
+    """The body's S0 controller id and its declaration, from [<body>.s0]."""
+    b = cfg["body"]
+    where = f"bodies.{b['id']}.s0"
+    t = get(b, "s0", dict, f"bodies.{b['id']}")
+    known = {"controller", "command", "dt_s", "motion", "frames", "object", "contact", "scene", "degraded"}
+    if set(t) - known:
+        raise ConfigError(f"{where}: unknown {', '.join(sorted(set(t) - known))}")
+    lists = {k: strings(t, k, where) if k in t else () for k in ("frames", "object", "scene", "degraded")}
+    contact = None
+    if "contact" in t:
+        c, cw = t["contact"], f"{where}.contact"
+        ranges = get(c, "stiffness", list, cw)
+        if len(ranges) != 6 or not all(isinstance(r, list) and len(r) == 2 for r in ranges):
+            raise ConfigError(f"{cw}.stiffness: six [min, max] ranges")
+        contact = ContactCapability(
+            strings(c, "ees", cw),
+            strings(c, "frames", cw),
+            get(c, "max_force_n", float, cw),
+            tuple((float(lo), float(hi)) for lo, hi in ranges),
+            bool(c.get("wrench", False)),
+        )
+    dt = floats(t, "dt_s", where, 2)
+    cap = ControllerCapability(
+        get(t, "controller", str, where),
+        "1",
+        get(t, "command", str, where),
+        get(cfg["world"]["rates_hz"], "s0", int, "world.toml rates_hz"),
+        (ns(dt[0]), ns(dt[1])),
+        strings(t, "motion", where) if "motion" in t else (get(b, "action_space", str, f"bodies.{b['id']}"),),
+        lists["frames"],
+        lists["object"],
+        contact,
+        lists["scene"],
+        lists["degraded"],
+    )
+    return cap.id, cap
 
 
 def capabilities(cfg: Json) -> list[Capability]:
@@ -169,6 +212,7 @@ def params(cfg: Json) -> Params:
     lost, long = ns(get(link, "lost_s", float, "s2_link")), ns(get(link, "long_s", float, "s2_link"))
     if not ns(get(link, "heartbeat_s", float, "s2_link")) < lost <= long:
         raise ConfigError("s2_link: expected heartbeat_s < lost_s <= long_s")
+    f = cfg["runtime"]["fidelity"]
     return Params(
         deadline=ns(get(r, "deadline_s", float, "runtime")),
         s1_stall_timeout=ns(get(r, "s1_stall_timeout_s", float, "runtime")),
@@ -177,6 +221,7 @@ def params(cfg: Json) -> Params:
         verify_budget=ns(get(v, "budget_s", float, "verification")),
         s2_lost=lost,
         s2_long=long,
+        fidelity=FidelityLimits(*(get(f, k, float, "fidelity") for k in ("tracking", "contact_mode", "force", "object_m"))),
     )
 
 

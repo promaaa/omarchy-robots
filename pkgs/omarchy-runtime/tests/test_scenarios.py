@@ -82,7 +82,19 @@ class TestEveryScenario(unittest.TestCase):
                     if e["type"] == "chunk":
                         self.assertEqual(
                             set(e["payload"]),
-                            {"seq", "source", "t_start", "dt", "horizon", "valid_until", "received", "observed_at", "inference_ns"},
+                            {
+                                "seq",
+                                "source",
+                                "t_start",
+                                "dt",
+                                "horizon",
+                                "valid_until",
+                                "received",
+                                "observed_at",
+                                "inference_ns",
+                                "channels",
+                                "degraded",
+                            },
                         )
 
 

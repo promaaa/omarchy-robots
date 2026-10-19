@@ -12,7 +12,7 @@ from pathlib import Path
 
 PACKAGE = Path(__file__).parent.parent / "omarchy_runtime"
 # The control plane and its contracts: what a real robot keeps when the simulator goes.
-CORE = {"__init__", "contracts", "belief", "runtime", "sched", "trace", "config", "extensions", "wallclock", "s2", "link"}
+CORE = {"__init__", "contracts", "belief", "runtime", "sched", "trace", "config", "extensions", "wallclock", "s2", "link", "guard", "s0", "controllers", "attribution"}
 COMPOSITION = (
     "omarchy_runtime.sim",
     "omarchy_runtime.scenario",

@@ -12,6 +12,14 @@ budget_s = 2.0  # then give the verifier this long to decide
 margin_m = 0.01  # positions this close to a boundary are UNKNOWN
 min_confidence = 0.5
 grasp_radius_m = 0.03  # an object this close to a closed gripper is held
+contradiction_m = 0.05  # two sources seeing one entity this far apart, confidently,
+contradiction_s = 0.1  # at most this far apart in time: the belief is contradictory
+
+[fidelity]  # S0's fidelity to the intent it executed (attribution.py): below these, S0 did not achieve it
+tracking = 0.05  # the largest mean tracking error, in the motion's units (rad, m)
+contact_mode = 0.9  # the least share of steady contact ticks (FREE, MAINTAIN) in the mode requested
+force = 0.8  # the least share of MAINTAIN ticks with the force within its bounds
+object_m = 0.01  # the largest mean error of an object against its intent
 
 [s2_link]  # S2 in another process (omarchy-runtime s2), on the wall clock
 heartbeat_s = 0.1  # S2 sends a heartbeat this often (it learns the period from the robot's hello)

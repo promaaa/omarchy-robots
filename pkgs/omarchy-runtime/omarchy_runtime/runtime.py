@@ -16,6 +16,7 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
+from omarchy_runtime.attribution import FidelityLimits, attribute, fidelity
 from omarchy_runtime.belief import Evaluation, WorldState
 from omarchy_runtime.contracts import (
     OUTCOME_CATEGORIES,
@@ -95,6 +96,7 @@ class Params:
     verify_budget: Ns
     s2_lost: Ns  # no heartbeat from S2 for longer than this: the link is lost
     s2_long: Ns  # an outage this long or longer is "long", a shorter one "short"
+    fidelity: FidelityLimits = FidelityLimits(0.05, 0.9, 0.8, 0.01)
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,8 @@ class Execution:
         self.s0_started: Ns | None = None  # S0's time when the execution started, for its coverage
         self.s0_stopped: Ns | None = None
         self.base_error: str | None = None  # the default fallback generator's last error, recorded once
+        self.s2_lost = False  # S2's link was lost while it was active
+        self.s0_fault = False
 
     def transition(self, to: State, category: Category | None = None, reason: str = "") -> None:
         if to not in TRANSITIONS.get(self.state, frozenset()):
@@ -316,6 +320,7 @@ class Runtime:
         self._status: S0Status | None = None
         self._mode: S0Mode | None = None
         self._chunk: ChunkMeta | None = None
+        self._rejection: Json | None = None
         self.executions: dict[str, Execution] = {}
         self.finished: list[Json] = []  # summaries, in the order executions ended
         # S2's liveness, watched from its first heartbeat to its final one.
@@ -385,6 +390,8 @@ class Runtime:
             self._handle(message, now)
         if self._s2_watch and self._s2_lost is None and self._s2_seen is not None and now - self._s2_seen > self.params.s2_lost:
             self._s2_lost = now
+            if self._active is not None:
+                self._active.s2_lost = True
             self._event(now, "s2.link", None, {"state": "lost", "last_heartbeat": self._s2_seen, "silent_ns": now - self._s2_seen})
         if self._active is None and self._queue:
             self._start(self._queue.popleft(), now)
@@ -421,12 +428,15 @@ class Runtime:
             del self._recent[next(iter(self._recent))]
 
     def _sample(self, now: Ns) -> None:
-        late = self._status.counters.late_ticks if self._status is not None else 0
+        before = self._status.counters if self._status is not None else S0Counters()
         status = self._status = self._s0.status()
         ex = self._active
-        if status.counters.late_ticks > late:
-            c = status.counters
+        c = status.counters
+        if c.late_ticks > before.late_ticks:
             self._event(now, "s0.late", ex, {"late_ticks": c.late_ticks, "max_interval_ns": c.max_interval_ns, "s0_t": status.t})
+        if (c.limit_clamps, c.guard_replacements) != (before.limit_clamps, before.guard_replacements):
+            guard = {"clamps": c.limit_clamps - before.limit_clamps, "replacements": c.guard_replacements - before.guard_replacements}
+            self._event(now, "s0.guard", ex, guard | {"s0_t": status.t, "mode": status.mode})
         if status.mode != self._mode:
             self._event(now, "s0.mode", ex, {"from": self._mode, "to": status.mode, "s0_t": status.t})
             self._mode = status.mode
@@ -434,6 +444,9 @@ class Runtime:
         if chunk is not None and chunk != self._chunk:
             self._chunk = chunk
             self._event(now, "chunk", ex, chunk.to_json())
+        if status.rejection is not None and status.rejection != self._rejection:
+            self._rejection = status.rejection
+            self._event(now, "chunk.rejected", ex, status.rejection)
         if ex is not None:
             self._event(now, "s0.status", ex, status.to_json())
 
@@ -647,6 +660,7 @@ class Runtime:
             ex.verify_until = ex.not_before + self.params.verify_budget
             self._set(ex, State.VERIFYING, now, reason=f"executor claims DONE: {report.reason}")
         elif status.mode is S0Mode.FAULT:
+            ex.s0_fault = True
             self._fail(ex, now, Category.IMPLEMENTATION_ERROR, "S0 reports a fault")
         elif silent > self.params.s1_stall_timeout:
             self._fail(ex, now, Category.S1_STALL, f"no chunk reached S0 for {seconds(silent):.2f} s; S0 is in {status.mode}")
@@ -720,9 +734,21 @@ class Runtime:
             return None
         return ex.counters.fallback_cover_ns / (ex.s0_stopped - ex.s0_started)
 
+    def _attribution(self, ex: Execution) -> tuple[Json | None, Json | None]:
+        """S0's fidelity to the intents of the execution, and the attribution of its failure (attribution.py)."""
+        if ex.started is None:
+            return None, None
+        fid = fidelity(ex.counters, self.params.fidelity)
+        assert ex.ended is not None
+        entities = set(ex.request.goal.args)
+        seen = [c for c in self.belief.contradictions if c["entity"] in entities and ex.requested <= c["t"] <= ex.ended]
+        blamed = attribute(ex.state, ex.category, ex.reason, fid, ex.counters, seen, ex.s2_lost, ex.s0_fault)
+        return fid, blamed
+
     def _summary(self, ex: Execution) -> Json:
         res, b = ex.resolution, ex.resolution.binding if ex.resolution else None
         assert ex.ended is not None
+        fid, blamed = self._attribution(ex)
         verdict = None
         if ex.verdict is not None:
             verdict = ex.verdict.to_json() | {"evidence_t": ex.evidence_t, "not_before": ex.not_before, "attempts": ex.attempts}
@@ -766,6 +792,8 @@ class Runtime:
             "s0": ex.counters.to_json(),
             "fallbacks": ex.fallbacks,
             "fallback_coverage": self._coverage(ex),
+            "fidelity": fid,
+            "attribution": blamed,
             "config_hash": self._config_hash,
             "seed": self._seed,
         }

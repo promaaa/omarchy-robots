@@ -1,0 +1,35 @@
+description = """nominal_a, but a second detector sees cup_1 30 cm to the right while the
+verifier looks: the belief is contradictory, the verdict VIOLATED (the cup is in
+the rack). The failure is attributed to PERCEPTION, not to S1 or S0; the retry
+finds the goal already satisfied once the ghost is gone."""
+seed = 1
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "ghost"
+entity = "cup_1"
+x = 0.30
+after = "release"
+delay_s = 1.45  # around the first verification attempt
+duration_s = 0.15
+
+[[expect]]
+outcome = "FAILED"
+category = "VERIFICATION_FAILED"
+claim = "DONE"
+verdict = "VIOLATED"
+truth = true
+attribution = "PERCEPTION"
+
+[[expect]]
+outcome = "SUCCEEDED"
+verdict = "SATISFIED"
+truth = true
+

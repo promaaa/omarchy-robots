@@ -1,0 +1,26 @@
+description = """nominal_a, but S0's controller emits NaN for 0.3 s while it carries the cup.
+The guard replaces every one of those commands by its own (hold), the trace
+records the interventions (s0.guard), and S1 plans again from where the arm
+is: the task still succeeds."""
+seed = 1
+body = "arm3"
+
+[s1]
+latency_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "controller"
+mode = "nan"
+after = "grasp"
+delay_s = 1.0
+duration_s = 0.3
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

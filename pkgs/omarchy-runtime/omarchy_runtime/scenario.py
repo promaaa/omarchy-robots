@@ -42,9 +42,9 @@ from omarchy_runtime.extensions import CORRECTORS, DEFAULT_FALLBACKS, FILTERS, I
 from omarchy_runtime.runtime import Runtime
 from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Latest, Mailbox, Scheduler, WallScheduler, distribution
-from omarchy_runtime.sim.s0 import SimS0
+from omarchy_runtime.sim.s0 import Adversary, SimS0
 from omarchy_runtime.sim.s1 import ScriptedPickPlace, SimS1Host, Stall
-from omarchy_runtime.sim.sensor import Occlusion, Sensor
+from omarchy_runtime.sim.sensor import Ghost, Occlusion, Sensor
 from omarchy_runtime.sim.world import Change, Trigger, World
 from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity, where_measured
 from omarchy_runtime.wallclock import stamp
@@ -133,9 +133,23 @@ def _timing(cfg: Json, seed: int, pauses: list[Trigger], s0_stalls: list[Trigger
     return Timing(_delay(t, "observation_age", "scenario timing", np.random.default_rng([seed, 6])), skip, pauses, s0_stalls)
 
 
-def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], list[Trigger], list[Trigger], list[Change]]:
+@dataclass
+class Faults:
+    slips: list[Trigger]
+    stalls: list[Stall]
+    occlusions: list[Occlusion]
+    pauses: list[Trigger]
+    s0_stalls: list[Trigger]
+    changes: list[Change]
+    ghosts: list[Ghost]
+    stuck: list[Trigger]
+    adversary: list[tuple[str, Trigger]]
+
+
+def _faults(cfg: Json) -> Faults:
     scene = config.scene(cfg)
-    slips, stalls, occlusions, pauses, s0_stalls, changes = [], [], [], [], [], []
+    slips, stalls, occlusions, pauses, s0_stalls, changes, ghosts, stuck = [], [], [], [], [], [], [], []
+    adversary: list[tuple[str, Trigger]] = []
     for n, f in enumerate(cfg["scenario"].get("faults", [])):
         where = f"scenario faults[{n}]"
         after = config.get(f, "after", str, where)
@@ -149,7 +163,19 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], lis
             changes.append(Change(after, ns(config.get(f, "delay_s", float, where)), kind, entity, config.get(f, "x", float, where)))
             continue
         when = Trigger(after, ns(config.get(f, "delay_s", float, where)), ns(config.get(f, "duration_s", float, where)))
-        if kind == "slip":
+        if kind == "ghost":
+            entity = config.get(f, "entity", str, where)
+            if entity not in scene.objects:
+                raise ConfigError(f"{where}.entity: no object {entity!r} in world.toml")
+            ghosts.append(Ghost(entity, config.get(f, "x", float, where), when))
+        elif kind == "gripper_stuck":
+            stuck.append(when)
+        elif kind == "controller":
+            mode = config.get(f, "mode", str, where)
+            if mode not in Adversary.MODES:
+                raise ConfigError(f"{where}.mode: {mode!r} is not one of {', '.join(Adversary.MODES)}")
+            adversary.append((mode, when))
+        elif kind == "slip":
             slips.append(when)
         elif kind == "s1_stall":
             stalls.append(Stall(when))
@@ -163,8 +189,9 @@ def _faults(cfg: Json) -> tuple[list[Trigger], list[Stall], list[Occlusion], lis
         elif kind == "s0_stall":
             s0_stalls.append(when)
         else:
-            raise ConfigError(f"{where}.kind: {kind!r} is not slip, s1_stall, occlusion, pause, s0_stall, move or appear")
-    return slips, stalls, occlusions, pauses, s0_stalls, changes
+            kinds = "slip, s1_stall, occlusion, pause, s0_stall, move, appear, ghost, gripper_stuck or controller"
+            raise ConfigError(f"{where}.kind: {kind!r} is not {kinds}")
+    return Faults(slips, stalls, occlusions, pauses, s0_stalls, changes, ghosts, stuck, adversary)
 
 
 def s2_parts(
@@ -269,22 +296,34 @@ def run(
     verification = cfg["runtime"]["verification"]
     sensor_cfg = cfg["world"]["sensor"]
     ext = cfg["runtime"]["extensions"]
-    slips, stalls, occlusions, pauses, s0_stalls, changes = _faults(cfg)
-    timing = _timing(cfg, seed, pauses, s0_stalls)
+    faults = _faults(cfg)
+    timing = _timing(cfg, seed, faults.pauses, faults.s0_stalls)
     run_id = f"{int(np.random.default_rng([seed, 1]).integers(1 << 32)):08x}"
 
     present = {k: config.get(v, "x", float, f"world objects.{k}") for k, v in cfg["world"]["objects"].items() if v.get("present", True)}
-    world = World(scene, present, body, slips, changes)
+    world = World(scene, present, body, faults.slips, faults.changes, faults.stuck)
     period = SECOND // rates["s0"]
     late = config.get(cfg["world"]["s0"], "late_after_periods", float, "world.toml s0")
-    s0 = SimS0(body, world, capacity=limit * rates["s0"] // SECOND + 1, nominal=period, late_after=round(late * period))
+    controller_id, capability = config.controller(cfg)
+    if controller_id != "motion_tracker":
+        raise ConfigError(f"body {body.id}: the planar simulator runs the motion tracker, not {controller_id}")
+    s0 = SimS0(
+        body,
+        world,
+        capacity=limit * rates["s0"] // SECOND + 1,
+        nominal=period,
+        late_after=round(late * period),
+        capability=capability,
+        adversary=faults.adversary,
+    )
     sensor = Sensor(
         world,
         np.random.default_rng([seed, 2]),
         source=sensor_cfg["source"],
         noise=sensor_cfg["noise_m"],
         confidence=sensor_cfg["confidence"],
-        occlusions=occlusions,
+        occlusions=faults.occlusions,
+        ghosts=faults.ghosts,
     )
     for_s1: Latest[Observation] = Latest()
     for_runtime: Mailbox[Observation] = Mailbox()
@@ -300,7 +339,7 @@ def run(
     except KeyError as e:
         raise ConfigError(f"extensions: no implementation with id {e}") from e
     host = SimS1Host(
-        s0, for_s1, s1_latency or (lambda: 0), stalls, world, period=SECOND // rates["s1"], corrector=corrector, trigger=trigger
+        s0, for_s1, s1_latency or (lambda: 0), faults.stalls, world, period=SECOND // rates["s1"], corrector=corrector, trigger=trigger
     )
     recovery, latency, s2_named = s2_parts(cfg, ttft, ttft_spread, ttft_file)
     goals = config.goals(s["s2"], "scenario s2")
@@ -333,6 +372,7 @@ def run(
         "run_id": run_id,
         "clock": sched.clock,
         "body": body.id,
+        "s0": capability.to_json(),
         "rates_hz": rates,
         "extensions": {
             "filter": describe(observation_filter),
@@ -353,6 +393,8 @@ def run(
         margin=verification["margin_m"],
         min_confidence=verification["min_confidence"],
         grasp_radius=verification["grasp_radius_m"],
+        contradiction_m=verification["contradiction_m"],
+        contradiction_s=verification["contradiction_s"],
     )
     implementations = {b.implementation: (lambda i=b.implementation: ScriptedPickPlace(i)) for b in config.bindings(cfg)}
     runtime = Runtime(
@@ -383,6 +425,8 @@ def run(
         observation = sensor.observe(now)
         age = timing.observation_age() if timing.observation_age else 0
         heapq.heappush(aging, (now + age, sensor.count, observation))
+        if (ghost := sensor.ghost(now)) is not None:
+            heapq.heappush(aging, (now + age, sensor.count, ghost))
         while aging and aging[0][0] <= now:
             _, _, ready = heapq.heappop(aging)
             observed.append((ready.t, now))
