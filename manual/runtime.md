@@ -14,7 +14,7 @@ The Omarchy Robots runtime sits between the intelligence that decides what a rob
 |---|---|---|---|
 | S2 | Slow reasoning and planning. Requests goals, may install a fallback, decides what to do after a failure. | about 10 Hz, decisions taking 0.1 s to 5 s | a scripted planner with a latency model, in the runtime's process or in its own |
 | S1 | Action generation: turns a goal into short timestamped trajectories, **action chunks**. | 20 Hz | a scripted pick-and-place policy |
-| S0 | Real-time execution: the only layer that commands actuators, and it enforces the body's limits. | 1 kHz (200 Hz on the wall clock) | a simulated controller |
+| S0 | Real-time execution: the only layer that commands actuators. Two halves: the **guard**, Omarchy's (limits, bounded steps, fallbacks, starvation watchdog), and a **controller** behind it. | 1 kHz (200 Hz on the wall clock) | a motion tracker behind the guard, simulated |
 
 ![S2 and the runtime above; S1, S0 and the body below]({{ '/assets/runtime-layers.svg' | relative_url }})
 
@@ -93,6 +93,9 @@ A simulated kitchen in a vertical plane: a table with two cups, a counter with a
 | `cup_moved` | A human moves the cup 6 cm while the arm approaches it. S1 plans the grasp again from fresh observations, without S2 | SUCCEEDED |
 | `slot_blocked` | A dish appears in the rack spot the arm is carrying the cup to. S1 gives up (blocked), S0 runs S2's fallback (held 3 s), S2 chooses another spot (`retry_elsewhere`) | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 | `fallback_expiry` | `slot_blocked` with S2 taking 2 s and a fallback that lasts 1.5 s: the fallback expires, S0 returns to HOLD with the cup held, then S2's new goal runs | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
+| `ghost_verify` | A second detector sees the cup 30 cm off while the verifier looks: the belief is contradictory, the verdict VIOLATED although the cup is in the rack; attributed to PERCEPTION. The retry finds the goal already satisfied | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
+| `gripper_stuck` | The gripper is stuck open (an actuator fault). S1 keeps planning the grasp again until the deadline; S0 never achieved the intent: attributed to EXECUTION | FAILED/TIMEOUT |
+| `guard_controller_fault` | S0's controller emits NaN for 0.3 s while the arm carries the cup. The guard replaces each command by its own hold, the trace records it (`s0.guard`), S1 plans again | SUCCEEDED |
 
 Each scenario is a TOML file in `pkgs/omarchy-runtime/omarchy_runtime/scenarios/`: seed, body, faults, S2's goals and latency, S1's inference latency, and the expected outcome of each execution.
 
@@ -118,6 +121,14 @@ The scene can change during a task. A change is a `[[faults]]` entry, at a delay
 |---|---|---|
 | `move` | `entity`, `x` | the entity moves by `x` along the table (refused while it is held) and settles on the support below |
 | `appear` | `entity`, `x` | an object declared absent (`present = false` in `world.toml`, as `dish_1`) appears at `x` |
+
+Three more fault kinds exercise the guard and the attribution (see "S0: the guard and its controller" and "Fidelity and failure attribution"):
+
+| Kind | Keys | Effect |
+|---|---|---|
+| `ghost` | `entity`, `x` | while it lasts, a second detector (source `sim.camera.b`) reports the entity `x` metres from where it is |
+| `gripper_stuck` | | while it lasts, the gripper does not move, whatever S0 commands |
+| `controller` | `mode` | while it lasts, S0's controller returns NaN (`nan`), huge values (`huge`), a one-unit jump (`jump`) or a command computed for an earlier tick (`stale`) |
 
 S2's fallback has a duration: `fallback_lasts_s` in a scenario's `[s2]` (by default, the duration of its rows). S0 holds the fallback's last row until then, and then goes on under the capability's default; S0's counters count each expiry (`fallback_expiries`). When an execution fails, the runtime engages the installed fallbacks. `fallback = true` in `[s2]` makes the scripted S2 send its prediction with each goal; `refine_fallback = true` also refines it once the execution runs.
 
@@ -170,16 +181,91 @@ Retries are new executions of the same task, linked by `task_id` and `retry_of`.
 
 S2 and applications use the runtime through two calls, `submit(message)` and `poll()`, with JSON messages: `request` (a goal), `install_fallback`, `cancel`, `decision` and `heartbeat`. The API is asynchronous. A request carries a `request_id` that its sender chooses, and every update about the execution it creates carries that id back, with the execution id and the runtime's time of the change. The same calls work in the runtime's process and from another process.
 
+## Intents: what S1 asks of S0 (contract v2)
+
+An action chunk (v1) says only where the joints should go. That is the motion-only interface that cannot say "press here without moving the board". Since v0.0.3 part 1, S1 sends S0 an **intent chunk** (`contracts.IntentChunk`) with optional channels, each validated on its own:
+
+| Channel | Contents |
+|---|---|
+| motion | targets over the body's own action space (joint targets, as in v1), or Cartesian end-effector poses (`x y z qw qx qy qz`, unit quaternion) in a declared frame |
+| object | the intended motion of one object in a frame: target poses, or sparse 3D points and their future positions (flow) |
+| contact, per end-effector | per row a mode (`FREE`, `MAKE`, `MAINTAIN`, `BREAK`); the surface normal in a frame; a target normal force or 6D wrench with lower and upper bounds; the stiffness along each Cartesian axis |
+
+Each channel is a timed trajectory with an action chunk's semantics: an absolute start, `dt` between rows, a horizon, `valid_until`, `observed_at`, the inference latency and its source. Rows are interpolated, contact modes step. A chunk is executed only while every channel it carries is valid. A chunk without motion keeps the pose S0 had when it took over. A malformed channel is refused with `SHAPE`, `NOT_FINITE` or `BOUNDS` (a `MAKE` or `MAINTAIN` target outside its own bounds), and the refusal names the channel.
+
+**What a controller honours.** Each S0 controller declares it (`ControllerCapability`, from the body's `[<body>.s0]` table in `config/bodies.toml`): the command it returns (position, velocity or torque), its rate, the spacing of rows it accepts, the motion action spaces and Cartesian frames, the object intent forms, contact (end-effectors, frames, modes, the largest force, a stiffness range per axis, wrench or not), and the sensor streams it consumes. An intent outside the declaration is refused with `UNSUPPORTED_INTENT`. The only exception is a degraded mode that the configuration names (`degraded`):
+
+| Degraded mode | What S0 executes instead |
+|---|---|
+| `drop_object` | the intent without its object channel |
+| `drop_contact` | the intent without its contact channels: the motion only |
+| `clamp_force` | force targets and bounds above the controller's maximum, clamped to it |
+| `clamp_stiffness` | stiffness outside the controller's ranges, clamped into them |
+
+A degradation is never silent: the chunk's metadata names it (`degraded` in its `chunk` event), and S0 counts degraded chunks. A refusal is never silent either: S0 keeps the last one (`rejection` in its status: the chunk, when, the code, the channel, the detail) and the runtime records it (`chunk.rejected`). The planar bodies declare the motion tracker, motion only, no degraded mode.
+
+**Compatibility.** A v1 `ActionChunk` is a motion-only intent (`IntentChunk.from_v1`), timing and rows unchanged: S1, the chunk correctors and the inference triggers keep v1, and every scenario and matrix runs as before (a test runs a chunk both ways and compares S0's ticks).
+
+## S0: the guard and its controller
+
+S0 is two halves (`s0.S0Loop`). The **guard** (`guard.py`) is Omarchy's, minimal and plain data: it does not depend on the controller's type, only on the command kind it returns, so it can become a native process later. It owns:
+
+- what S0 executes: S1's chunk while it is valid; when it ran out with no successor, the starvation watchdog arms the fallbacks, S2's before the base; else HOLD;
+- position, velocity and workspace limits, joint torque limits and the end-effector force limit;
+- the bounded step: a position never moves more than its velocity limit times the nominal tick period, a torque never changes more than its rate limit times that period;
+- its own safe command: hold the position (position control), stop (velocity), or a joint spring and damper to where it took over (torque control, gravity being the robot's own, as a Franka compensates it).
+
+The **controller** (`contracts.S0Controller`, implementations in `controllers.py`) gets, at each tick, the active intent (S1's chunk or the fallback the guard engaged), the robot state (`RobotState`: positions, velocities, torques, the end-effector pose and twist, the external wrench, the Jacobian and Coriolis terms, each as the robot reports it), and the scene inputs it declares. It returns a command. The guard checks every one: a command that is not finite, computed for another tick, of another kind or shape, or from a controller that raised, is replaced by the guard's safe command; in torque control a breach no clamp fixes (a joint past its limit, too much force) is replaced too. A command out of its limits or steps is clamped. Both are counted (`limit_clamps`, `guard_replacements`) and recorded (`s0.guard` events, at most one per supervisor step). The guard is additional to a robot's own safety, never a replacement for it.
+
+**Scene inputs.** A controller declares the sensor streams it consumes (`scene` in `[<body>.s0]`, such as `pose:plate`). They reach S0 from the robot side on the data plane, never through runtime events; S0 passes the controller the declared ones only. In simulation they come straight from the simulator.
+
+**Fallbacks are intents.** A fallback (`FallbackSpec`) is a motion and, optionally, a contact channel: "hold where you are" is a relative row of zeros; with a Cartesian frame, relative positions add and a relative orientation composes with the one S0 has when it engages; a contact channel can say "leave contact upwards, compliant along z". When the guard engages one it becomes the intent the controller executes (`FallbackSpec.engage`), by the precedence above. S0 refuses a fallback its controller does not honour, and never degrades one.
+
+**Adversarial tests.** `tests/test_guard.py` drives the guard with controllers that emit NaN, infinities, huge values, jumps, stale or malformed commands, or raise, over seeded random runs in position and torque control: nothing but a finite, limited, step-bounded command reaches the actuators, and every replacement is counted. `guard_controller_fault` shows the same in a whole run, with the trace.
+
+Implementations: the **motion tracker** (`motion_tracker`), S0's behaviour before v0.0.3 part 1, behind the guard. A learned, interaction-competent controller can implement the same interface; none is here.
+
+## Fidelity and failure attribution
+
+Verification has two levels. The outcome verifier is unchanged: SUCCEEDED still needs a SATISFIED verdict from fresh observations. Beside it, the **fidelity check** compares what S0 achieved with the intent it executed (`attribution.py`). S0 accumulates, tick by tick on the data plane, only for S1's chunks: the tracking error of the motion channel (in its units, rad or m; along a contact normal outside `FREE` force rules, not position), the share of steady contact ticks (`FREE`, `MAINTAIN`) in the mode requested (contact is a measured normal force of at least 1 N), the share of `MAINTAIN` ticks with the force within bounds, and the object's error against its intent. The runtime reads them once per execution and checks them against `[fidelity]` in `config/runtime.toml`:
+
+| Key | Default | Unfaithful when |
+|---|---|---|
+| `tracking` | 0.05 | the mean tracking error is above it |
+| `contact_mode` | 0.9 | the share in the requested mode is below it |
+| `force` | 0.8 | the share within bounds is below it |
+| `object_m` | 0.01 | the mean object error is above it (m) |
+
+A command the guard replaced, or a chunk executed degraded, also makes the execution unfaithful. Every execution that ran has its `fidelity` in its summary.
+
+**Attribution.** An execution that ran and did not succeed (FAILED, UNVERIFIED) gets one category, with its reason, the first rule that holds:
+
+1. **INFRASTRUCTURE**: S1 stalled, S0 starved (a chunk ran out with no successor) or ticked late, or S2's link was lost during the execution.
+2. **PERCEPTION**: the verdict is inconclusive, or the belief was contradictory on one of the goal's entities during the execution: two sources saw it, confidently, at most 0.1 s apart, more than 5 cm apart (`contradiction_s`, `contradiction_m` in `[verification]`).
+3. **EXECUTION**: S0 did not achieve the intent: the fidelity check failed, or S0 reported a fault.
+4. **INTENT**: S0 executed the intent faithfully, and the goal was not reached.
+
+SUCCEEDED, REJECTED and ABORTED executions have none. The scenarios that produce each one, checked by `tests/test_attribution.py`:
+
+| Category | Scenario | Why |
+|---|---|---|
+| INTENT | `slip_retry`, `slot_blocked` (first execution) | S0 tracked every chunk; the cup slipped, or the spot was taken |
+| EXECUTION | `gripper_stuck` | the gripper never reached its target: mean tracking error above the threshold |
+| PERCEPTION | `occluded_long`; `ghost_verify` (first execution) | an inconclusive verdict; two sources a contradictory 30 cm apart |
+| INFRASTRUCTURE | `s1_stall_long` | S1 stalled, S0 starved |
+
+The attribution is only as precise as the intent: a motion-only intent cannot say "keep the grasp", so a slip is an INTENT failure. A contact channel that says it can be checked for it.
+
 ## Traces
 
 Every run writes one directory:
 
 | File | Contents |
 |---|---|
-| `run.json` | Header: `trace_schema` (5), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
-| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the actions, with `observed_at` and `inference_ns`), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `run.end`. |
-| `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, configuration hash and seed. |
-| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, desired position, chunk and its validity, when the chunk's observation was taken, and which fallback runs: none, base or S2's), kept in a preallocated buffer and written once at the end. |
+| `run.json` | Header: `trace_schema` (6), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, S0's controller and what it honours (`s0`, its ControllerCapability), rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
+| `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the rows, with `observed_at`, `inference_ns`, the `channels` and any degradation), `chunk.rejected` (the structured error of S0's last refusal), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `s0.guard` (the guard clamped or replaced commands since the last step), `run.end`. |
+| `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, S0's `fidelity` to the intents and the failure's `attribution` (see "Fidelity and failure attribution"), configuration hash and seed. |
+| `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, the controller's command before the guard, chunk and its validity, when the chunk's observation was taken, and which fallback runs: none, base or S2's), kept in a preallocated buffer and written once at the end. |
 | `results.json` | Written by the evaluation harness only: ground truth and agreement for each execution. |
 
 Keys that start with `wall` are wall-clock values. Everything else follows from the scenario and its seed: the same scenario with the same seed gives the same trace.
@@ -540,4 +626,4 @@ jump: the largest jump of S0's desired position at a chunk switch (rad for the a
 
 ## What is not here
 
-No ROS and no ROS types, no learned model, no images, no physics engine (a cup attaches when the gripper closes around it, and settles on the support below when released), no real-time guarantee, and no hardware. The S0 contract is plain data so that a native controller, a vendor controller or ros2_control behind an adapter can implement it later.
+No ROS and no ROS types, no learned model, no images, no physics engine (a cup attaches when the gripper closes around it, and settles on the support below when released), no real-time guarantee, and no hardware. The S0 contract is plain data so that a native controller, a vendor controller or ros2_control behind an adapter can implement it later: the guard and the controller interface are its two halves.

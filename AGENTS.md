@@ -42,7 +42,9 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 |---|---|
 | `robot.nix`, `modules/` | the OS: options, base, boards (`vm`, `pc`, Jetson), identity (`build.json`), the runtime option |
 | `pkgs/omarchy-robot/` | `omarchy-robot`: info, validate, update, rollback |
-| `pkgs/omarchy-runtime/omarchy_runtime/` | the runtime core: `contracts.py` (all data and interfaces), `runtime.py` (resolver, lifecycle, supervisor, verification), `belief.py`, `sched.py` (simulated and wall-clock schedulers), `trace.py`, `config.py`, `wallclock.py`, `link.py` (the link to an S2 in another process: TCP transport, robot and S2 ends) |
+| `pkgs/omarchy-runtime/omarchy_runtime/` | the runtime core: `contracts.py` (all data and interfaces: intents, controller capabilities, the S0 and controller contracts), `runtime.py` (resolver, lifecycle, supervisor, verification), `belief.py`, `sched.py` (simulated and wall-clock schedulers), `trace.py`, `config.py`, `wallclock.py`, `link.py` (the link to an S2 in another process: TCP transport, robot and S2 ends) |
+| `.../guard.py`, `.../s0.py`, `.../controllers.py` | S0: the guard (Omarchy's half: what S0 executes, limits, bounded steps, its own safe command), the loop that joins it to a controller and a robot (`S0Loop`, fidelity counters), the controllers (`motion_tracker`) |
+| `.../attribution.py` | the fidelity check and failure attribution |
 | `.../extensions.py` | the collaborator extension points and their registries |
 | `.../s2.py` | the scripted S2, a client of the public API |
 | `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics |
@@ -73,7 +75,12 @@ there when their handles are known.
    `wallclock.py` reads the wall clock or sleeps, for overhead, wall stamps
    and the wall-clock scheduler.
 7. S0 never waits: a valid chunk, else a valid fallback (S2's, else the
-   capability's default), else HOLD; S0 enforces the body's limits itself.
+   capability's default), else HOLD. S0 is a guard and a controller: the
+   guard, Omarchy's, picks what S0 executes and checks every command the
+   controller returns (limits, bounded step, NaN, stale, force) before the
+   actuators; no controller bypasses it. A controller honours only what its
+   capability declares: anything else is refused (UNSUPPORTED_INTENT) or
+   degraded in a mode the configuration names, and recorded.
    Every running execution holds a valid fallback from its start: the
    capability's default, computed on the robot side, and S2's prediction,
    sent with the goal. No gap: a fallback is replaced, never removed first.
@@ -106,6 +113,23 @@ there when their handles are known.
 `runtime.py`, `belief.py` and `contracts.py` do not change for this. A change
 to a contract changes every implementation: say so in the commit and the
 CHANGELOG.
+
+## Adding an S0 controller
+
+1. Write a class with a `capability` (a `ControllerCapability`) and
+   `command(intent, state, scene, now)` returning a `Command` of its declared
+   kind, in `controllers.py`, and add it to `CONTROLLERS`. Plain numpy: it
+   reads only the `RobotState` and the scene inputs it declares, never ground
+   truth, and never touches the actuators.
+2. Declare it for a body in `config/bodies.toml` (`[<body>.s0]`): command,
+   rows' spacing (`dt_s`), motion spaces and frames, object forms, contact,
+   scene streams. Degraded modes (`degraded`) only when a refusal would be
+   wrong for that body; each is recorded.
+3. The guard does not change for a new controller. In torque control the
+   body gives the guard its torque and force limits and hold gains
+   (`[<body>.kinematics.limits]`).
+4. Test it behind the guard: `tests/test_guard.py` shows the adversarial
+   pattern; a scenario shows it end to end with fidelity and attribution.
 
 ## Asynchronous inference: a ChunkCorrector or an InferenceTrigger
 
@@ -190,6 +214,11 @@ replacement, from the run's seed; it never invents or fits a distribution.
   with ground truth, S0's per-tick record and the trace.
 - The same scenario and seed give the same trace, wall keys aside
   (`tests/test_trace.py`).
+- `tests/test_intent.py` holds contract v2 to its rules (each channel
+  validated alone, v1 as a motion-only intent, refusals and degraded modes
+  recorded); `tests/test_guard.py` drives the guard with adversarial
+  controllers, property style; `tests/test_attribution.py` produces each
+  attribution category from a scenario.
 - `tests/runtime.nix` runs nominal_a and slip_retry in a vm-board VM with the
   runtime enabled.
 - `tests/s2-placement.nix` runs the S2 placement cells: a robot VM, an edge

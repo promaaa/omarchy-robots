@@ -7,6 +7,70 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+Milestone R6, part 1: a steerable S0. The interface between S1 and S0
+carries intents, not only motion; S0 is a guard, Omarchy's, and a
+controller behind it; a fidelity check and failure attribution sit beside
+the outcome verifier. Simulated: nothing is real-time, and nothing has run
+on hardware.
+
+### Changed (contracts: every implementation of S0 is affected)
+
+- Intent contract v2 (`contracts.IntentChunk`): optional channels, each
+  validated on its own (`SHAPE`, `NOT_FINITE`, `BOUNDS`, naming the
+  channel): motion (joint targets, or Cartesian end-effector poses in a
+  declared frame), object (target poses, or 3D points and their flow), and
+  contact per end-effector (mode FREE, MAKE, MAINTAIN or BREAK; normal; a
+  target normal force or wrench with bounds; stiffness per axis). Each
+  channel keeps an action chunk's timing; a chunk runs while all its
+  channels are valid. A v1 `ActionChunk` is a motion-only intent
+  (`IntentChunk.from_v1`); `S0.submit_chunk` takes either.
+- Each S0 controller declares what it honours (`ControllerCapability`, from
+  `[<body>.s0]` in `config/bodies.toml`). An intent outside it is refused
+  with `UNSUPPORTED_INTENT`, unless the configuration names a degraded mode
+  (`drop_object`, `drop_contact`, `clamp_force`, `clamp_stiffness`); a
+  degradation is recorded in the chunk's metadata and counted, a refusal in
+  S0's status (`rejection`) and the trace (`chunk.rejected`).
+- S0 is split in two (`s0.S0Loop`): the guard (`guard.py`: what S0
+  executes, the starvation watchdog, fallback selection, position,
+  velocity, workspace, torque and force limits, the bounded step, its own
+  safe command) and a controller behind it (`contracts.S0Controller`,
+  `controllers.py`; today the motion tracker, S0's behaviour before). The
+  guard replaces a command that is not finite, stale, of another kind or
+  shape, or from a controller that raised, and clamps one out of its limits;
+  both are counted and traced (`s0.guard`). Controllers get the scene inputs
+  they declare, on the data plane (`RobotIO.scene`).
+- Fallbacks are intents: `FallbackSpec` takes a Cartesian `frame` (relative
+  orientations compose) and a `contact` channel, and becomes the intent the
+  controller executes when the guard engages it (`FallbackSpec.engage`).
+- `Detection` and the belief's estimates have a `y`, for 3D scenes; a body's
+  workspace has 4 values (x-z) or 6 (x-y-z).
+- Trace schema 6: the header names S0's controller and its declaration
+  (`s0`); `chunk` events list the channels and any degradation; new events
+  `chunk.rejected` and `s0.guard`; each execution summary has its
+  `fidelity` and, when it ran and did not succeed, its `attribution`.
+
+### Added
+
+- A fidelity check (`attribution.py`, `[fidelity]` in `runtime.toml`): the
+  tracking error, the share of time in the contact mode requested, the share
+  of time with the force within bounds, the object's error, from S0's own
+  counters, accumulated tick by tick; the guard's replacements and degraded
+  chunks make an execution unfaithful.
+- Failure attribution, in traces and evaluation tables: INFRASTRUCTURE
+  (stall, starvation, late ticks, S2's link lost), PERCEPTION (inconclusive
+  verdict, or a contradictory belief: two sources too far apart at once),
+  EXECUTION (S0 did not achieve the intent), INTENT (it did, and the goal
+  was not reached). Rules in the manual (Runtime, "Fidelity and failure
+  attribution").
+- Scenarios `ghost_verify` (PERCEPTION), `gripper_stuck` (EXECUTION) and
+  `guard_controller_fault` (the guard replacing a NaN controller), with the
+  fault kinds `ghost`, `gripper_stuck` and `controller`. The existing
+  scenarios are unchanged and pass; their failures are attributed INTENT
+  (`slip_retry`, `slot_blocked`, `fallback_expiry`), PERCEPTION
+  (`occluded_long`) and INFRASTRUCTURE (`s1_stall_long`).
+- Tests: `test_intent.py`, `test_guard.py` (adversarial controllers, seeded,
+  position and torque control), `test_attribution.py`.
+
 ### Changed (checks and releases)
 
 - Every check, build, experiment and release check runs locally on the

@@ -130,10 +130,20 @@ path, where S1 sends action chunks to S0 directly, never through the runtime.
 S2 installs a fallback ahead of time through the runtime. S0 uses it when
 chunks stop.
 
-S0 never waits: at every tick (1 kHz, simulated) it runs a valid chunk, else
-a fallback, else HOLD, and it enforces the body's limits. Its steps are
-bounded: never more than the velocity limit times its nominal tick period,
-so a late tick never catches up with a jump. Every execution holds a
+S1 sends S0 intents (contract v2): a motion and, optionally, an object's
+intended motion and contact (make, maintain or break it; a target force or
+wrench with bounds; a stiffness per axis), each channel validated on its own.
+A v1 action chunk is a motion-only intent. Each S0 controller declares what it
+honours; anything else is refused (`UNSUPPORTED_INTENT`), or executed in a
+degraded mode its configuration allows, and recorded. S0 is two halves: the
+guard, Omarchy's, and a controller behind it. The guard never waits: at every
+tick (1 kHz, simulated) it gives the controller a valid chunk, else a
+fallback, else it holds itself; it checks every command (limits, NaN, stale,
+force) and clamps or replaces it. Its steps are bounded: never more than the
+velocity limit times its nominal tick period, so a late tick never catches up
+with a jump. A fidelity check compares what S0 achieved with the intent, and
+each failed execution is attributed to INTENT, EXECUTION, PERCEPTION or
+INFRASTRUCTURE (manual, Runtime). Every execution holds a
 fallback from its start, before S1's first chunk: the capability's default
 (hold where S0 is and keep the grasp; on a gantry, holding an object, rise
 2 cm first), computed by the runtime on the robot, and S2's prediction,
@@ -164,6 +174,9 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `timing_s0_stall`, `timing_jitter` | S0 stalled for 0.3 s while carrying; S0 skipping 5 % of its ticks, jittery S1 latency and observation age | SUCCEEDED, steps within S0's bound |
 | `cup_moved` | a human moves the cup 6 cm during the approach; S1 plans the grasp again, without S2 | SUCCEEDED |
 | `slot_blocked`, `fallback_expiry` | a dish appears in the rack spot; S1 gives up, S0 runs S2's fallback, S2 chooses another spot; with a slow S2, S2's fallback runs out first and the capability's default holds the cup | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
+| `ghost_verify` | a second detector sees the cup 30 cm off while the verifier looks: VIOLATED although the cup is in the rack, attributed to PERCEPTION | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
+| `gripper_stuck` | the gripper is stuck open; S1 plans the grasp again until the deadline; attributed to EXECUTION | FAILED/TIMEOUT |
+| `guard_controller_fault` | S0's controller emits NaN for 0.3 s; the guard replaces every command and the trace says so | SUCCEEDED |
 
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,
