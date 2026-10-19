@@ -50,6 +50,9 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 | `.../s2.py` | the scripted S2, a client of the public API |
 | `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics; `panda.py` the MuJoCo scene of the Franka Panda (tools only), `wipe.py` the scripted wiper (S1) |
 | `.../scrub.py` | the scrubbing experiment, its tables and its videos (tools only) |
+| `.../arms.py` | S0 backends for the lab's arms: the Franka Panda (libfranka-like interface), the AgileX PiPER (its SDK over CAN) |
+| `.../sim/fake_franka.py`, `.../sim/fake_piper.py` | the fake arms the backends are tested against (the PiPER's under the real SDK, on a fake CAN bus: tools only) |
+| `pkgs/libfranka/`, `pkgs/piper-sdk/` | libfranka 0.9.2 (C++, with its examples) and piper_sdk 0.6.2 (Python), not in nixpkgs |
 | `pkgs/mujoco-menagerie/` | the Menagerie's Panda model, pinned, fetched by Nix (Apache-2.0) |
 | `.../scenario.py`, `evaluate.py`, `placement.py`, `cli.py` | composition (the robot process, the S2 process), evaluation harness, the S2 placement experiment's table, command |
 | `.../config/`, `.../scenarios/` | bodies, capabilities and bindings, runtime parameters, scenarios (TOML) |
@@ -101,6 +104,19 @@ there when their handles are known.
     need it.
 11. One product: the runtime is a Nix package enabled from `robot.nix`; its
     traces name the OS build, or say there is none.
+
+## Real arms
+
+- Never open a connection to a real robot from this repository, its tests
+  or its tools, and never run anything against one: the Panda and the PiPER
+  are reached by Marc, in the lab, by the runbook (manual, "In the lab").
+- The backends (`arms.py`) take an interface object made elsewhere and
+  import no vendor library (`tests/test_arms.py` checks it). They read
+  state freely; anything sent to the actuators needs an operator
+  authorization in the configuration, and none is committed.
+- The guard is additional to each arm's own safety, never a replacement:
+  keep its limits inside the robot's (the Panda's 15 N against its 20 N
+  collision threshold).
 
 ## Adding a Verifier, ObservationFilter, RecoveryPolicy or latency model
 

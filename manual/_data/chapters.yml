@@ -12,6 +12,8 @@
   url: /omarchy-robot/
 - title: Runtime
   url: /runtime/
+- title: In the lab
+  url: /lab/
 - title: Updates and rollback
   url: /updates/
 - title: Security

@@ -219,6 +219,18 @@ nix run .#omarchy-runtime-tools -- run scrub_hover --record-s0
 nix run .#omarchy-runtime-tools -- scrub-render runs/run-*/scrub_hover --out hover.mp4
 ```
 
+### The lab's arms (prepared)
+
+S0 backends for a Franka Emika Panda (libfranka 0.9.2, torque control at
+1 kHz) and an AgileX PiPER (its official SDK over CAN, joint positions),
+each tested against a fake only: no connection to a real robot has been
+opened. Anything sent to an arm's actuators needs an operator
+authorization in the configuration. `nix build .#libfranka` builds
+Franka's library with its examples (x86_64); the manual's chapter "In the
+lab" has the sources, where the Panda's 1 kHz loop can run, a first
+contact that only reads the Panda's state, and the questions to answer in
+the lab.
+
 S2 can also run in its own process, on the robot or on another machine,
 connected to the runtime over TCP; both processes then run on the wall clock,
 soft real-time (`omarchy-runtime s2`, `run ... --clock wall --s2 HOST:PORT`).

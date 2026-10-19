@@ -7,6 +7,46 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+Milestone R6, part 3: S0 backends for the lab's arms, a Franka Emika Panda
+and an AgileX PiPER, tested against fakes only. No connection to a real
+robot was opened.
+
+### Added
+
+- `arms.py`: the Panda as an S0 backend behind a libfranka-like interface
+  (torque control in libfranka's 1 kHz loop, Cartesian motion and contact
+  on the flange up to 15 N), and the PiPER through AgileX's official SDK
+  (joint positions, MOVE J, 200 Hz, motion only: its documentation proves
+  no force control). Each has its declaration in `bodies.toml` (`franka`,
+  `piper`). Reading state needs nothing; anything sent to the actuators,
+  enabling the PiPER's motors included, is refused (`NotAuthorized`)
+  unless the configuration names an operator authorization. The guard is
+  additional to each arm's own safety.
+- Fakes: a Panda behind the libfranka-like interface (its DH kinematics
+  and limits; 1 kHz, the first period zero; the reflexes for a torque
+  jump, 20 dropped commands, a joint limit, a collision; recovery), and a
+  PiPER on a fake CAN bus under the real SDK (python-can's socketcan
+  replaced for a test's duration; the SDK's frames decoded; feedback at
+  200 Hz; a refused target, an emergency stop, a collision).
+- Nix packages: `libfranka` 0.9.2 with its examples, the last release for
+  the Panda, built on x86_64 (not in nixpkgs); `piper-sdk` 0.6.2
+  (`python3Packages.piper-sdk`, not in nixpkgs); both in
+  `omarchy-runtime-tools` where needed.
+- The manual's chapter "In the lab": what each arm's documentation says,
+  with sources; where the Panda's 1 kHz loop can run (the Orin with
+  jetpack-nixos's PREEMPT_RT kernel, or an x86 PC with Linux's, both
+  evaluated, neither built); a first contact that only reads the Panda's
+  state (untested); the questions to answer in the lab; the lab GPU
+  server's experiment, prepared, with what it needs.
+
+### Changed
+
+- The guard starts a torque from zero and bounds its change by the rate
+  limit times the time since the last tick: the first torque command is
+  zero (a Panda requires it). The scrubbing table is from a run with it.
+- `contracts.matrix_quat` (rotation matrix to quaternion), exact near half
+  turns.
+
 ## [0.0.3] - 2026-10-19
 
 ### Part 2 (2026-10-19)
