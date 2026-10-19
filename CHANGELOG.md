@@ -7,13 +7,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+## [0.0.3] - 2026-10-19
+
+### Part 1 (2026-10-19)
+
 Milestone R6, part 1: a steerable S0. The interface between S1 and S0
 carries intents, not only motion; S0 is a guard, Omarchy's, and a
 controller behind it; a fidelity check and failure attribution sit beside
 the outcome verifier. Simulated: nothing is real-time, and nothing has run
 on hardware.
 
-### Changed (contracts: every implementation of S0 is affected)
+#### Changed (contracts: every implementation of S0 is affected)
 
 - Intent contract v2 (`contracts.IntentChunk`): optional channels, each
   validated on its own (`SHAPE`, `NOT_FINITE`, `BOUNDS`, naming the
@@ -49,7 +53,7 @@ on hardware.
   `chunk.rejected` and `s0.guard`; each execution summary has its
   `fidelity` and, when it ran and did not succeed, its `attribution`.
 
-### Added
+#### Added
 
 - A fidelity check (`attribution.py`, `[fidelity]` in `runtime.toml`): the
   tracking error, the share of time in the contact mode requested, the share
@@ -71,7 +75,7 @@ on hardware.
 - Tests: `test_intent.py`, `test_guard.py` (adversarial controllers, seeded,
   position and torque control), `test_attribution.py`.
 
-### Changed (checks and releases)
+#### Changed (checks and releases)
 
 - Every check, build, experiment and release check runs locally on the
   development host; GitHub Actions runs nothing by itself. The workflows
@@ -87,13 +91,13 @@ on hardware.
   flash script of the six boards), built on the development host at v0.0.2
   under aarch64 emulation (2026-10-08, 7 h 33 min).
 
-### Added
+#### Added
 
 - A `manual` check: the manual built with Jekyll and kramdown's GFM parser,
   as GitHub Pages builds it; it fails when a chapter has no page or a page
   keeps Markdown as text.
 
-### Fixed
+#### Fixed
 
 - Two generated tables did not render in the manual (the before-and-after
   comparison and the TTFT distributions): kramdown does not end a table on
@@ -599,6 +603,7 @@ VM-validated and ready for Jetson bring-up. Not hardware-tested.
 - GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
   one Jetson system.
 
-[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/promaaa/omarchy-robots/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/promaaa/omarchy-robots/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.0.1

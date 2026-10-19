@@ -23,7 +23,7 @@
     }:
     let
       inherit (nixpkgs) lib;
-      version = "0.0.2";
+      version = "0.0.3";
       boards = import ./modules/boards.nix;
       jetsonBoards = lib.filterAttrs (_: board: board ? som) boards;
       pkgs = nixpkgs.legacyPackages.x86_64-linux.extend self.overlays.default;
