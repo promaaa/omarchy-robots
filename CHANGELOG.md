@@ -15,6 +15,11 @@ Milestone R6, part 3: S0 backends for the lab's arms, a Franka Emika Panda
 and an AgileX PiPER, tested against fakes only. No connection to a real
 robot was opened.
 
+Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
+on df655c6, started 2026-10-19 18:42 KST, 31 min 40 s, on an Intel i7-9700
+with 62.7 GiB RAM and KVM: every check passed (placement 14 of 14). Logs:
+`~/src/omarchy-robots-evidence/R6-v0.0.12/` on the development host.
+
 #### Added
 
 - `arms.py`: the Panda as an S0 backend behind a libfranka-like interface
@@ -56,6 +61,12 @@ robot was opened.
 
 Milestone R6, part 2: contact intent on a simulated Franka Panda, scrubbing
 a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
+
+Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
+on 4ba8d5f with KVM, 2026-10-19 18:30 KST, exit 0, after two interrupted
+attempts (a reboot to enable VT-x, a session restart; the checks they
+finished stayed cached: placement 14 of 14). Logs:
+`~/src/omarchy-robots-evidence/R6-v0.0.11/` on the development host.
 
 #### Added
 
@@ -105,6 +116,13 @@ carries intents, not only motion; S0 is a guard, Omarchy's, and a
 controller behind it; a fidelity check and failure attribution sit beside
 the outcome verifier. Simulated: nothing is real-time, and nothing has run
 on hardware.
+
+Release check, local runs on 5fc5a2c without KVM (QEMU TCG): the first,
+2026-10-19 15:33 KST, 61 min 53 s, passed every check but vm-s2-placement
+(13 of 14 cells: one 32 % over its simulated task time, 30 % allowed, the
+host loaded); vm-s2-placement alone on a quiet host passed (14 of 14); the
+full check again, every check built, exit 0. The tolerance was not changed.
+Logs: `~/src/omarchy-robots-evidence/R6-v0.0.10/` on the development host.
 
 #### Changed (contracts: every implementation of S0 is affected)
 

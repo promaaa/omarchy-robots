@@ -282,8 +282,8 @@ triggers, and do not change repository or billing settings.
   `~/src/omarchy-robots-evidence/<version>/`, with a README listing the runs.
 - Jetson builds: locally, by aarch64 emulation, in the background (hours).
 - Experiments (the placement and inference matrices): locally. Label every
-  number from VMs on this host "measured in VMs on the host, without KVM
-  (QEMU TCG)". When a wall-clock tolerance fails only because of the
+  number from VMs on this host "measured in VMs on the host, with KVM" (it
+  has KVM since 2026-10-19; numbers from before say "without KVM (QEMU TCG)"). When a wall-clock tolerance fails only because of the
   emulation, report it and ask before changing the tolerance.
 - The manual: `nix build .#checks.x86_64-linux.manual` builds it and fails
   if a page keeps Markdown as text; check it renders (`result/index.html`)
