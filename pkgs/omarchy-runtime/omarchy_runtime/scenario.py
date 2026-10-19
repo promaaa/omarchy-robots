@@ -18,13 +18,13 @@ import heapq
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
 from omarchy_runtime import config, link
 from omarchy_runtime import latency as latency_files
-from omarchy_runtime.belief import WorldState
+from omarchy_runtime.belief import Scene, WorldState
 from omarchy_runtime.contracts import (
     SECOND,
     BodySpec,
@@ -36,20 +36,24 @@ from omarchy_runtime.contracts import (
     Observation,
     OmarchyError,
     RecoveryPolicy,
+    S1Policy,
     ns,
 )
+from omarchy_runtime.controllers import CartesianImpedance
 from omarchy_runtime.extensions import CORRECTORS, DEFAULT_FALLBACKS, FILTERS, INFERENCE_TRIGGERS, LATENCY, RECOVERY, VERIFIERS, describe
 from omarchy_runtime.runtime import Runtime
+from omarchy_runtime.s0 import S0Loop
 from omarchy_runtime.s2 import ScriptedS2
 from omarchy_runtime.sched import Latest, Mailbox, Scheduler, WallScheduler, distribution
 from omarchy_runtime.sim.s0 import Adversary, SimS0
 from omarchy_runtime.sim.s1 import ScriptedPickPlace, SimS1Host, Stall
 from omarchy_runtime.sim.sensor import Ghost, Occlusion, Sensor
+from omarchy_runtime.sim.wipe import ScriptedWiper
 from omarchy_runtime.sim.world import Change, Trigger, World
 from omarchy_runtime.trace import S0_MODES, TraceWriter, os_identity, runtime_identity, where_measured
 from omarchy_runtime.wallclock import stamp
 
-TRIGGERS = ("start", "moving", "grasp", "release")  # the run starts; the body first moves; the first grasp; the first release
+TRIGGERS = ("start", "moving", "grasp", "release", "contact")  # the run starts; the body first moves; the first grasp, release, contact
 S2_TIMEOUT = ns(120.0)  # how long the robot waits for an S2 process to answer
 
 
@@ -60,8 +64,8 @@ class RunResult:
     cfg: Json
     summaries: list[Json]
     truths: list[bool | None]  # ground truth of each execution's goal when it ended
-    world: World
-    s0: SimS0
+    world: Ground
+    s0: S0Loop
     completed: bool  # S2 finished its goals before the time limit
     end: Ns
     clock: str  # "simulated" or "wall"
@@ -144,12 +148,14 @@ class Faults:
     ghosts: list[Ghost]
     stuck: list[Trigger]
     adversary: list[tuple[str, Trigger]]
+    weak: list[tuple[float, Trigger]]
 
 
 def _faults(cfg: Json) -> Faults:
     scene = config.scene(cfg)
     slips, stalls, occlusions, pauses, s0_stalls, changes, ghosts, stuck = [], [], [], [], [], [], [], []
     adversary: list[tuple[str, Trigger]] = []
+    weak: list[tuple[float, Trigger]] = []
     for n, f in enumerate(cfg["scenario"].get("faults", [])):
         where = f"scenario faults[{n}]"
         after = config.get(f, "after", str, where)
@@ -170,6 +176,8 @@ def _faults(cfg: Json) -> Faults:
             ghosts.append(Ghost(entity, config.get(f, "x", float, where), when))
         elif kind == "gripper_stuck":
             stuck.append(when)
+        elif kind == "weak_actuators":
+            weak.append((config.get(f, "scale", float, where), when))
         elif kind == "controller":
             mode = config.get(f, "mode", str, where)
             if mode not in Adversary.MODES:
@@ -189,9 +197,69 @@ def _faults(cfg: Json) -> Faults:
         elif kind == "s0_stall":
             s0_stalls.append(when)
         else:
-            kinds = "slip, s1_stall, occlusion, pause, s0_stall, move, appear, ghost, gripper_stuck or controller"
+            kinds = "slip, s1_stall, occlusion, pause, s0_stall, move, appear, ghost, gripper_stuck, controller or weak_actuators"
             raise ConfigError(f"{where}.kind: {kind!r} is not {kinds}")
-    return Faults(slips, stalls, occlusions, pauses, s0_stalls, changes, ghosts, stuck, adversary)
+    return Faults(slips, stalls, occlusions, pauses, s0_stalls, changes, ghosts, stuck, adversary, weak)
+
+
+class Ground(Protocol):
+    """The simulator's ground truth as the harness reads it: a planar World or the MuJoCo scene."""
+
+    first: dict[str, Ns]
+    events: list[tuple[Ns, str, str]]
+    violations: list[tuple[Ns, str]]
+
+    def truth(self, goal: Goal) -> bool | None: ...
+
+
+class Observer(Protocol):
+    count: int
+
+    def observe(self, now: Ns) -> Observation: ...
+
+    def ghost(self, now: Ns) -> Observation | None: ...
+
+
+PLANAR_ONLY = ("slips", "changes", "stuck", "ghosts")
+
+
+def _body_side(
+    cfg: Json, body: BodySpec, scene: Scene, faults: Faults, seed: int, capacity: int, period: Ns, late: Ns
+) -> tuple[Ground, S0Loop, Observer, Callable[[str], S1Policy]]:
+    """The simulated world, S0 (guard and controller), the sensor and S1, for the body's kind."""
+    controller_id, capability = config.controller(cfg)
+    sensor_cfg = cfg["world"]["sensor"]
+    if body.kind == "mujoco_panda":
+        try:
+            from omarchy_runtime.sim import panda  # MuJoCo: in omarchy-runtime-tools only
+        except ImportError as e:
+            raise ConfigError(f"body {body.id} is simulated in MuJoCo: run it with omarchy-runtime-tools ({e})") from e
+
+        used = [k for k in PLANAR_ONLY if getattr(faults, k)]
+        if used or faults.adversary or controller_id != "cartesian_impedance":
+            raise ConfigError(f"body {body.id}: planar-only faults {used}, or controller {controller_id}")
+        world = panda.PandaWorld(cfg["world"], body, np.random.default_rng([seed, 7]), capacity, faults.weak)
+        stiffness = config.floats(body.kinematics.get("impedance", {}), "stiffness", f"bodies.{body.id}.kinematics.impedance", 6)
+        controller = CartesianImpedance(capability, stiffness, body.home)
+        s0 = S0Loop(body, controller, world, capacity, nominal=period, late_after=late)
+        sensor = panda.PandaSensor(world, np.random.default_rng([seed, 2]), sensor_cfg, faults.occlusions)
+        params = cfg["scenario"]["s1"]
+        return world, s0, sensor, lambda i: ScriptedWiper(i, params)
+    if controller_id != "motion_tracker" or faults.weak:
+        raise ConfigError(f"body {body.id}: the planar simulator runs the motion tracker, not {controller_id}, and has no weak actuators")
+    present = {k: config.get(v, "x", float, f"world objects.{k}") for k, v in cfg["world"]["objects"].items() if v.get("present", True)}
+    planar = World(scene, present, body, faults.slips, faults.changes, faults.stuck)
+    sim_s0 = SimS0(body, planar, capacity=capacity, nominal=period, late_after=late, capability=capability, adversary=faults.adversary)
+    camera = Sensor(
+        planar,
+        np.random.default_rng([seed, 2]),
+        source=sensor_cfg["source"],
+        noise=sensor_cfg["noise_m"],
+        confidence=sensor_cfg["confidence"],
+        occlusions=faults.occlusions,
+        ghosts=faults.ghosts,
+    )
+    return planar, sim_s0, camera, ScriptedPickPlace
 
 
 def s2_parts(
@@ -294,37 +362,15 @@ def run(
     rates = cfg["world"]["rates_hz"]
     scene, body, params = config.scene(cfg), config.body(cfg), config.params(cfg)
     verification = cfg["runtime"]["verification"]
-    sensor_cfg = cfg["world"]["sensor"]
     ext = cfg["runtime"]["extensions"]
     faults = _faults(cfg)
     timing = _timing(cfg, seed, faults.pauses, faults.s0_stalls)
     run_id = f"{int(np.random.default_rng([seed, 1]).integers(1 << 32)):08x}"
 
-    present = {k: config.get(v, "x", float, f"world objects.{k}") for k, v in cfg["world"]["objects"].items() if v.get("present", True)}
-    world = World(scene, present, body, faults.slips, faults.changes, faults.stuck)
     period = SECOND // rates["s0"]
-    late = config.get(cfg["world"]["s0"], "late_after_periods", float, "world.toml s0")
-    controller_id, capability = config.controller(cfg)
-    if controller_id != "motion_tracker":
-        raise ConfigError(f"body {body.id}: the planar simulator runs the motion tracker, not {controller_id}")
-    s0 = SimS0(
-        body,
-        world,
-        capacity=limit * rates["s0"] // SECOND + 1,
-        nominal=period,
-        late_after=round(late * period),
-        capability=capability,
-        adversary=faults.adversary,
-    )
-    sensor = Sensor(
-        world,
-        np.random.default_rng([seed, 2]),
-        source=sensor_cfg["source"],
-        noise=sensor_cfg["noise_m"],
-        confidence=sensor_cfg["confidence"],
-        occlusions=faults.occlusions,
-        ghosts=faults.ghosts,
-    )
+    late = round(config.get(cfg["world"]["s0"], "late_after_periods", float, "world.toml s0") * period)
+    world, s0, sensor, policy = _body_side(cfg, body, scene, faults, seed, limit * rates["s0"] // SECOND + 1, period, late)
+    capability = s0.capability
     for_s1: Latest[Observation] = Latest()
     for_runtime: Mailbox[Observation] = Mailbox()
     config.get(s["s1"], "latency_s", float, "scenario s1")
@@ -396,7 +442,7 @@ def run(
         contradiction_m=verification["contradiction_m"],
         contradiction_s=verification["contradiction_s"],
     )
-    implementations = {b.implementation: (lambda i=b.implementation: ScriptedPickPlace(i)) for b in config.bindings(cfg)}
+    implementations = {b.implementation: (lambda i=b.implementation: policy(i)) for b in config.bindings(cfg)}
     runtime = Runtime(
         body=body,
         capabilities=capabilities,
@@ -508,6 +554,9 @@ def run(
         for summary in runtime.finished:
             rec = result.record(summary["timing"]["requested"], summary["timing"]["ended"])
             np.savez(run_dir / f"s0_{summary['execution_id']}.npz", **rec, dims=np.array(body.dims), modes=np.array(S0_MODES))
+        log = getattr(world, "log", None)
+        if log is not None:  # the MuJoCo scene: its ground truth, tick by tick, for the harness and the video
+            np.savez_compressed(run_dir / "world.npz", **log())
     return result
 
 

@@ -1,0 +1,72 @@
+# The scrubbing scene (MuJoCo, sim/panda.py): a Franka Emika Panda with a
+# sponge, a table, a square plate free to slide on it, and dirt on the plate.
+# Metres, the robot's base frame: x forward, y to the left, z up. The plate's
+# pose here is ground truth; the belief gets only the camera's estimate of it
+# (with `plate_bias_z_m`, the perception error) and the plate's size.
+
+[table]
+center = [0.55, 0.0, 0.2]
+half = [0.3, 0.4, 0.2]  # its top at z = 0.40
+
+[plate]
+center = [0.55, 0.0]  # x, y; it rests on the table
+half = 0.12  # a 24 cm square
+thickness = 0.015
+mass_kg = 0.4
+friction = 1.0
+
+[sponge]
+half = [0.03, 0.04, 0.02]  # along the pad's x and y (the world's y and x at home) and its depth
+mass_kg = 0.05
+friction = 0.3
+solref_s = 0.05  # a soft contact
+
+[dirt]
+cells = 10  # a 10 x 10 grid of 2 cm cells
+margin_m = 0.02  # from the plate's edge
+f_min_n = 4.0  # a cell is clean once the sponge pressed on it with at least this force
+t_min_s = 0.3  # for at least this long in all
+clean_share = 0.9  # ground truth of clean(plate): at least this share of cells clean
+
+[force_sensor]  # the external force estimate S0 reads (a Panda estimates it from its joint torques)
+noise_n = 0.5  # Gaussian, per axis, each millisecond
+filter = 0.1  # first-order low-pass: about 17 Hz at 1 kHz
+
+[sensor]  # the camera above the table
+source = "sim.camera"
+noise_m = 0.002  # per coordinate of the plate's position
+plate_bias_z_m = 0.0  # added to the plate's height: perception error
+dirt_flip = 0.03  # each cell seen as its opposite with this probability
+confidence = 0.95
+
+# For the belief: the plate's size, the table as a surface (x-z), and a
+# region over the table, for occlusions.
+[objects.plate]
+width = 0.24
+height = 0.015
+x = 0.55
+
+[surfaces.table]
+x0 = 0.25
+x1 = 0.85
+z = 0.40
+
+[regions.above_table]
+x0 = 0.25
+x1 = 0.85
+z0 = 0.35
+z1 = 0.60
+
+[s0]
+late_after_periods = 1.5
+
+[rates_hz]  # simulated: physics and S0 at 1 kHz, S1 at 20 Hz
+s0 = 1000
+s1 = 20
+supervisor = 20
+observation = 10
+s2 = 10
+
+[wall_rates_hz]
+s0 = 200
+link = 1000

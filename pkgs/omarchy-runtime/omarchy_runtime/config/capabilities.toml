@@ -28,3 +28,17 @@ implementation = "pick_place.gantry"
 version = "1"
 bodies = ["gantry"]
 priority = 10
+
+[capabilities.wipe]
+achieves = "clean"
+params = ["surface"]
+requires = ["contact"]
+preconditions = ["observed surface", "reachable surface"]
+default_fallback = "retreat"  # leave contact upwards, compliant along z (Cartesian bodies)
+
+[[bindings]]
+capability = "wipe"
+implementation = "wipe.panda"
+version = "1"
+bodies = ["panda"]
+priority = 10

@@ -62,9 +62,14 @@ def effective(scenario: str) -> Json:
     if body not in bodies:
         raise ConfigError(f"{path}: body {body!r} is not in bodies.toml ({', '.join(bodies)})")
     runtime = _merge(load(CONFIG / "runtime.toml"), {k: s.pop(k) for k in OVERRIDABLE if k in s})
+    world = CONFIG / (f"world_{s['world']}.toml" if "world" in s else "world.toml")
+    if not world.exists():
+        raise ConfigError(f"{path}: no world {s['world']!r} ({world.name})")
+    scene = load(world)
+    scene["sensor"] |= s.pop("sensor", {})  # a scenario may change the sensor: noise, the perception error
     return {
         "scenario": {"name": path.stem} | s,
-        "world": load(CONFIG / "world.toml"),
+        "world": scene,
         "body": {"id": body} | bodies[body],
         "capabilities": load(CONFIG / "capabilities.toml"),
         "runtime": runtime,

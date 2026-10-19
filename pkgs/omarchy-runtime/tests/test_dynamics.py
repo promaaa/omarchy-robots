@@ -15,7 +15,7 @@ from omarchy_runtime.extensions import CORRECTORS, INFERENCE_TRIGGERS
 from omarchy_runtime.placement import trace_fallbacks
 from omarchy_runtime.scenario import RunResult, run
 from omarchy_runtime.trace import S0_MODES, validate_run
-from tests.helpers import IN_RACK, scenario, tmpdir
+from tests.helpers import IN_RACK, planar, scenario, tmpdir
 
 
 def result(name: str) -> dict[str, Any]:
@@ -72,7 +72,7 @@ class TestNeighbourOffItsSpot(unittest.TestCase):
         r = run(str(path), tmpdir() / "neighbour")
         self.assertEqual([s["outcome"] for s in r.summaries], ["SUCCEEDED", "SUCCEEDED"])
         self.assertEqual([e[1] for e in r.world.events if e[1] == "move"], ["move"])
-        self.assertAlmostEqual(r.world.cups["cup_2"][0], 0.36, places=2)  # the next spot, not cup_1's
+        self.assertAlmostEqual(planar(r).cups["cup_2"][0], 0.36, places=2)  # the next spot, not cup_1's
         self.assertEqual(r.world.violations, [])
 
 
@@ -87,7 +87,7 @@ class TestFallbackExpiry(unittest.TestCase):
         failed, retry = r.summaries
         waiting = r.record(failed["timing"]["ended"] + 1, retry["timing"]["started"])
         self.assertEqual(set(waiting["mode"].tolist()), {S0_MODES.index("FALLBACK")})  # no HOLD while S2 decides
-        self.assertEqual(r.world.held, None)
+        self.assertEqual(planar(r).held, None)
         self.assertEqual(r.world.violations, [])
         self.assertGreaterEqual(r.s0.c["fallback_expiries"], 1)
 

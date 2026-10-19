@@ -146,7 +146,9 @@ in
       '';
 
   # The runtime: lint, strict types, and every test, the whole scenario matrix
-  # included (simulated, no VM). Its version is the release's.
+  # included (simulated, no VM), the MuJoCo scenes of the simulated Panda and a
+  # short video with them (software rendering). Its version is the release's.
+  # `omarchy-runtime --version` runs the package a robot installs: numpy only.
   omarchy-runtime =
     assert lib.assertMsg (
       pkgs.omarchy-runtime.version == version
@@ -157,12 +159,21 @@ in
         (pkgs.python3.withPackages (ps: [
           ps.mypy
           ps.numpy
+          ps.mujoco
         ]))
+        pkgs.ffmpeg-headless
         pkgs.omarchy-runtime
       ]
       ''
         cd pkgs/omarchy-runtime
-        export PYTHONDONTWRITEBYTECODE=1
+        export PYTHONDONTWRITEBYTECODE=1 OMARCHY_MENAGERIE=${pkgs.mujoco-menagerie} MUJOCO_GL=egl
+        export __EGL_VENDOR_LIBRARY_FILENAMES=${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json
+        export LD_LIBRARY_PATH=${
+          lib.makeLibraryPath [
+            pkgs.libglvnd
+            pkgs.mesa
+          ]
+        }
         ruff check --no-cache .
         ruff format --check --no-cache .
         mypy --cache-dir=/dev/null omarchy_runtime tests

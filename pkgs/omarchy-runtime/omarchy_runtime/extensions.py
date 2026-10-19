@@ -19,10 +19,13 @@ import numpy as np
 
 from omarchy_runtime.belief import WorldState, free_spots
 from omarchy_runtime.contracts import (
+    CARTESIAN,
     ActionChunk,
     BodySpec,
     ChunkCorrector,
     ConfigError,
+    ContactIntent,
+    ContactMode,
     FallbackGenerator,
     FallbackSpec,
     GiveUp,
@@ -39,6 +42,7 @@ from omarchy_runtime.contracts import (
     S0History,
     S0Mode,
     S0Status,
+    Timing,
     Truth,
     Verdict,
     VerdictKind,
@@ -71,6 +75,32 @@ class GeometricVerifier:
     def verify(self, goal: Goal, belief: WorldState, not_before: Ns) -> Verdict:
         e = belief.evaluate(goal, since=not_before)
         return Verdict(VERDICTS[e.truth], e.evidence, e.reason)
+
+
+class CoverageVerifier:
+    """Judges clean(surface) from the latest coverage of the surface seen at
+    or after not_before (a dirt sensor): fewer than VISIBLE of its cells seen
+    (occluded) is INCONCLUSIVE; else at least CLEAN of those seen looking
+    clean is SATISFIED, fewer is VIOLATED. No such observation: INCONCLUSIVE.
+    A simulated sensor feeds it; a real cleanliness verifier is future work."""
+
+    id = "coverage"
+    version = "1"
+    CLEAN = 0.9
+    VISIBLE = 0.8
+
+    def verify(self, goal: Goal, belief: WorldState, not_before: Ns) -> Verdict:
+        if goal.predicate != "clean" or len(goal.args) != 1:
+            return Verdict(VerdictKind.INCONCLUSIVE, (), f"coverage judges clean(surface), not {goal}")
+        seen = belief.coverage(goal.args[0], not_before)
+        if seen is None:
+            return Verdict(VerdictKind.INCONCLUSIVE, (), f"no coverage of {goal.args[0]} seen since t={not_before} ns")
+        c, obs = seen
+        if c.seen < self.VISIBLE * c.cells:
+            return Verdict(VerdictKind.INCONCLUSIVE, (obs,), f"occluded: {c.seen} of {c.cells} cells of {c.entity} seen [{obs}]")
+        share = c.clean / c.seen
+        kind = VerdictKind.SATISFIED if share >= self.CLEAN else VerdictKind.VIOLATED
+        return Verdict(kind, (obs,), f"{c.clean} of {c.seen} cells of {c.entity} seen look clean ({100 * share:.0f} %) [{obs}]")
 
 
 class RetryOnce:
@@ -109,6 +139,16 @@ class RetryElsewhere:
             x = free_spots(entities[container]["geometry"], entities[obj]["geometry"]["width"], others)[0]
             return Retry(goal, {"place_x": x, "tries": tries + 1}, f"{claim['reason']}: place at x = {x:.3f} instead")
         return RetryOnce().decide(goal, summary, belief)
+
+
+class NoRetry:
+    """Never retry: one execution per goal (the scrubbing experiment compares first attempts)."""
+
+    id = "give_up"
+    version = "1"
+
+    def decide(self, goal: Goal, summary: Json, belief: Json) -> Retry | GiveUp:
+        return GiveUp(f"no retry after {summary['outcome']}/{summary['category']}: this S2 never retries")
 
 
 class NoCorrection:
@@ -287,12 +327,44 @@ class LiftHeld(Hold):
         return row
 
 
+class Retreat:
+    """A Cartesian body's default fallback for contact: leave contact upwards,
+    compliant along the normal. The end-effector rises RETREAT_M from where S0
+    is, its orientation kept, with a contact channel that breaks contact and
+    then stays free, soft along z (RETREAT_STIFFNESS). The body names its
+    Cartesian space, frame and end-effector (`kinematics.cartesian`)."""
+
+    id = "retreat"
+    version = "1"
+
+    def motion_key(self, body: BodySpec, status: S0Status) -> Hashable:
+        return None  # always the same motion
+
+    def fallback(self, body: BodySpec, status: S0Status, valid_from: Ns, valid_until: Ns) -> FallbackSpec:
+        cart = body.kinematics.get("cartesian")
+        if cart is None:
+            raise ConfigError(f"body {body.id}: the retreat fallback needs kinematics.cartesian")
+        source = f"default.{self.id}@{self.version}"
+        lasts = max(valid_until - valid_from, RETREAT_DT)
+        timing = Timing(0, RETREAT_DT, lasts, source, 0)
+        modes = [ContactMode.BREAK, ContactMode.FREE]
+        contact = ContactIntent.make(
+            timing, cart["ee"], cart["frame"], (0, 0, 1), modes, [[0.0], [0.0]], [0.0], [RETREAT_MAX_N], RETREAT_STIFFNESS
+        )
+        rows = [[0.0, 0.0, RETREAT_M, 1.0, 0.0, 0.0, 0.0]]
+        return FallbackSpec.make(
+            cart["action_space"], CARTESIAN, RETREAT_DT, rows, valid_from, valid_until, source, lasts, [True] * 7, cart["frame"], contact
+        )
+
+
 FALLBACK_DT = ns(0.2)  # the default fallback's one row, reached over this time
 LIFT_M = 0.02
+RETREAT_DT, RETREAT_M, RETREAT_MAX_N = ns(0.5), 0.03, 20.0
+RETREAT_STIFFNESS = (1000.0, 1000.0, 200.0, 50.0, 50.0, 50.0)
 
 FILTERS: Mapping[str, Callable[[], ObservationFilter]] = {"identity": IdentityFilter}
-VERIFIERS: Mapping[str, Callable[[], Verifier]] = {"geometric": GeometricVerifier}
-RECOVERY: Mapping[str, Callable[[], RecoveryPolicy]] = {"retry_once": RetryOnce, "retry_elsewhere": RetryElsewhere}
+VERIFIERS: Mapping[str, Callable[[], Verifier]] = {"geometric": GeometricVerifier, "coverage": CoverageVerifier}
+RECOVERY: Mapping[str, Callable[[], RecoveryPolicy]] = {"retry_once": RetryOnce, "retry_elsewhere": RetryElsewhere, "give_up": NoRetry}
 # Robot-side S1 extensions take their parameter table, [s1_host] in runtime.toml.
 CORRECTORS: Mapping[str, Callable[[Json], ChunkCorrector]] = {
     "none": lambda p: NoCorrection(),
@@ -303,7 +375,7 @@ INFERENCE_TRIGGERS: Mapping[str, Callable[[Json], InferenceTrigger]] = {
     "mismatch": lambda p: Mismatch(float(p["mismatch"])),
 }
 # A capability names its default fallback generator in capabilities.toml (default_fallback).
-DEFAULT_FALLBACKS: Mapping[str, Callable[[], FallbackGenerator]] = {"hold": Hold, "lift": LiftHeld}
+DEFAULT_FALLBACKS: Mapping[str, Callable[[], FallbackGenerator]] = {"hold": Hold, "lift": LiftHeld, "retreat": Retreat}
 # Latency models take the median time to first token (s) and a spread (0 for fixed).
 LATENCY: Mapping[str, Callable[[float, float], LatencyModel]] = {"fixed": FixedLatency, "lognormal": LognormalLatency}
 

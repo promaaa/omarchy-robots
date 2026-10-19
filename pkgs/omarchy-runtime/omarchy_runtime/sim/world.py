@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from omarchy_runtime.belief import Scene
 from omarchy_runtime.contracts import BodySpec, Goal, Ns, seconds
@@ -29,15 +30,21 @@ TOLERANCE = 1e-9  # numerical slack on limits
 PENETRATION = 0.005  # how far below a surface top a held cup may dip before it counts
 
 
+class Timeline(Protocol):
+    """A simulated world's first events, by kind: what fault windows count from."""
+
+    first: dict[str, Ns]
+
+
 @dataclass(frozen=True)
 class Trigger:
-    """A fault window: `delay` after the first `after` event ("start", "moving", "grasp" or "release"), for `duration`."""
+    """A fault window: `delay` after the first `after` event ("start", "moving", "grasp", "release" or "contact"), for `duration`."""
 
     after: str
     delay: Ns
     duration: Ns
 
-    def active(self, world: World, now: Ns) -> bool:
+    def active(self, world: Timeline, now: Ns) -> bool:
         t0 = world.first.get(self.after)
         return t0 is not None and t0 + self.delay <= now < t0 + self.delay + self.duration
 

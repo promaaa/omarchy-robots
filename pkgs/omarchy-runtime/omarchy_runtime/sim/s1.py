@@ -27,6 +27,7 @@ from omarchy_runtime.contracts import (
     Goal,
     InferenceContext,
     InferenceTrigger,
+    IntentChunk,
     Json,
     Ns,
     Observation,
@@ -35,10 +36,10 @@ from omarchy_runtime.contracts import (
     ns,
 )
 from omarchy_runtime.extensions import NoCorrection, Periodic
+from omarchy_runtime.s0 import S0Loop
 from omarchy_runtime.sched import Latest
 from omarchy_runtime.sim.kinematics import Kinematics
-from omarchy_runtime.sim.s0 import SimS0
-from omarchy_runtime.sim.world import Trigger, World
+from omarchy_runtime.sim.world import Timeline, Trigger
 
 SPEED = 0.25  # m/s of the gripper's reference point along each segment
 GRIP_RATE = 2.0  # gripper travel per second
@@ -167,7 +168,8 @@ class ScriptedPickPlace:
         if self._report is not None or observation is None or observation.proprio is None:
             return None
         q = observation.proprio.position
-        here = (*observation.proprio.ee, q[self._gripper])
+        ee = observation.proprio.ee
+        here = (ee[0], ee[1], q[self._gripper])
         seen = self._judged_at(observation, now)  # the body was `here` then, not at `now`
         if not self._plan:
             self._replan(seen, here, 0)
@@ -221,11 +223,11 @@ class SimS1Host:
 
     def __init__(
         self,
-        s0: SimS0,
+        s0: S0Loop,
         observations: Latest[Observation],
         latency: Callable[[], Ns],
         stalls: Sequence[Stall],
-        world: World,
+        world: Timeline,
         *,
         period: Ns,
         corrector: ChunkCorrector | None = None,
@@ -243,7 +245,7 @@ class SimS1Host:
         self.failure: str | None = None
         self.inferences = 0
         self._measured: Ns = 0  # the last inference latency
-        self._in_flight: list[tuple[Ns, int, Ns, ActionChunk]] = []  # a heap: arrival, sequence, inference start, chunk
+        self._in_flight: list[tuple[Ns, int, Ns, ActionChunk | IntentChunk]] = []  # a heap: arrival, sequence, inference start, chunk
 
     def attach(self, policy: S1Policy) -> None:
         self.policy, self.failure = policy, None
@@ -267,6 +269,8 @@ class SimS1Host:
                 return
             self.inferences += 1
             chunk = self.policy.step(now, self.observations.get())
+            if isinstance(chunk, IntentChunk) and self.corrector.id != NoCorrection.id:
+                raise ContractError(f"corrector {self.corrector.id} corrects v1 action chunks, and this S1 sends intent chunks")
         except Exception as e:  # noqa: BLE001 - a crashing policy or trigger fails its execution, never S0
             self.failure = f"{type(e).__name__}: {e}"
             return
@@ -277,6 +281,9 @@ class SimS1Host:
         while self._in_flight and self._in_flight[0][0] <= now:
             _, _, started, chunk = heapq.heappop(self._in_flight)
             self._measured = now - started
+            if isinstance(chunk, IntentChunk):
+                self._submit(chunk.inferred(self._measured), now)  # no corrector: the correctors take v1 chunks (checked at start)
+                continue
             chunk = dataclasses.replace(chunk, inference_ns=self._measured)
             try:
                 corrected = self.corrector.correct(chunk, self.s0.history(chunk.observed_at), self.s0.status(), now)
@@ -287,9 +294,11 @@ class SimS1Host:
                 self.failure = f"corrector {self.corrector.id}: {type(e).__name__}: {e}"
                 self._in_flight = []
                 return
-            chunk = corrected
-            try:
-                self.s0.submit_chunk(chunk, now)
-            except ChunkRejected as e:
-                # S0 counts rejected chunks; the runtime sees the count in S0's status.
-                log.debug("S0 rejected chunk %d: %s", chunk.seq, e)
+            self._submit(corrected, now)
+
+    def _submit(self, chunk: ActionChunk | IntentChunk, now: Ns) -> None:
+        try:
+            self.s0.submit_chunk(chunk, now)
+        except ChunkRejected as e:
+            # S0 counts rejected chunks and keeps the last refusal; the runtime records it from S0's status.
+            log.debug("S0 rejected chunk %d: %s", chunk.seq, e)

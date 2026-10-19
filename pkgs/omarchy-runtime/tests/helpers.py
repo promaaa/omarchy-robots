@@ -12,6 +12,7 @@ from omarchy_runtime import config
 from omarchy_runtime.belief import WorldState
 from omarchy_runtime.contracts import BodySpec, Detection, Goal, Observation, Proprioception, ns
 from omarchy_runtime.scenario import RunResult, run
+from omarchy_runtime.sim.world import World
 
 TMP = tempfile.TemporaryDirectory()
 atexit.register(TMP.cleanup)  # after every test module: runs are shared between them
@@ -44,6 +45,12 @@ def belief(*observations: Observation) -> WorldState:
     for o in observations:
         b.update(o)
     return b
+
+
+def planar(r: RunResult) -> World:
+    """The planar world of a run, its cups and grasp."""
+    assert isinstance(r.world, World)
+    return r.world
 
 
 @functools.cache

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import sys
@@ -45,6 +46,17 @@ def narrate(results: dict[str, object]) -> str:
                 f"ground truth {str(r['truth']).lower()}, {r['duration_s']:.2f} s simulated"
             )
     return "\n".join(lines)
+
+
+def runnable() -> list[str]:
+    """Every scenario this package can run: without MuJoCo (the robot's package), not the simulated Panda's, and it says so."""
+    names = config.scenario_names()
+    if importlib.util.find_spec("mujoco") is not None:
+        return names
+    left = [n for n in names if config.effective(n)["body"]["kind"] == "mujoco_panda"]
+    if left:
+        print(f"Not run, for want of MuJoCo (omarchy-runtime-tools has it): {', '.join(left)}\n")
+    return [n for n in names if n not in left]
 
 
 def cmd_eval(args: argparse.Namespace, names: list[str], prefix: str) -> int:
@@ -248,6 +260,32 @@ def cmd_inference_matrix(args: argparse.Namespace) -> int:
     return 0 if all(c["violations"] == 0 for c in results["cells"]) else 1
 
 
+def cmd_scrub_experiment(args: argparse.Namespace) -> int:
+    from omarchy_runtime import scrub  # MuJoCo: in omarchy-runtime-tools only
+
+    out = fresh(runs_dir(args), f"scrub-{stamp()}")
+    results = scrub.experiment(out, seeds=args.seeds, jobs=args.jobs)
+    print(scrub.report(results))
+    print(f"\nTraces and results.json: {out}")
+    if args.docs:
+        source = (
+            f"runtime {runtime_identity()['revision'] or 'unknown'}, {stamp()}, `omarchy-runtime scrub-experiment --seeds {args.seeds}`"
+        )
+        placement.write_block([Path(f) for f in args.docs], "scrub", scrub.markdown(results, source))
+        print(f"The scrubbing tables in {', '.join(args.docs)} are now this run's.")
+    return 0 if all(c["violations"] == 0 for c in results["cells"]) else 1
+
+
+def cmd_scrub_render(args: argparse.Namespace) -> int:
+    from omarchy_runtime import scrub  # MuJoCo: in omarchy-runtime-tools only
+
+    out = Path(args.out)
+    provenance = scrub.render(Path(args.run_dir), out, fps=args.fps)
+    out.with_suffix(".json").write_text(json.dumps(provenance, indent=2) + "\n")
+    print(f"{out} and its provenance, {out.with_suffix('.json')}")
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     status = 0
     for run in args.run_dir:
@@ -285,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=lambda a: cmd_eval(a, DEMO, "demo"))
     p = sub.add_parser("eval", parents=[runs], help="run scenarios (default: all) and print the results table")
     p.add_argument("scenarios", nargs="*", help=f"from: {', '.join(config.scenario_names())}")
-    p.set_defaults(func=lambda a: cmd_eval(a, a.scenarios or config.scenario_names(), "eval"))
+    p.set_defaults(func=lambda a: cmd_eval(a, a.scenarios or runnable(), "eval"))
     p = sub.add_parser("run", parents=[runs], help="run one scenario (a name, or a path to a .toml file)")
     p.add_argument("scenario")
     p.set_defaults(func=cmd_run)
@@ -357,6 +395,20 @@ def main(argv: list[str] | None = None) -> int:
         help="measured S1 inference delays (latency format, kind s1_inference): one more delay each",
     )
     p.set_defaults(func=cmd_inference_matrix)
+    p = sub.add_parser(
+        "scrub-experiment",
+        help="the scrubbing experiment on the simulated Panda: motion only and with contact x plate height errors x seeds (tools package)",
+        parents=[runs],
+    )
+    p.add_argument("--seeds", type=int, default=5, help="runs per condition and error (seeds 1..N)")
+    p.add_argument("--jobs", type=int, default=1, help="runs at a time")
+    p.add_argument("--docs", nargs="*", help="write the table into these files, between <!-- scrub:begin --> and <!-- scrub:end -->")
+    p.set_defaults(func=cmd_scrub_experiment)
+    p = sub.add_parser("scrub-render", help="an mp4 of a recorded scrubbing run (run --record-s0), with its provenance (tools package)")
+    p.add_argument("run_dir")
+    p.add_argument("--out", required=True, help="the .mp4 to write; its provenance goes next to it (.json)")
+    p.add_argument("--fps", type=int, default=30)
+    p.set_defaults(func=cmd_scrub_render)
     p = sub.add_parser("show", help="summarise a run directory")
     p.add_argument("run_dir")
     p.set_defaults(func=cmd_show)

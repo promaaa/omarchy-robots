@@ -1,0 +1,46 @@
+description = """scrub_contact, but the actuators deliver a tenth of the torque S0 commands
+(derated motors) from the first contact on: the force never reaches its
+bounds, the dirt stays. S0 did not achieve the intent: EXECUTION."""
+seed = 1
+body = "panda"
+world = "scrub"
+limit_s = 40.0
+
+[extensions]
+recovery = "give_up"  # first attempts only
+
+[fidelity]
+tracking = 0.01  # m: about twice the controller's tracking error in free space
+
+[s1]
+latency_s = 0.05
+contact = true
+force_n = 10.0
+force_min_n = 5.0
+force_max_n = 20.0
+stiffness = [1500, 1500, 800, 60, 60, 60]
+press_m = 0.010  # the path runs this far below the believed top: with S0's default stiffness (1000 N/m), about 10 N where the belief is right
+line_spacing_m = 0.035
+margin_m = 0.05  # the pad's centre stays this far inside the plate's edge
+transfer_m_s = 0.15
+descend_m_s = 0.03
+wipe_m_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "clean", args = ["plate"] }]
+
+[[faults]]
+kind = "weak_actuators"
+scale = 0.1
+after = "contact"
+delay_s = 0.0
+duration_s = 60.0
+
+[[expect]]
+outcome = "FAILED"
+category = "VERIFICATION_FAILED"
+claim = "DONE"
+verdict = "VIOLATED"
+truth = false
+attribution = "EXECUTION"

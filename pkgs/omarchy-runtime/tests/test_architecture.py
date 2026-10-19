@@ -1,6 +1,8 @@
 """Binding principles that the import graph can show: contracts and the runtime
 core never import the simulator, nothing imports ROS, only wallclock.py reads
-the wall clock, and numpy is the only dependency outside the standard library."""
+the wall clock, and numpy is the only dependency outside the standard library
+(the development tools aside: MuJoCo, in two modules that only a command
+imports, inside a function)."""
 
 from __future__ import annotations
 
@@ -52,6 +54,11 @@ def imports(path: Path) -> set[str]:
     return names
 
 
+# The development tools, in the omarchy-runtime-tools package only: what each may import besides,
+# and the modules that may import them, never at their top level.
+TOOLS = {"sim.panda": {"mujoco"}, "scrub": {"mujoco"}}
+TOOL_USERS = {"cli", "scenario", "scrub"}
+
 TMP = tempfile.TemporaryDirectory()
 unittest.addModuleCleanup(TMP.cleanup)
 MODULES = {p.relative_to(PACKAGE).with_suffix("").as_posix().replace("/", "."): imports(p) for p in PACKAGE.rglob("*.py")}
@@ -84,8 +91,25 @@ class TestArchitecture(unittest.TestCase):
 
     def test_numpy_is_the_only_dependency(self) -> None:
         for module, names in MODULES.items():
-            roots = {n.split(".")[0] for n in names} - {"omarchy_runtime", "numpy", "__future__"}
+            roots = {n.split(".")[0] for n in names} - {"omarchy_runtime", "numpy", "__future__"} - TOOLS.get(module, set())
             self.assertEqual(roots - set(sys.stdlib_module_names), set(), module)
+
+    def test_the_robot_package_runs_without_the_tools(self) -> None:
+        tools = {f"omarchy_runtime.{m}" for m in TOOLS}
+        for path in PACKAGE.rglob("*.py"):
+            module = path.relative_to(PACKAGE).with_suffix("").as_posix().replace("/", ".")
+            if module in TOOLS:
+                continue
+            top = set()
+            for node in ast.parse(path.read_text()).body:  # the module's top level only
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    top |= {node.module} | {f"{node.module}.{a.name}" for a in node.names}
+                elif isinstance(node, ast.Import):
+                    top |= {a.name for a in node.names}
+            with self.subTest(module):
+                self.assertEqual(top & (tools | {"mujoco"}), set())
+                if MODULES[module] & tools:
+                    self.assertIn(module, TOOL_USERS)
 
 
 if __name__ == "__main__":

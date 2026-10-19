@@ -50,3 +50,46 @@ safe_pose = [0.55, 1.20, 0.0]
 controller = "motion_tracker"
 command = "position"
 dt_s = [0.001, 10.0]
+
+[panda]  # a Franka Emika Panda with a sponge on its flange, torque-controlled: simulated in MuJoCo (the Menagerie model)
+kind = "mujoco_panda"
+action_space = "panda.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+max_velocity = [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61]
+workspace = [0.25, 0.85, -0.35, 0.35, 0.38, 0.90]  # x0, x1, y0, y1, z0, z1 of the pad
+features = ["contact"]
+home = [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853]  # the pad at (0.554, 0, 0.585), pointing down
+safe_pose = [0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853]
+
+[panda.kinematics.limits]  # the guard's, in torque control: the Panda's documented torque and torque-rate limits
+torque_nm = [87, 87, 87, 87, 12, 12, 12]
+torque_rate_nm_s = [1000, 1000, 1000, 1000, 1000, 1000, 1000]
+force_n = 40.0  # the most end-effector force the guard lets a controller cause
+hold_stiffness = [60, 60, 60, 60, 20, 20, 10]  # the guard's own joint spring and damper
+hold_damping = [10, 10, 10, 10, 3, 3, 2]
+
+[panda.kinematics.cartesian]  # the Cartesian intents it takes
+action_space = "panda.ee_pose.v1"
+frame = "panda.base"
+ee = "pad"
+orientation = [0.0, -0.70710678, 0.70710678, 0.0]  # the pad pointing down, as at home
+
+[panda.kinematics.impedance]  # the Cartesian impedance controller's default stiffness (N/m, Nm/rad), without a contact channel
+stiffness = [1000, 1000, 1000, 50, 50, 50]
+
+[panda.s0]
+controller = "cartesian_impedance"
+command = "torque"
+dt_s = [0.001, 1.0]
+motion = ["panda.ee_pose.v1"]
+frames = ["panda.base"]
+object = ["pose"]
+scene = ["pose:plate"]
+
+[panda.s0.contact]
+ees = ["pad"]
+frames = ["panda.base"]
+max_force_n = 30.0
+stiffness = [[0, 3000], [0, 3000], [0, 3000], [0, 300], [0, 300], [0, 300]]

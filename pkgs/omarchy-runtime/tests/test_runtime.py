@@ -147,8 +147,8 @@ class Rig:
         p |= params
         self.runtime = Runtime(
             body=GANTRY,
-            capabilities=config.capabilities(GANTRY_CFG),
-            bindings=config.bindings(GANTRY_CFG),
+            capabilities=[c for c in config.capabilities(GANTRY_CFG) if c.id == "place_in"],  # the one bound to the gantry
+            bindings=[b for b in config.bindings(GANTRY_CFG) if b.capability == "place_in"],
             implementations={"pick_place.arm3": FakePolicy, "pick_place.gantry": factory or (lambda: self.policy)},
             params=Params(**{k: ns(v) for k, v in p.items()}),  # type: ignore[arg-type]  # the fidelity limits keep their default
             belief=belief(),

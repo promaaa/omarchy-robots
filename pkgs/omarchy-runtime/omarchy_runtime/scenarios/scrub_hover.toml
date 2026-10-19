@@ -1,0 +1,43 @@
+description = """Motion only, the plate believed 2 cm higher than it is: the path runs 1 cm
+above the plate, the sponge never touches it, S0 tracks the path faithfully,
+and the dirt stays. Attributed to INTENT: a motion-only intent cannot say
+"press here", so nothing below S1 can tell the path is wrong."""
+seed = 1
+body = "panda"
+world = "scrub"
+limit_s = 40.0
+
+[extensions]
+recovery = "give_up"  # first attempts only
+
+[fidelity]
+tracking = 0.01  # m: about twice the controller's tracking error in free space
+
+[sensor]
+plate_bias_z_m = 0.02  # the camera sees the plate 2 cm higher: perception error
+
+[s1]
+latency_s = 0.05
+contact = false
+force_n = 10.0
+force_min_n = 5.0
+force_max_n = 20.0
+stiffness = [1500, 1500, 800, 60, 60, 60]
+press_m = 0.010  # the path runs this far below the believed top: with S0's default stiffness (1000 N/m), about 10 N where the belief is right
+line_spacing_m = 0.035
+margin_m = 0.05  # the pad's centre stays this far inside the plate's edge
+transfer_m_s = 0.15
+descend_m_s = 0.03
+wipe_m_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "clean", args = ["plate"] }]
+
+[[expect]]
+outcome = "FAILED"
+category = "VERIFICATION_FAILED"
+claim = "DONE"
+verdict = "VIOLATED"
+truth = false
+attribution = "INTENT"

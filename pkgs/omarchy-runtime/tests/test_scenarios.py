@@ -16,7 +16,7 @@ from omarchy_runtime.contracts import SECOND
 from omarchy_runtime.evaluate import scenario_result
 from omarchy_runtime.scenario import RunResult, run
 from omarchy_runtime.trace import S0_FALLBACKS, S0_MODES, validate_run
-from tests.helpers import scenario, tmpdir
+from tests.helpers import planar, scenario, tmpdir
 
 TRACKING, FALLBACK, HOLD = (S0_MODES.index(m) for m in ("TRACKING", "FALLBACK", "HOLD"))
 BASE, S2 = S0_FALLBACKS.index("base"), S0_FALLBACKS.index("s2")
@@ -163,7 +163,7 @@ class TestProperties(unittest.TestCase):
     def test_p4_long_stall_fails_and_leaves_s0_holding_the_cup(self) -> None:
         r = scenario("s1_stall_long")
         self.assertEqual(outcomes(r), [("FAILED", "S1_STALL", None, None)])
-        self.assertEqual(r.world.held, "cup_1")
+        self.assertEqual(planar(r).held, "cup_1")
         # Still under the capability's default after the failure, waiting for S2: the cup held.
         self.assertEqual((r.s0.mode.value, r.s0.status().fallback_source), ("FALLBACK", "default.lift@1"))
         s = r.summaries[0]
@@ -182,7 +182,7 @@ class TestProperties(unittest.TestCase):
         self.assertEqual([s for s, _, _ in runs], [S2, BASE])
         (_, s0, s1), (_, b0, b1) = runs
         self.assertAlmostEqual((rec["t"][s1] - rec["t"][s0]) / SECOND, 1.5, places=2)
-        safe = np.array(r.world.body.safe_pose)
+        safe = np.array(planar(r).body.safe_pose)
         self.assertTrue(np.allclose(rec["position"][s1], safe))
         self.assertTrue(np.allclose(rec["position"][b0 : b1 + 1], safe))
         self.assertEqual(r.summaries[0]["s0"]["fallback_expiries"], 1)
@@ -238,7 +238,16 @@ class TestProperties(unittest.TestCase):
         s = r.summaries[0]
         self.assertEqual(
             s["candidates"],
-            [{"capability": "place_in", "implementation": None, "version": None, "accepted": False, "reason": "achieves in, not clean"}],
+            [
+                {"capability": "place_in", "implementation": None, "version": None, "accepted": False, "reason": "achieves in, not clean"},
+                {
+                    "capability": "wipe",
+                    "implementation": "wipe.panda",
+                    "version": "1",
+                    "accepted": False,
+                    "reason": "not bound to body arm3 (bodies: panda)",
+                },
+            ],
         )
         resolution = next(e for e in events(r) if e["type"] == "resolution")
         self.assertEqual(resolution["payload"]["candidates"], s["candidates"])

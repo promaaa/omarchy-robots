@@ -299,8 +299,8 @@ class TestLifecycle(unittest.TestCase):
 
 
 class TestResolver(unittest.TestCase):
-    caps = config.capabilities(ARM_CFG)
-    binds = config.bindings(ARM_CFG)
+    caps = [c for c in config.capabilities(ARM_CFG) if c.id == "place_in"]  # the planar bodies' (wipe is the Panda's)
+    binds = [b for b in config.bindings(ARM_CFG) if b.capability == "place_in"]
 
     def test_chooses_the_binding_for_the_body_with_reasons(self) -> None:
         b = belief(observation(1, 1.0, {"cup_1": TABLE_SPOT}))
@@ -316,6 +316,10 @@ class TestResolver(unittest.TestCase):
         r = resolve(Goal("clean", ("cup_1",)), belief(), ARM, self.caps, self.binds, 0)
         self.assertIs(r.category, Category.NO_CAPABILITY)
         self.assertEqual([c.reason for c in r.candidates], ["achieves in, not clean"])
+        everything = resolve(Goal("clean", ("cup_1",)), belief(), ARM, config.capabilities(ARM_CFG), config.bindings(ARM_CFG), 0)
+        self.assertIs(everything.category, Category.NO_CAPABILITY)  # wiping is the Panda's, not this arm's
+        self.assertIn("not bound to body arm3 (bodies: panda)", [c.reason for c in everything.candidates])
+        self.assertEqual([c.id for c in config.capabilities(ARM_CFG)], ["place_in", "wipe"])
 
     def test_preconditions(self) -> None:
         r = resolve(IN_RACK, belief(), ARM, self.caps, self.binds, 0)

@@ -45,3 +45,4 @@ trigger = "periodic"  # InferenceTrigger, asked at S1's rate
 in = "geometric"
 on = "geometric"
 held = "geometric"
+clean = "coverage"  # from a surface sensor's coverage (the simulated dirt sensor)

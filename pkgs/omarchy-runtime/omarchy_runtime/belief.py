@@ -13,7 +13,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from omarchy_runtime.contracts import Goal, Json, Ns, Observation, Proprioception, Truth
+from omarchy_runtime.contracts import Coverage, Goal, Json, Ns, Observation, Proprioception, Truth
 
 PREDICATES = {"in": 2, "on": 2, "held": 1}
 
@@ -142,6 +142,7 @@ class WorldState:
         self.version = 0
         self._estimates: dict[str, Estimate] = {}
         self._by_source: dict[tuple[str, str], Estimate] = {}
+        self._coverage: dict[str, tuple[Coverage, str, Ns]] = {}
         self._proprio: tuple[Proprioception, str, Ns] | None = None
         self.contradictions: list[Json] = []
 
@@ -168,9 +169,18 @@ class WorldState:
             e = Estimate(d.x, d.z, d.confidence, observation.id, observation.t, observation.source, d.y)
             self._contradicted(d.entity, e)
             self._estimates[d.entity] = self._by_source[(d.entity, observation.source)] = e
+        for c in observation.coverage:
+            self._coverage[c.entity] = (c, observation.id, observation.t)
         if observation.proprio is not None:
             self._proprio = (observation.proprio, observation.id, observation.t)
         self.version += 1
+
+    def coverage(self, entity: str, since: Ns | None = None) -> tuple[Coverage, str] | None:
+        """The latest coverage of an entity's surface, with its observation id; None if older than `since`."""
+        c = self._coverage.get(entity)
+        if c is None or (since is not None and c[2] < since):
+            return None
+        return c[0], c[1]
 
     def estimate(self, entity: str, since: Ns | None = None) -> Estimate | None:
         e = self._estimates.get(entity)
@@ -268,6 +278,9 @@ class WorldState:
         for name, e in sorted(self._estimates.items()):
             if name not in entities:
                 entities[name] = {"kind": "unknown", "geometry": None, "estimate": e.to_json()}
+        for name, (c, obs, t) in sorted(self._coverage.items()):
+            if name in entities:
+                entities[name]["coverage"] = c.to_json() | {"observation": obs, "t": t}
         robot = None
         if self._proprio is not None:
             proprio, obs, t = self._proprio

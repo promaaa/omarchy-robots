@@ -81,6 +81,13 @@
         omarchy-runtime = final.callPackage ./pkgs/omarchy-runtime {
           revision = self.rev or self.dirtyRev or null;
         };
+        # The runtime with the MuJoCo scene of the simulated Panda: development
+        # tools, never in a robot's system.
+        omarchy-runtime-tools = final.callPackage ./pkgs/omarchy-runtime {
+          revision = self.rev or self.dirtyRev or null;
+          tools = true;
+        };
+        mujoco-menagerie = final.callPackage ./pkgs/mujoco-menagerie { };
         omarchy-branding = final.callPackage ./pkgs/omarchy-branding { };
       };
 
@@ -88,7 +95,7 @@
         lib.recursiveUpdate
           {
             x86_64-linux = {
-              inherit (pkgs) omarchy-robot omarchy-runtime;
+              inherit (pkgs) omarchy-robot omarchy-runtime omarchy-runtime-tools;
               # The local S2 backend of `omarchy-runtime ttft-measure`: nixpkgs'
               # llama.cpp, as packaged (baseline x86-64: GGML_NATIVE off, no
               # AVX2), and the same built for AVX2 hosts (FMA, F16C, BMI2 too).
@@ -178,9 +185,19 @@
           (python3.withPackages (ps: [
             ps.mypy
             ps.numpy
+            ps.mujoco
           ]))
+          ffmpeg-headless
           ruff
           statix
+        ];
+        # The simulated Panda's model and software rendering, as in omarchy-runtime-tools.
+        OMARCHY_MENAGERIE = pkgs.mujoco-menagerie;
+        MUJOCO_GL = "egl";
+        __EGL_VENDOR_LIBRARY_FILENAMES = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
+        LD_LIBRARY_PATH = lib.makeLibraryPath [
+          pkgs.libglvnd
+          pkgs.mesa
         ];
       };
     };

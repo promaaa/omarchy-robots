@@ -39,7 +39,7 @@ def _invariants(r: RunResult) -> list[str]:
     rec = r.record()
     tick = SECOND // r.cfg["world"]["rates_hz"]["s0"]
     bound = r.s0.bound * (1 + 1e-9) + 1e-12
-    if len(rec["t"]) > 1 and np.any(np.abs(np.diff(rec["position"], axis=0)) > bound):
+    if r.s0.position and len(rec["t"]) > 1 and np.any(np.abs(np.diff(rec["position"], axis=0)) > bound):
         problems.append("S0 commanded a step above its bound (velocity limit times the nominal period)")
     if len(rec["t"]) != r.s0.c["ticks"]:
         problems.append("S0's record is incomplete")

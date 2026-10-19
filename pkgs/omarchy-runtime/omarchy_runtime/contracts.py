@@ -235,13 +235,29 @@ class Detection:
 
 
 @dataclass(frozen=True)
+class Coverage:
+    """What a surface sensor saw of one entity's surface, a grid of `cells`:
+    how many it could see (not occluded), and how many of those looked clean.
+    A sensor of dirt, noisy and occludable; no images."""
+
+    entity: str
+    cells: int
+    seen: int
+    clean: int
+
+    def to_json(self) -> Json:
+        return {"entity": self.entity, "cells": self.cells, "seen": self.seen, "clean": self.clean}
+
+
+@dataclass(frozen=True)
 class Proprioception:
     """What the body reports about itself: its position over `dims` (the action
-    space's dimensions, gripper included) and the gripper's reference point."""
+    space's dimensions, gripper included) and the end-effector's reference
+    point, (x, z) on a planar body, (x, y, z) in 3D."""
 
     dims: tuple[str, ...]
     position: tuple[float, ...]
-    ee: tuple[float, float]
+    ee: tuple[float, ...]
 
     def value(self, dim: str) -> float:
         return self.position[self.dims.index(dim)]
@@ -262,6 +278,7 @@ class Observation:
     source: str
     detections: tuple[Detection, ...]
     proprio: Proprioception | None
+    coverage: tuple[Coverage, ...] = ()
 
     def to_json(self) -> Json:
         return {
@@ -270,6 +287,7 @@ class Observation:
             "source": self.source,
             "detections": [d.to_json() for d in self.detections],
             "proprio": self.proprio.to_json() if self.proprio else None,
+            "coverage": [c.to_json() for c in self.coverage],
         }
 
 
@@ -666,6 +684,14 @@ class IntentChunk:
         """A v1 chunk as a motion-only intent, timing and rows unchanged."""
         timing = Timing(chunk.t_start, chunk.dt, chunk.valid_until, chunk.source, chunk.observed_at, chunk.inference_ns)
         return IntentChunk(chunk.seq, chunk.source, MotionIntent(timing, chunk.action_space, chunk.dims, chunk.actions))
+
+    def inferred(self, latency: Ns) -> IntentChunk:
+        """The same chunk with its measured inference latency on every channel (set by S1's host)."""
+
+        def at(c: Any) -> Any:
+            return None if c is None else dataclasses.replace(c, timing=dataclasses.replace(c.timing, inference_ns=latency))
+
+        return IntentChunk(self.seq, self.source, at(self.motion), at(self.object), tuple(at(c) for c in self.contact))
 
     @functools.cached_property
     def channels(self) -> tuple[str, ...]:
@@ -1511,8 +1537,8 @@ class S1Policy(Protocol):
     def start(self, goal: Goal, belief: Json, body: BodySpec, conditioning: Mapping[str, Any]) -> None:
         """Begin working on `goal` from a belief snapshot."""
 
-    def step(self, now: Ns, observation: Observation | None) -> ActionChunk | None:
-        """Compute the next chunk from the latest observation, or nothing."""
+    def step(self, now: Ns, observation: Observation | None) -> ActionChunk | IntentChunk | None:
+        """Compute the next chunk (v1, or an intent chunk) from the latest observation, or nothing."""
 
     def report(self) -> Report | None:
         """The executor's claim once it has one; None while it is still working."""

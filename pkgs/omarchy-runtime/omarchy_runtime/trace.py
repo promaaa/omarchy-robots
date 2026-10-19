@@ -1,4 +1,4 @@
-"""Run directories: writing them, and checking them (trace schema 6).
+"""Run directories: writing them, and checking them (trace schema 7).
 
 A run directory holds:
   run.json          header: schema, runtime and OS identity, config hash, seed, clock, extensions
@@ -39,7 +39,7 @@ from omarchy_runtime.contracts import (
 )
 from omarchy_runtime.wallclock import perf_ns, wall_ns
 
-TRACE_SCHEMA = 6
+TRACE_SCHEMA = 7
 BUILD_JSON = Path("/etc/omarchy-robot/build.json")
 NO_OS = "no Omarchy Robots identity: /etc/omarchy-robot/build.json not found"
 
@@ -319,7 +319,7 @@ def _check_s0_record(path: Path, errors: list[str]) -> None:
 
 
 def validate_run(run_dir: Path) -> TraceCheck:
-    """Check a run directory against trace schema 6 (TRACE_SCHEMA). `complete` means the run
+    """Check a run directory against trace schema 7 (TRACE_SCHEMA). `complete` means the run
     ended normally and every execution it started has a terminal summary."""
     check = TraceCheck()
     errors = check.errors
