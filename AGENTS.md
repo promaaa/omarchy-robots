@@ -30,6 +30,7 @@ nix build .#checks.x86_64-linux.omarchy-runtime   # the runtime: lint, types, al
 nix fmt                            # nixfmt
 nix develop                        # nixfmt, statix, deadnix, ruff, python3 with numpy and mypy
 nix run .#omarchy-runtime -- demo  # or eval, run <scenario>, show <run>, validate-trace <run>
+nix run .#omarchy-runtime-tools -- run scrub_contact  # the simulated Panda (MuJoCo); also scrub-experiment, scrub-render
 ```
 
 In `pkgs/omarchy-runtime`, inside `nix develop`:
@@ -47,7 +48,9 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 | `.../attribution.py` | the fidelity check and failure attribution |
 | `.../extensions.py` | the collaborator extension points and their registries |
 | `.../s2.py` | the scripted S2, a client of the public API |
-| `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics |
+| `.../sim/` | the simulator: world (ground truth), S0, scripted S1, sensor, kinematics; `panda.py` the MuJoCo scene of the Franka Panda (tools only), `wipe.py` the scripted wiper (S1) |
+| `.../scrub.py` | the scrubbing experiment, its tables and its videos (tools only) |
+| `pkgs/mujoco-menagerie/` | the Menagerie's Panda model, pinned, fetched by Nix (Apache-2.0) |
 | `.../scenario.py`, `evaluate.py`, `placement.py`, `cli.py` | composition (the robot process, the S2 process), evaluation harness, the S2 placement experiment's table, command |
 | `.../config/`, `.../scenarios/` | bodies, capabilities and bindings, runtime parameters, scenarios (TOML) |
 | `pkgs/omarchy-runtime/tests/` | unit, contract, scenario, trace and architecture tests |
@@ -89,9 +92,13 @@ there when their handles are known.
 9. Honesty: never call anything real-time; label every number (simulated,
    wall-clock in a VM, wall-clock on the host); never claim hardware support
    or a test that did not run.
-10. Minimal: numpy is the only dependency; no plugin framework, message bus,
-    database, web framework or ROS. Add an abstraction when two
-    implementations or a named collaborator need it.
+10. Minimal: numpy is the only dependency of the robot's package; no plugin
+    framework, message bus, database, web framework or ROS. The development
+    tools (`sim/panda.py`, `scrub.py`: MuJoCo, the pinned Menagerie model,
+    software rendering) are in `omarchy-runtime-tools` only, imported inside
+    the command or the function that needs them (`tests/test_architecture.py`).
+    Add an abstraction when two implementations or a named collaborator
+    need it.
 11. One product: the runtime is a Nix package enabled from `robot.nix`; its
     traces name the OS build, or say there is none.
 

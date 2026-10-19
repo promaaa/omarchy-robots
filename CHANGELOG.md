@@ -7,6 +7,49 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+Milestone R6, part 2: contact intent on a simulated Franka Panda, scrubbing
+a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
+
+### Added
+
+- The simulated Franka Emika Panda (`sim/panda.py`): the MuJoCo Menagerie
+  model (`franka_emika_panda/panda_nohand.xml`, Apache-2.0), fetched by Nix
+  at a pinned commit (`pkgs/mujoco-menagerie`, 62ab00f, a fixed-output
+  fetch of the Panda's directory); torque motors within the Panda's limits,
+  gravity compensated, a sponge, a table and a plate free to slide; physics
+  and S0 at 1 kHz. Dirt cells on the plate, a noisy and occludable dirt
+  sensor, and the `coverage` verifier for `clean(surface)`; a real
+  cleanliness verifier is future work.
+- S0's Cartesian impedance controller with normal-force regulation
+  (`cartesian_impedance`, joint torques behind the guard), declared for the
+  Panda body; the scripted wiper (`sim/wipe.py`), the same path in both
+  interface conditions; the capability `wipe` with its default fallback
+  `retreat` (leave contact upwards, compliant along z); the recovery policy
+  `give_up`.
+- Scenarios `scrub_contact`, `scrub_motion`, `scrub_hover` (INTENT),
+  `scrub_occluded` (PERCEPTION), `scrub_weak` (EXECUTION; fault kind
+  `weak_actuators`).
+- `omarchy-runtime scrub-experiment`: both conditions x five plate-height
+  errors x seeds, its table in the README and the manual;
+  `omarchy-runtime scrub-render`: an mp4 of a recorded run (software EGL,
+  no display), with its provenance.
+- `.#omarchy-runtime-tools`: the runtime with MuJoCo, the Menagerie model,
+  Mesa and ffmpeg; never in a robot's system. The robot's package stays
+  numpy only, and `eval` there says which scenarios it cannot run.
+
+### Changed
+
+- Contracts: an observation may carry `coverage` (`contracts.Coverage`),
+  kept by the belief; proprioception's end-effector point is (x, z) or
+  (x, y, z); `S1Policy.step` may return an intent chunk (S1's host passes it
+  to S0, with its measured inference latency, and refuses a v1 corrector
+  with it). A scenario's `world` names its scene (`config/world_<name>.toml`)
+  and its `[sensor]` table changes the sensor's.
+- Trace schema 7: observations and the belief's snapshots carry coverage.
+- The test rigs of the resolver and the runtime use the `place_in`
+  capability they test; the tests of the configured capability lists and
+  of `unsupported_clean`'s candidates name `wipe` as well.
+
 ## [0.0.3] - 2026-10-19
 
 ### Part 1 (2026-10-19)

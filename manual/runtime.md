@@ -66,6 +66,8 @@ nix run .#omarchy-runtime -- eval     # every scenario, and the results table
 | `omarchy-runtime s2` | Is S2 for one robot run in another process: waits for the robot, runs the scripted S2 on the wall clock, prints its own report. See "S2 in another process". |
 | `omarchy-runtime inference-matrix` | S1's inference delay x chunk corrector x inference trigger on `nominal_a` and `cup_moved`, in simulated time. See "Asynchronous inference". |
 | `omarchy-runtime scenarios` | Lists the scenarios. |
+| `omarchy-runtime scrub-experiment` | The scrubbing experiment on the simulated Panda (development tools). See "Contact on a simulated Franka Panda". |
+| `omarchy-runtime scrub-render RUN_DIR --out FILE` | An mp4 of a recorded scrubbing run, with its provenance (development tools). |
 
 `--runs DIR` chooses where run directories go (default: `$OMARCHY_RUNTIME_RUNS`, else `./runs`). `--record-s0` also writes S0's per-tick record for each execution.
 
@@ -256,13 +258,48 @@ SUCCEEDED, REJECTED and ABORTED executions have none. The scenarios that produce
 
 The attribution is only as precise as the intent: a motion-only intent cannot say "keep the grasp", so a slip is an INTENT failure. A contact channel that says it can be checked for it.
 
+## Contact on a simulated Franka Panda: scrubbing a plate
+
+> **Tested in simulation, and nothing more.** MuJoCo on the CPU, in simulated time. No real robot has run any of this, and no number here is a measurement on a robot.
+
+Wiping a plate means pressing on it without moving it: a motion-only interface cannot say that. This scene puts the intent contract, the guard and the attribution on a body with real contact dynamics.
+
+**The scene** (`sim/panda.py`, `config/world_scrub.toml`). The arm is the Franka Emika Panda of the official [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie/tree/main/franka_emika_panda) (`panda_nohand.xml`, Apache-2.0), fetched by Nix at a pinned commit (`pkgs/mujoco-menagerie`, 62ab00f, 2026-10-15; a fixed-output fetch of the Panda's directory only). The scene is built around the file without editing it: the position actuators become torque motors within the Panda's torque limits (87 and 12 Nm), the arm is gravity-compensated (a real Panda compensates gravity itself under torque control), a sponge (8 x 6 cm, a soft contact) is fixed to the flange, and a table and a 24 cm square plate, free to slide, are added. Physics and S0 run at 1 kHz, S1 at 20 Hz, all in simulated time; MuJoCo 3.8.1 from nixpkgs, on the CPU. The same seed gives the same trace.
+
+**The dirt and its verifier.** The plate carries a 10 x 10 grid of dirt cells. A cell is clean once the sponge has pressed on it with at least 4 N for at least 0.3 s in all (ground truth, read only by the harness). A simulated camera sees the plate's position (2 mm noise, plus a bias in height: the perception error of the experiment) and its dirt as a coverage (`contracts.Coverage`: cells seen, cells that look clean): each cell is seen flipped with probability 0.03, the cells under the sponge are hidden while it is close to the plate, and an occlusion hides everything. The verifier of `clean(plate)` (`coverage`) says SATISFIED when at least 90 % of the cells seen look clean, VIOLATED below, INCONCLUSIVE when fewer than 80 % of the cells are seen. **A real cleanliness verifier is future work:** this one reads a simulated sensor.
+
+**S1 and S0.** A scripted S1 (`sim/wipe.py`, capability `wipe`, `clean(surface)`, bound to `panda`) plans one path from the belief: above the plate's first corner, down, a raster of lines 3.5 cm apart at 5 cm/s, 10 mm below the believed top, then up. The path is the same in every condition. With `contact = true` in the scenario's `[s1]`, its chunks also carry a contact channel: MAKE on the way down, MAINTAIN while wiping (10 N, bounds 5 to 20 N, stiffness 1500, 1500 and 800 N/m), BREAK on the way up. S0's controller (`cartesian_impedance`, `controllers.py`) is a Cartesian impedance controller with normal-force regulation, behind the guard: the pad tracks the motion channel with the contact channel's stiffness (else its default, 1000 N/m); along the normal in MAKE or MAINTAIN, its set-point moves (at most 3 cm/s, at most 4 cm from the path) until the measured force reaches the target. It returns joint torques; the guard limits them, their rate (1000 Nm/s) and the end-effector force (40 N). The Panda's declaration (`[panda.s0]`) honours Cartesian motion in `panda.base`, contact on the pad up to 30 N, and object poses; joint targets and anything above 30 N are refused. The force S0 reads is an estimate (0.5 N noise, filtered), as a Panda estimates it from its joint torques. The capability's default fallback, `retreat`, rises 3 cm, compliant along z, leaving contact.
+
+| Scenario | What happens | Outcome |
+|---|---|---|
+| `scrub_contact` | the plate where the belief says, with the contact channel | SUCCEEDED |
+| `scrub_motion` | the same, motion only | SUCCEEDED |
+| `scrub_hover` | motion only, the plate believed 2 cm higher than it is: the sponge never touches it | FAILED/VERIFICATION_FAILED, attributed to INTENT |
+| `scrub_occluded` | with contact; the camera cannot see the plate after the wiping | UNVERIFIED, attributed to PERCEPTION |
+| `scrub_weak` | with contact; the actuators deliver a tenth of the torque from the first contact on | FAILED/VERIFICATION_FAILED, attributed to EXECUTION |
+
+They run with the development tools: `nix run .#omarchy-runtime-tools -- run scrub_contact`. The robot's package has no MuJoCo; there, `eval` lists them as not run.
+
+### The scrubbing experiment
+
+`omarchy-runtime scrub-experiment --seeds 5` runs both interface conditions (motion only; motion and the contact channel) x five errors in the plate's height in the belief (-2, -1, 0, +1, +2 cm) x seeds 1 to 5, each a whole run of `scrub_contact` with the condition and the error changed, one attempt each (S2 never retries). Every number comes from ground truth or from the execution's summary, the same way in both conditions; `--docs` writes the table below.
+
+<!-- scrub:begin -->
+<!-- scrub:end -->
+
+What it shows: with the same path, the contact channel kept the force at its target whatever the plate's height within +-2 cm, and every run succeeded; motion only hovered, and failed, when the plate was lower than believed, and pressed harder, out of the force's bounds, when it was higher. A motion-only failure is attributed to INTENT: S0 tracked the path it was given, and nothing below S1 could know the path was wrong. What it does not show: anything about a real robot, a real sponge, real dirt or a real cleanliness sensor; a learned controller; other surfaces, frictions or speeds; or that these numbers transfer. The simulated contact is MuJoCo's soft contact, tuned once (a soft sponge, an elliptic friction cone), and the controller's gains were chosen on this scene.
+
+### Videos
+
+`omarchy-runtime scrub-render RUN_DIR --out FILE.mp4` renders a run recorded with `--record-s0` (its `world.npz`): the scene, the dirt as it was at each frame, and two bars along the bottom, the true normal force (grey below 5 N, green within 5 to 20 N, red above; white marks at 5 and 20 N; full width 30 N) and the plate's coverage (blue). Software rendering through EGL (Mesa's llvmpipe), no display; the provenance (run, seed, revision, configuration hash) goes next to the video.
+
 ## Traces
 
 Every run writes one directory:
 
 | File | Contents |
 |---|---|
-| `run.json` | Header: `trace_schema` (6), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, S0's controller and what it honours (`s0`, its ControllerCapability), rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
+| `run.json` | Header: `trace_schema` (7), the runtime's version, revision and dirty flag, the Omarchy Robots identity (the contents of `/etc/omarchy-robot/build.json`, or `null` with "no Omarchy Robots identity" on another machine), the hash and the contents of the effective configuration, scenario, seed, clock (`simulated` or `wall`), body, S0's controller and what it honours (`s0`, its ControllerCapability), rates, the id and version of the observation filter, the verifiers, the recovery policy and the S2 latency model (with its median and spread), where S2 ran (`s2`), and the run's `tags`. |
 | `events.jsonl` | Low-rate events only, one JSON object per line, flushed one by one, so a crashed run leaves a readable prefix. Each has `seq`, simulated time `t` (ns), `wall_ns`, `type`, `execution` and `payload`. A wall-clock run's `run.end` carries the loop statistics; with S2 in another process, also S2's liveness (`s2_link`). Types: `run.start`, `request`, `resolution`, `lifecycle`, `chunk` (metadata, never the rows, with `observed_at`, `inference_ns`, the `channels` and any degradation), `chunk.rejected` (the structured error of S0's last refusal), `s0.mode`, `s0.status` (at the supervisor rate), `fallback.install`, `fallback.rejected`, `s0.hold`, `verify.attempt`, `verify.evidence` (the observations a verdict rests on), `verdict`, `decision`, `cancel`, `error`, `s2.link` (S2's link up, lost, recovered with the outage's class, left, closed), `s0.late` (a late S0 tick), `s0.guard` (the guard clamped or replaced commands since the last step), `run.end`. |
 | `executions.jsonl` | One summary per execution: ids, goal, chosen capability and implementation with every candidate's reason, body and action space, belief before and after, claim, verdict with its evidence, outcome and category, simulated timings (time to first chunk, duration, time in fallback and in HOLD), wall-clock costs (resolution, verification, trace writing), S0's counters, S0's `fidelity` to the intents and the failure's `attribution` (see "Fidelity and failure attribution"), configuration hash and seed. |
 | `s0_<execution>.npz` | With `--record-s0`: S0's per-tick record for the execution (time, mode, position, the controller's command before the guard, chunk and its validity, when the chunk's observation was taken, and which fallback runs: none, base or S2's), kept in a preallocated buffer and written once at the end. |
@@ -626,4 +663,4 @@ jump: the largest jump of S0's desired position at a chunk switch (rad for the a
 
 ## What is not here
 
-No ROS and no ROS types, no learned model, no images, no physics engine (a cup attaches when the gripper closes around it, and settles on the support below when released), no real-time guarantee, and no hardware. The S0 contract is plain data so that a native controller, a vendor controller or ros2_control behind an adapter can implement it later: the guard and the controller interface are its two halves.
+No ROS and no ROS types, no learned model, no images, no physics engine in the kitchen (a cup attaches when the gripper closes around it, and settles on the support below when released; only the Panda's scene is MuJoCo), no real-time guarantee, and no hardware. The S0 contract is plain data so that a native controller, a vendor controller or ros2_control behind an adapter can implement it later: the guard and the controller interface are its two halves.

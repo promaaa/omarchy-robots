@@ -6,3 +6,9 @@ designed by Marc Duboc for Omarchy Robots, after the Omarchy brand assets at
 https://omarchy.org/brand/ ("Omarchy is a pending trademark. All rights
 reserved."). They are not covered by the MIT License. branding/boot.svg and
 branding/logo.txt are derived from them.
+
+The simulated Franka Emika Panda (pkgs/mujoco-menagerie) is the MuJoCo
+Menagerie model (https://github.com/google-deepmind/mujoco_menagerie,
+franka_emika_panda/), released by its authors under the Apache License 2.0.
+Nix fetches it at a pinned commit when the development tools are built; it
+is not in this repository. Franka Emika and Panda are names of their owners.
