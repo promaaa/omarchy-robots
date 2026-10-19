@@ -29,7 +29,18 @@ python3.pkgs.buildPythonApplication {
     ];
   };
   build-system = [ python3.pkgs.setuptools ];
-  dependencies = [ python3.pkgs.numpy ] ++ lib.optionals tools [ python3.pkgs.mujoco ];
+  dependencies = [
+    python3.pkgs.numpy
+  ]
+  ++ lib.optionals tools (
+    with python3.pkgs;
+    [
+      mujoco
+      # The PiPER's SDK and CAN, for the fake arm's tests and the lab's first contact.
+      python-can
+      piper-sdk
+    ]
+  );
   # The source revision goes into every trace header ("<rev>" or "<rev>-dirty").
   makeWrapperArgs =
     lib.optionals (revision != null) [

@@ -29,5 +29,5 @@ select = ["E", "F", "W", "B", "UP", "I", "PLW", "BLE", "EXE"]
 strict = true
 
 [[tool.mypy.overrides]]  # MuJoCo ships no type information; sim/panda.py is the only module that imports it
-module = ["mujoco", "mujoco.*"]
+module = ["mujoco", "mujoco.*", "piper_sdk", "piper_sdk.*"]
 ignore_missing_imports = true

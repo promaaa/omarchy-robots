@@ -1040,6 +1040,24 @@ def quat_matrix(q: Array) -> Array:
     )
 
 
+def matrix_quat(m: Array) -> Array:
+    """The unit quaternion (w first, w >= 0) of a rotation matrix, from its
+    largest diagonal term (exact near half turns too)."""
+    trace = m[0, 0] + m[1, 1] + m[2, 2]
+    if trace > 0:
+        s = 2.0 * math.sqrt(1.0 + trace)
+        q = np.array([s / 4, (m[2, 1] - m[1, 2]) / s, (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s])
+    else:
+        i = int(np.argmax([m[0, 0], m[1, 1], m[2, 2]]))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[i, i] - m[j, j] - m[k, k]))
+        q = np.zeros(4)
+        q[0] = (m[k, j] - m[j, k]) / s
+        q[1 + i], q[1 + j], q[1 + k] = s / 4, (m[j, i] + m[i, j]) / s, (m[k, i] + m[i, k]) / s
+    out: Array = (q if q[0] >= 0 else -q) / np.linalg.norm(q)
+    return out
+
+
 def quat_mul(a: Array, b: Array) -> Array:
     """The Hamilton product a b of two quaternions, w first."""
     w1, x1, y1, z1 = a

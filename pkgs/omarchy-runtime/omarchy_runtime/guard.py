@@ -104,7 +104,8 @@ class Guard:
         self.engaged: tuple[FallbackSpec, IntentChunk] | None = None  # the fallback running, as the intent S0 executes
         self.armed = False  # a chunk ran out, or the runtime asked: a fallback engages (not while awaiting a first chunk)
         self.held: Array | None = None  # where the guard's own safe command holds (torque control)
-        self.last: Array | None = None  # the last command sent (the bounded step of a torque)
+        # The last command sent, for the bounded step of a torque: torques start from zero (a Franka requires it).
+        self.last: Array | None = np.zeros(len(body.dims)) if kind == "torque" else None
 
     # What S0 executes.
 
@@ -204,7 +205,9 @@ class Guard:
             assert command is not None
             values, self.held = np.array(command.values, dtype=np.float64), None
         wanted = values.copy()
-        values = self._position(values, state, dt) if self.kind == "position" else self._torque(values) if self.kind == "torque" else values
+        values = (
+            self._position(values, state, dt) if self.kind == "position" else self._torque(values, dt) if self.kind == "torque" else values
+        )
         if self.kind == "velocity":
             values = np.clip(values, -self.limits.velocity, self.limits.velocity)
         clamped = mode is not S0Mode.HOLD and bool((np.abs(values - wanted) > 1e-9).any())
@@ -240,12 +243,14 @@ class Guard:
             out = out or float(np.linalg.norm(state.wrench[:3])) > lim.force
         return out
 
-    def _torque(self, tau: Array) -> Array:
-        """Joint torque limits, then the bounded step of a torque (its rate limit times the nominal period)."""
+    def _torque(self, tau: Array, dt: Ns) -> Array:
+        """Joint torque limits, then the bounded step of a torque: its rate
+        limit times the time since the last tick, at most the nominal period
+        (the first tick keeps zero)."""
         lim = self.limits
         if lim.torque is not None:
             tau = np.clip(tau, -lim.torque, lim.torque)
         if lim.torque_rate is not None and self.last is not None:
-            step = lim.torque_rate * seconds(self.nominal)
+            step = lim.torque_rate * seconds(min(dt, self.nominal))
             tau = np.clip(tau, self.last - step, self.last + step)
         return tau

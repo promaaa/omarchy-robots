@@ -76,7 +76,7 @@
       }
       // lib.mapAttrs (board: _: robot board [ (onBoard board) ]) boards;
 
-      overlays.default = final: _: {
+      overlays.default = final: prev: {
         omarchy-robot = final.callPackage ./pkgs/omarchy-robot { };
         omarchy-runtime = final.callPackage ./pkgs/omarchy-runtime {
           revision = self.rev or self.dirtyRev or null;
@@ -88,6 +88,11 @@
           tools = true;
         };
         mujoco-menagerie = final.callPackage ./pkgs/mujoco-menagerie { };
+        # The lab's arms: Franka's C++ library (Panda) and AgileX's Python SDK (PiPER).
+        libfranka = final.callPackage ./pkgs/libfranka { };
+        pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+          (pyfinal: _: { piper-sdk = pyfinal.callPackage ./pkgs/piper-sdk { }; })
+        ];
         omarchy-branding = final.callPackage ./pkgs/omarchy-branding { };
       };
 
@@ -95,7 +100,13 @@
         lib.recursiveUpdate
           {
             x86_64-linux = {
-              inherit (pkgs) omarchy-robot omarchy-runtime omarchy-runtime-tools;
+              inherit (pkgs)
+                omarchy-robot
+                omarchy-runtime
+                omarchy-runtime-tools
+                libfranka
+                ;
+              piper-sdk = pkgs.python3.pkgs.piper-sdk;
               # The local S2 backend of `omarchy-runtime ttft-measure`: nixpkgs'
               # llama.cpp, as packaged (baseline x86-64: GGML_NATIVE off, no
               # AVX2), and the same built for AVX2 hosts (FMA, F16C, BMI2 too).
@@ -186,6 +197,8 @@
             ps.mypy
             ps.numpy
             ps.mujoco
+            ps.python-can
+            ps.piper-sdk
           ]))
           ffmpeg-headless
           ruff

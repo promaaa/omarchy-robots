@@ -146,7 +146,7 @@ def controller(cfg: Json) -> tuple[str, ControllerCapability]:
     b = cfg["body"]
     where = f"bodies.{b['id']}.s0"
     t = get(b, "s0", dict, f"bodies.{b['id']}")
-    known = {"controller", "command", "dt_s", "motion", "frames", "object", "contact", "scene", "degraded"}
+    known = {"controller", "command", "rate_hz", "dt_s", "motion", "frames", "object", "contact", "scene", "degraded"}
     if set(t) - known:
         raise ConfigError(f"{where}: unknown {', '.join(sorted(set(t) - known))}")
     lists = {k: strings(t, k, where) if k in t else () for k in ("frames", "object", "scene", "degraded")}
@@ -168,7 +168,7 @@ def controller(cfg: Json) -> tuple[str, ControllerCapability]:
         get(t, "controller", str, where),
         "1",
         get(t, "command", str, where),
-        get(cfg["world"]["rates_hz"], "s0", int, "world.toml rates_hz"),
+        get(t, "rate_hz", int, where) if "rate_hz" in t else get(cfg["world"]["rates_hz"], "s0", int, "world.toml rates_hz"),
         (ns(dt[0]), ns(dt[1])),
         strings(t, "motion", where) if "motion" in t else (get(b, "action_space", str, f"bodies.{b['id']}"),),
         lists["frames"],

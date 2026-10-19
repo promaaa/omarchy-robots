@@ -31,7 +31,9 @@ from omarchy_runtime.contracts import (
     RobotState,
     S0Mode,
     Timing,
+    matrix_quat,
     ns,
+    quat_matrix,
     sample,
 )
 from omarchy_runtime.controllers import MotionTracker
@@ -220,6 +222,18 @@ class TestSceneInputs(unittest.TestCase):
         s0.submit_chunk(IntentChunk.make(1, "s1", m), 0)
         s0.tick(0)
         self.assertEqual(seen, [{"pose:cup_1"}])
+
+
+class TestRotations(unittest.TestCase):
+    def test_a_rotation_matrix_and_its_quaternion_agree_half_turns_included(self) -> None:
+        rng = np.random.default_rng(1)
+        for k in range(500):
+            q = rng.normal(size=4)
+            q[0] *= 1e-9 if k % 3 == 0 else 1.0  # a third of them near a half turn
+            q /= np.linalg.norm(q)
+            back = matrix_quat(quat_matrix(q))
+            self.assertGreaterEqual(back[0], 0.0)
+            np.testing.assert_allclose(quat_matrix(back), quat_matrix(q), atol=1e-9)
 
 
 class TestFallbackIntent(unittest.TestCase):

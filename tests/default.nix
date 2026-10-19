@@ -160,6 +160,8 @@ in
           ps.mypy
           ps.numpy
           ps.mujoco
+          ps.python-can
+          ps.piper-sdk
         ]))
         pkgs.ffmpeg-headless
         pkgs.omarchy-runtime

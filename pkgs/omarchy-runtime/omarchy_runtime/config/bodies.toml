@@ -93,3 +93,76 @@ ees = ["pad"]
 frames = ["panda.base"]
 max_force_n = 30.0
 stiffness = [[0, 3000], [0, 3000], [0, 3000], [0, 300], [0, 300], [0, 300]]
+
+# The lab's arms, behind arms.py. Declared here for S0 (the guard and its
+# controller); no scenario runs them, and nothing here connects to them. Their
+# workspaces are placeholders: set them for the cell in the lab. Anything sent
+# to their actuators needs `operator_authorization` in their adapter table:
+# "<who>, <date>, <where>". None is given here.
+
+[franka]  # a Franka Emika Panda (FER), through libfranka 0.9.2 (robot system >= 4.2.1): torque control at 1 kHz
+kind = "franka_fci"
+action_space = "franka.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]  # Franka's FER limits
+upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+max_velocity = [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61]
+workspace = [0.25, 0.75, -0.40, 0.40, 0.05, 0.80]  # placeholder: the flange's box, base frame
+features = ["contact"]
+home = [0.0, -0.7854, 0.0, -2.3562, 0.0, 1.5708, 0.7854]  # libfranka's examples' start pose
+safe_pose = [0.0, -0.7854, 0.0, -2.3562, 0.0, 1.5708, 0.7854]
+
+[franka.kinematics.limits]
+torque_nm = [87, 87, 87, 87, 12, 12, 12]
+torque_rate_nm_s = [1000, 1000, 1000, 1000, 1000, 1000, 1000]
+force_n = 15.0  # below the 20 N collision threshold of libfranka's examples: the robot's reflex stays the last resort
+hold_stiffness = [60, 60, 60, 60, 20, 20, 10]
+hold_damping = [10, 10, 10, 10, 3, 3, 2]
+
+[franka.kinematics.cartesian]
+action_space = "franka.ee_pose.v1"
+frame = "franka.base"
+ee = "flange"
+orientation = [0.0, 0.92388, -0.38268, 0.0]  # the flange pointing down, turned -45 degrees about z, as in the start pose
+
+[franka.kinematics.impedance]
+stiffness = [1000, 1000, 1000, 50, 50, 50]
+
+[franka.kinematics.adapter]
+interface = "libfranka 0.9.2"
+
+[franka.s0]
+controller = "cartesian_impedance"
+command = "torque"
+rate_hz = 1000
+dt_s = [0.001, 1.0]
+motion = ["franka.ee_pose.v1"]
+frames = ["franka.base"]
+
+[franka.s0.contact]
+ees = ["flange"]
+frames = ["franka.base"]
+max_force_n = 15.0
+stiffness = [[10, 3000], [10, 3000], [10, 3000], [1, 300], [1, 300], [1, 300]]  # libfranka's Cartesian impedance ranges
+
+[piper]  # an AgileX PiPER, through piper_sdk 0.6.2 over CAN (1 Mbit/s): joint positions (MOVE J) at 200 Hz
+kind = "piper_can"
+action_space = "piper.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+lower = [-2.6179, 0.0, -2.9670, -1.7453, -1.2217, -2.0943]  # the SDK's documented limits, rounded inwards: -150, 0, -170, -100, -70, -120 degrees
+upper = [2.6179, 3.1415, 0.0, 1.7453, 1.2217, 2.0943]  # 150, 180, 0, 100, 70, 120 degrees
+max_velocity = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]  # the guard's bound; the arm's own maximum is not documented
+workspace = [-0.6, 0.6, -0.6, 0.6, 0.0, 0.8]  # placeholder; the guard checks it only where the body's kinematics are known
+features = []
+home = [0.0, 0.5236, -0.5236, 0.0, 0.0, 0.0]
+safe_pose = [0.0, 0.5236, -0.5236, 0.0, 0.0, 0.0]
+
+[piper.kinematics.adapter]
+interface = "piper_sdk 0.6.2, C_PiperInterface_V2 (firmware V1.5-2 and later)"
+speed_percent = 30  # MOVE J speed, percent of the arm's maximum
+
+[piper.s0]
+controller = "motion_tracker"
+command = "position"
+rate_hz = 200
+dt_s = [0.005, 1.0]

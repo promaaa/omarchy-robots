@@ -56,7 +56,7 @@ def imports(path: Path) -> set[str]:
 
 # The development tools, in the omarchy-runtime-tools package only: what each may import besides,
 # and the modules that may import them, never at their top level.
-TOOLS = {"sim.panda": {"mujoco"}, "scrub": {"mujoco"}}
+TOOLS = {"sim.panda": {"mujoco"}, "scrub": {"mujoco"}, "sim.fake_piper": {"can"}}
 TOOL_USERS = {"cli", "scenario", "scrub"}
 
 TMP = tempfile.TemporaryDirectory()
