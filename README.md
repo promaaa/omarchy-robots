@@ -194,7 +194,7 @@ the manual (Runtime, "Contact on a simulated Franka Panda").
 
 <!-- scrub:begin -->
 
-Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 9f3b6b8bff29, runs of 2026-10-19, `omarchy-runtime scrub-experiment --seeds 5`.
+Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 027c01c9eacd, runs of 2026-10-19, `omarchy-runtime scrub-experiment --seeds 5`.
 
 | condition | belief error | outcomes | coverage % | force in bounds % | mean force N | peak force N | guard | verdict = truth | attribution |
 |---|---|---|---|---|---|---|---|---|---|
