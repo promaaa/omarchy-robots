@@ -7,10 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+## [0.0.3] - 2026-10-19
+
+### Part 2 (2026-10-19)
+
 Milestone R6, part 2: contact intent on a simulated Franka Panda, scrubbing
 a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
 
-### Added
+#### Added
 
 - The simulated Franka Emika Panda (`sim/panda.py`): the MuJoCo Menagerie
   model (`franka_emika_panda/panda_nohand.xml`, Apache-2.0), fetched by Nix
@@ -37,7 +41,7 @@ a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
   Mesa and ffmpeg; never in a robot's system. The robot's package stays
   numpy only, and `eval` there says which scenarios it cannot run.
 
-### Changed
+#### Changed
 
 - Contracts: an observation may carry `coverage` (`contracts.Coverage`),
   kept by the belief; proprioception's end-effector point is (x, z) or
@@ -50,7 +54,6 @@ a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
   capability they test; the tests of the configured capability lists and
   of `unsupported_clean`'s candidates name `wipe` as well.
 
-## [0.0.3] - 2026-10-19
 
 ### Part 1 (2026-10-19)
 
