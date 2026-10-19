@@ -276,6 +276,20 @@ def cmd_scrub_experiment(args: argparse.Namespace) -> int:
     return 0 if all(c["violations"] == 0 for c in results["cells"]) else 1
 
 
+def cmd_scrub_docs(args: argparse.Namespace) -> int:
+    from omarchy_runtime import scrub  # MuJoCo: in omarchy-runtime-tools only
+
+    path = Path(args.results)
+    results = json.loads(path.read_text())
+    header = json.loads((Path(results["cells"][0]["run_dir"]) / "run.json").read_text())
+    w = header["wall_created"]  # 20261019T065433Z
+    command = f"`omarchy-runtime scrub-experiment --seeds {results['seeds']}`"
+    source = f"runtime {header['runtime']['revision'][:12]}, runs of {w[:4]}-{w[4:6]}-{w[6:8]}, {command}"
+    placement.write_block([Path(f) for f in args.docs], "scrub", scrub.markdown(results, source))
+    print(f"The scrubbing tables in {', '.join(args.docs)} are now {path}'s.")
+    return 0
+
+
 def cmd_scrub_render(args: argparse.Namespace) -> int:
     from omarchy_runtime import scrub  # MuJoCo: in omarchy-runtime-tools only
 
@@ -404,6 +418,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--jobs", type=int, default=1, help="runs at a time")
     p.add_argument("--docs", nargs="*", help="write the table into these files, between <!-- scrub:begin --> and <!-- scrub:end -->")
     p.set_defaults(func=cmd_scrub_experiment)
+    p = sub.add_parser("scrub-docs", help="write a scrubbing results.json's table into documentation files, between its markers")
+    p.add_argument("results")
+    p.add_argument("--docs", nargs="+", required=True, metavar="FILE")
+    p.set_defaults(func=cmd_scrub_docs)
     p = sub.add_parser("scrub-render", help="an mp4 of a recorded scrubbing run (run --record-s0), with its provenance (tools package)")
     p.add_argument("run_dir")
     p.add_argument("--out", required=True, help="the .mp4 to write; its provenance goes next to it (.json)")

@@ -192,6 +192,24 @@ nothing here ran on a robot. Details, and what the table does not show, in
 the manual (Runtime, "Contact on a simulated Franka Panda").
 
 <!-- scrub:begin -->
+
+Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 9f3b6b8bff29, runs of 2026-10-19, `omarchy-runtime scrub-experiment --seeds 5`.
+
+| condition | belief error | outcomes | coverage % | force in bounds % | mean force N | peak force N | guard | verdict = truth | attribution |
+|---|---|---|---|---|---|---|---|---|---|
+| motion only | -2 cm | SUCCEEDED 5 | 100 (99 to 100) | 5 | 24.2 (22.9 to 24.9) | 27.9 (26.3 to 28.7) | 3 | 5 of 5 | - 5 |
+| motion only | -1 cm | SUCCEEDED 5 | 100 | 91 | 16.0 (14.6 to 16.8) | 18.3 (16.7 to 19.2) | 2 | 5 of 5 | - 5 |
+| motion only | +0 cm | SUCCEEDED 5 | 100 | 91 | 7.7 (6.3 to 8.5) | 9.1 (7.7 to 9.9) | 2 | 5 of 5 | - 5 |
+| motion only | +1 cm | FAILED 5 | 0 | 0 | 0.0 (0.0 to 0.1) | 0.6 (0.0 to 1.8) | 2 | 5 of 5 | INTENT 5 |
+| motion only | +2 cm | FAILED 5 | 0 | 0 | 0.0 | 0.0 | 2 | 5 of 5 | INTENT 5 |
+| motion + contact | -2 cm | SUCCEEDED 5 | 100 | 93 | 9.7 (9.7 to 9.8) | 17.3 (17.2 to 17.3) | 2 | 5 of 5 | - 5 |
+| motion + contact | -1 cm | SUCCEEDED 5 | 100 | 93 | 9.7 | 17.1 (17.1 to 17.2) | 2 | 5 of 5 | - 5 |
+| motion + contact | +0 cm | SUCCEEDED 5 | 100 | 93 (93 to 94) | 9.7 | 16.9 (16.8 to 16.9) | 2 | 5 of 5 | - 5 |
+| motion + contact | +1 cm | SUCCEEDED 5 | 100 | 95 | 9.8 | 16.5 (16.4 to 16.6) | 2 (2 to 3) | 5 of 5 | - 5 |
+| motion + contact | +2 cm | SUCCEEDED 5 | 100 | 95 | 9.7 | 15.8 (15.4 to 15.9) | 3 (2 to 3) | 5 of 5 | - 5 |
+
+belief error: added to the plate's height in the belief (+ : believed higher than it is). Each row: the runs' mean, then their range. coverage: dirt cells clean at the end (ground truth). force in bounds: the share of the raster window (the pad over the dirty area, at most 2 cm above the plate) with the true normal force within 5 to 20 N. guard: commands the guard clamped or replaced. verdict = truth: the verifier's verdict agrees with ground truth. attribution: the runtime's, for each failed run (- for none).
+
 <!-- scrub:end -->
 
 ```sh

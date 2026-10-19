@@ -285,9 +285,27 @@ They run with the development tools: `nix run .#omarchy-runtime-tools -- run scr
 `omarchy-runtime scrub-experiment --seeds 5` runs both interface conditions (motion only; motion and the contact channel) x five errors in the plate's height in the belief (-2, -1, 0, +1, +2 cm) x seeds 1 to 5, each a whole run of `scrub_contact` with the condition and the error changed, one attempt each (S2 never retries). Every number comes from ground truth or from the execution's summary, the same way in both conditions; `--docs` writes the table below.
 
 <!-- scrub:begin -->
+
+Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 9f3b6b8bff29, runs of 2026-10-19, `omarchy-runtime scrub-experiment --seeds 5`.
+
+| condition | belief error | outcomes | coverage % | force in bounds % | mean force N | peak force N | guard | verdict = truth | attribution |
+|---|---|---|---|---|---|---|---|---|---|
+| motion only | -2 cm | SUCCEEDED 5 | 100 (99 to 100) | 5 | 24.2 (22.9 to 24.9) | 27.9 (26.3 to 28.7) | 3 | 5 of 5 | - 5 |
+| motion only | -1 cm | SUCCEEDED 5 | 100 | 91 | 16.0 (14.6 to 16.8) | 18.3 (16.7 to 19.2) | 2 | 5 of 5 | - 5 |
+| motion only | +0 cm | SUCCEEDED 5 | 100 | 91 | 7.7 (6.3 to 8.5) | 9.1 (7.7 to 9.9) | 2 | 5 of 5 | - 5 |
+| motion only | +1 cm | FAILED 5 | 0 | 0 | 0.0 (0.0 to 0.1) | 0.6 (0.0 to 1.8) | 2 | 5 of 5 | INTENT 5 |
+| motion only | +2 cm | FAILED 5 | 0 | 0 | 0.0 | 0.0 | 2 | 5 of 5 | INTENT 5 |
+| motion + contact | -2 cm | SUCCEEDED 5 | 100 | 93 | 9.7 (9.7 to 9.8) | 17.3 (17.2 to 17.3) | 2 | 5 of 5 | - 5 |
+| motion + contact | -1 cm | SUCCEEDED 5 | 100 | 93 | 9.7 | 17.1 (17.1 to 17.2) | 2 | 5 of 5 | - 5 |
+| motion + contact | +0 cm | SUCCEEDED 5 | 100 | 93 (93 to 94) | 9.7 | 16.9 (16.8 to 16.9) | 2 | 5 of 5 | - 5 |
+| motion + contact | +1 cm | SUCCEEDED 5 | 100 | 95 | 9.8 | 16.5 (16.4 to 16.6) | 2 (2 to 3) | 5 of 5 | - 5 |
+| motion + contact | +2 cm | SUCCEEDED 5 | 100 | 95 | 9.7 | 15.8 (15.4 to 15.9) | 3 (2 to 3) | 5 of 5 | - 5 |
+
+belief error: added to the plate's height in the belief (+ : believed higher than it is). Each row: the runs' mean, then their range. coverage: dirt cells clean at the end (ground truth). force in bounds: the share of the raster window (the pad over the dirty area, at most 2 cm above the plate) with the true normal force within 5 to 20 N. guard: commands the guard clamped or replaced. verdict = truth: the verifier's verdict agrees with ground truth. attribution: the runtime's, for each failed run (- for none).
+
 <!-- scrub:end -->
 
-What it shows: with the same path, the contact channel kept the force at its target whatever the plate's height within +-2 cm, and every run succeeded; motion only hovered, and failed, when the plate was lower than believed, and pressed harder, out of the force's bounds, when it was higher. A motion-only failure is attributed to INTENT: S0 tracked the path it was given, and nothing below S1 could know the path was wrong. What it does not show: anything about a real robot, a real sponge, real dirt or a real cleanliness sensor; a learned controller; other surfaces, frictions or speeds; or that these numbers transfer. The simulated contact is MuJoCo's soft contact, tuned once (a soft sponge, an elliptic friction cone), and the controller's gains were chosen on this scene.
+What it shows (the 50 runs above, 2026-10-19, 8 min 48 s on the development host, an Intel i7-9700 without KVM; traces and `results.json` in `~/src/omarchy-robots-evidence/R6-v0.0.11/scrub-experiment/` there): with the same path, the contact channel kept the force at its target (9.7 N on average in every row) whatever the plate's height within 2 cm either way, and all 25 runs succeeded. Motion only did as well where the belief was right, but never touched the plate when it was 1 or 2 cm lower than believed (10 runs, all FAILED, the dirt untouched), and pressed harder when it was higher: 16 N on average at 1 cm, 24 N at 2 cm, outside the 20 N bound 95 % of the time, peaking at 28.7 N. Those failures are attributed to INTENT: S0 tracked the path it was given, and nothing below S1 could know the path was wrong. The verifier agreed with ground truth in all 50 runs. The guard clamped 2 or 3 commands per run, in every row: the torque rate, during the first ticks after the controller took over from the guard's own hold; no run reached its 40 N force limit. What it does not show: anything about a real robot, a real sponge, real dirt or a real cleanliness sensor; a learned controller; other surfaces, frictions or speeds; or that these numbers transfer. The simulated contact is MuJoCo's soft contact, tuned once (a soft sponge, an elliptic friction cone), and the controller's gains were chosen on this scene.
 
 ### Videos
 
