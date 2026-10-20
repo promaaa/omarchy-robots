@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
 Milestone R6, part 6: the lab GPU server as S2's edge machine. Measured on
 lab machines, on the lab's real network; no robot.
 
+Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
+on 9b3fe85, started 2026-10-20 15:18 KST, 32 min 29 s, on an Intel i7-9700
+with 62.7 GiB RAM and KVM: every check passed (221 runtime tests; placement
+14 of 14). Logs: `~/src/omarchy-robots-evidence/R6-v0.0.14/` and
+`R6-lab-gpu/` on the development host.
+
 #### Added
 
 - S2's time to first token on one GPU of the lab server laplace:
