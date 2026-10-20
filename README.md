@@ -198,7 +198,7 @@ the manual (Runtime, "Contact on a simulated Franka Panda").
 
 <!-- scrub:begin -->
 
-Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 027c01c9eacd, runs of 2026-10-19, `omarchy-runtime scrub-experiment --seeds 5`.
+Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, physics and S0 at 1 kHz, S1 at 20 Hz; the Panda is the MuJoCo Menagerie model, the dirt and its sensor are simulated; no real robot. 5 seeds per row; runtime 590c0b2b43a4, runs of 2026-10-20, `omarchy-runtime scrub-experiment --seeds 5`.
 
 | condition | belief error | outcomes | coverage % | force in bounds % | mean force N | peak force N | guard | verdict = truth | attribution |
 |---|---|---|---|---|---|---|---|---|---|
@@ -207,6 +207,11 @@ Scrubbing experiment: tested in simulation: MuJoCo on the CPU, simulated time, p
 | motion only | +0 cm | SUCCEEDED 5 | 100 | 91 | 7.7 (6.3 to 8.5) | 9.1 (7.7 to 9.9) | 2 | 5 of 5 | - 5 |
 | motion only | +1 cm | FAILED 5 | 0 | 0 | 0.0 (0.0 to 0.1) | 0.6 (0.0 to 1.8) | 2 | 5 of 5 | INTENT 5 |
 | motion only | +2 cm | FAILED 5 | 0 | 0 | 0.0 | 0.0 | 2 | 5 of 5 | INTENT 5 |
+| motion only, stiffness matched | -2 cm | SUCCEEDED 5 | 100 | 7 (6 to 7) | 19.6 (18.5 to 20.1) | 22.6 (21.3 to 23.3) | 2 | 5 of 5 | - 5 |
+| motion only, stiffness matched | -1 cm | SUCCEEDED 5 | 100 | 91 | 13.0 (11.9 to 13.6) | 14.9 (13.6 to 15.6) | 2 | 5 of 5 | - 5 |
+| motion only, stiffness matched | +0 cm | SUCCEEDED 5 | 100 (98 to 100) | 89 (84 to 91) | 6.3 (5.1 to 6.9) | 7.7 (6.5 to 8.3) | 2 | 5 of 5 | - 5 |
+| motion only, stiffness matched | +1 cm | FAILED 5 | 0 | 0 | 0.0 (0.0 to 0.1) | 0.8 (0.0 to 1.8) | 2 (2 to 3) | 5 of 5 | INTENT 5 |
+| motion only, stiffness matched | +2 cm | FAILED 5 | 0 | 0 | 0.0 | 0.0 | 3 (2 to 3) | 5 of 5 | INTENT 5 |
 | motion + contact | -2 cm | SUCCEEDED 5 | 100 | 93 | 9.7 (9.7 to 9.8) | 17.3 (17.2 to 17.3) | 2 | 5 of 5 | - 5 |
 | motion + contact | -1 cm | SUCCEEDED 5 | 100 | 93 | 9.7 | 17.1 (17.1 to 17.2) | 2 | 5 of 5 | - 5 |
 | motion + contact | +0 cm | SUCCEEDED 5 | 100 | 93 (93 to 94) | 9.7 | 16.9 (16.8 to 16.9) | 2 | 5 of 5 | - 5 |
