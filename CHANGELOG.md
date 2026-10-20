@@ -17,6 +17,12 @@ fidelity check; the scrubbing experiment's ablation and summary. Tested
 against fakes and in simulation only; no connection to a real robot was
 opened.
 
+Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
+on 43225e2, started 2026-10-20 10:41 KST, 33 min 31 s, on an Intel i7-9700
+with 62.7 GiB RAM and KVM: every check passed (221 runtime tests; placement
+14 of 14). Logs: `~/src/omarchy-robots-evidence/R6-v0.0.13/` on the
+development host.
+
 #### Fixed
 
 - The Panda backend's wrench had the wrong sign. libfranka 0.9.2 reports
