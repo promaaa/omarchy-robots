@@ -7,10 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+## [0.0.3] - 2026-10-20
+
+### Part 5 (2026-10-20)
+
 Milestone R6, part 6: the lab GPU server as S2's edge machine. Measured on
 lab machines, on the lab's real network; no robot.
 
-### Added
+#### Added
 
 - S2's time to first token on one GPU of the lab server laplace:
   Qwen2.5-1.5B-Instruct Q4_K_M (the file of the 2026-10-07 measurement),
@@ -25,7 +29,6 @@ lab machines, on the lab's real network; no robot.
   measured distribution: 12 of 12 runs within tolerance, no fallback ran
   out, a recovery took 0.20 s (manual, "In the lab").
 
-## [0.0.3] - 2026-10-20
 
 ### Part 4 (2026-10-20)
 
