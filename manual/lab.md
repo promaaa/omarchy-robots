@@ -4,7 +4,7 @@ title: In the lab
 permalink: /lab/
 ---
 
-> **Prepared, not run on any arm or lab machine.** The backends below are tested against fakes only: a fake Panda behind a libfranka-like interface, and AgileX's own SDK talking to a fake PiPER on a fake CAN bus. Nothing in this repository has opened a connection to a real robot. The facts about each arm come from its maker's documentation and source (links at the end of each section, read on 2026-10-19), and none has been checked against the lab's arms yet.
+> **Prepared, not run on any arm.** The lab GPU server section at the end ran on a lab server (2026-10-20); everything else here is prepared. The backends below are tested against fakes only: a fake Panda behind a libfranka-like interface, and AgileX's own SDK talking to a fake PiPER on a fake CAN bus. Nothing in this repository has opened a connection to a real robot. The facts about each arm come from its maker's documentation and source (links at the end of each section, read on 2026-10-19), and none has been checked against the lab's arms yet.
 
 The lab has two Franka Emika Panda arms (joint torque sensing) and one AgileX PiPER (CAN). This chapter says how Omarchy Robots reaches them: S0 backends behind the intent contract, what each arm's documentation says, where the Panda's 1 kHz loop can run, a first contact that reads state and moves nothing, and what to check in the lab.
 
@@ -156,20 +156,44 @@ The PiPER:
 - Q14. Which collision levels are set?
 - Q15. Does the PC that drives it have `gs_usb`, and does `ip -details link show can0` report 1000000?
 
-## The lab GPU server as an edge machine (prepared, not run)
+## The lab GPU server as an edge machine
 
-The milestone asks to measure a local model's time to first token on the lab's GPU server, and to run the S2 placement experiment between the development PC (the robot process) and that server (S2) over the lab's network. Nothing has run: no SSH host for that server is in the development host's SSH configuration, and no password or key belongs in this repository.
+> **Measured on lab machines, real network.** One GPU of the lab server laplace, and the development host, on the lab's LAN (ping 0.64 ms), 2026-10-20. No robot, no Orin.
 
-**What is needed.** An SSH host alias for the server in `~/.ssh/config` on the development host (for example `lab-gpu`), with key authentication already working; the server's GPU (`nvidia-smi`) and whether Nix is installed there; a port the PC can reach on the server, or permission to forward one over SSH; the model to serve, and whether the server can download it.
+The milestone asks for a local model's time to first token on a lab GPU server, and for the S2 placement experiment between the development host (the robot process) and that server (S2) over the lab's network. Both ran on laplace (8 RTX 6000 Ada, driver 550.107.02, Ubuntu 22.04; other users' jobs on 4 of its GPUs at the time), reached with the development host's own SSH key; no password or key is in this repository.
 
-**Without root on the server.** If Nix is absent there, the options are: the server's own OpenAI-compatible server if it has one (llama.cpp, vLLM, Ollama), since `ttft-measure` only needs an endpoint; Nix installed without root (nix-portable, or a user-namespace store); or the runtime from a source checkout with the server's Python and numpy, which is all S2 needs. Nothing here installs anything that needs root.
+**Nix without root.** No lab server has Nix, and their Python (3.6 to 3.10) is older than the runtime's. nix-portable (v012, MIT, its official release) runs Nix in the home directory through user namespaces. It built the runtime v0.0.3 part 4 and llama.cpp 9190 with CUDA 12.9, both from the nixpkgs this repository pins: CUDA's licence allowed for the CUDA packages only, built for the RTX 6000 Ada (sm_89), 9 minutes on laplace, 8.7 GB in nix-portable's store. A Nix-built program finds the server's NVIDIA driver through `LD_LIBRARY_PATH` set to a folder of links to its libraries (`libcuda`, `libnvidia-ptxjitcompiler`, `libnvidia-ml`). The model is the file of the development host's measurement (SHA-256 6a1a2eb6), downloaded again from Qwen's repository and checked.
 
-Then, from the development host, once the alias works:
+**S2's time to first token** (the table in Runtime, "Measured latencies"): 0.044 s median on laplace, against 3.8 s on the development host's CPU (built for AVX2) and 8.5 s (as packaged). From the development host through an SSH tunnel: 0.087 s. The extra 43 ms is not the LAN: a tiny request through the same tunnel takes 3 ms, against 0.9 ms on laplace itself. It is probably the tunnel holding the first streamed chunk of the answer (Nagle's algorithm meeting delayed acknowledgements, 40 ms on Linux). That is not tested: the direct test needs a model server listening on the lab network, which was not opened.
 
-1. On the server, serve the model on its loopback (llama.cpp shown; the model file is the one in `data/latency`'s provenance): `ssh lab-gpu 'llama-server -m qwen2.5-1.5b-instruct-q4_k_m.gguf --host 127.0.0.1 --port 8090 -ngl 99 --parallel 1'`.
-2. On the development host, forward that port: `ssh -N -L 8090:127.0.0.1:8090 lab-gpu`.
-3. On the development host, measure the time to first token over the lab's network: `nix run .#omarchy-runtime -- ttft-measure --url http://127.0.0.1:8090/v1 --model qwen2.5-1.5b-instruct --n 50 --no-prompt-cache --backend "llama.cpp on the lab GPU server" --model-file <file> --out lab-gpu.json`.
-4. On the server, start S2 for one robot run, with that distribution (copied there first), and forward its port: `ssh -L 7447:127.0.0.1:7447 lab-gpu 'omarchy-runtime s2 --listen 127.0.0.1:7447 --ttft-file lab-gpu.json'`. Without Nix on the server, `omarchy-runtime` is `PYTHONPATH=pkgs/omarchy-runtime python3 -m omarchy_runtime` in a checkout of this repository, with numpy.
-5. On the development host, run the robot process on the wall clock against it: `nix run .#omarchy-runtime -- run s2_placement --clock wall --s2 127.0.0.1:7447 --tag network="lab, over SSH"`.
+**S2 placement on the real network.** The robot process on the development host (runtime at 0584de1, not in a VM), S2 on laplace (v0.0.3 part 4), the S2 link through an SSH tunnel over the lab LAN. S2 takes each decision's delay from the distribution measured on laplace. The four scenarios of the placement experiment, three runs each (`profile` lab-lan: the real LAN, not the emulated `lan`):
 
-Label every number "measured on lab machines, real network" and say that the link ran through SSH port forwarding.
+S2 placement, the two-cup task and the dynamic scenarios (no emulated network, not in VMs, soft real-time). Measured 2026-10-20 with omarchy-runtime 0.0.3 (0584de1d9a1a), no Omarchy Robots identity, S0 at 200 Hz; soft real-time, Python, wall-clock on a host without Omarchy Robots identity (x86_64, Python 3.13.15, 8 CPUs, virtualization none). Times are wall-clock; in parentheses and in the simulated column, the same task with S2 in one process on simulated time. Values: median of a cell's runs, and in brackets a distribution-free confidence interval for that median from order statistics: the narrowest pair (k-th smallest, k-th largest) whose binomial coverage is at least 95 % (with 6 runs, the smallest and the largest, 96.9 %); no interval below 6 runs. Reaction, cup_moved: from the move to S0 executing the first chunk computed from an observation taken after it. Recovery, slot_blocked, fallback_expiry: from S1 giving up to the retry running; expired: S2's fallback (3 s in slot_blocked, 1.5 s in fallback_expiry) ran out before the retry started, and S0 went on under the capability's default. Fallback coverage, the least fraction of an execution's running time during which S0 held a valid fallback, as S0 counted it. S2 RTT: heartbeat echo measured by S2: the network both ways, plus up to one loop period at each end.
+
+| profile | TTFT s | two-cup task s | cup_moved reaction s | slot_blocked recovery s | fallback_expiry recovery s | S2 fallbacks expired | fallback coverage | violations | S0 starvations | runs within tolerance |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lab-lan | qwen2.5-1.5b-q4km-lab-gpu (median 0.04 s) | 18.45 (18.45) | 0.10 (0.10) | 0.20 (0.15) | 0.20 (0.15) | 0 of 6 | 100.0 % | 0 | 0 | 12 of 12 |
+
+<details markdown="1"><summary>Every cell (12)</summary>
+
+| scenario | profile | TTFT s | runs | outcomes | violations | S0 starvations | task s (simulated) | reaction s | recovery s | fallback engaged | S2 fallbacks expired | fallback coverage | S2 RTT p50 ms | long outage s | S0 overruns, most | runs within tolerance |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cup_moved | lab-lan | qwen2.5-1.5b-q4km-lab-gpu (median 0.04 s) | 3 | SUCCEEDED | 0 | 0 | 9.20 (9.15) | 0.10 | - | - | - | 100.0 % | 3.01 | - | 0 | 3 of 3 |
+| fallback_expiry | lab-lan | qwen2.5-1.5b-q4km-lab-gpu (median 0.04 s) | 3 | FAILED SUCCEEDED | 0 | 0 | 8.15 (8.05) | - | 0.20 | 3 of 3 | 0 of 3 | 100.0 % | 3.00 | - | 0 | 3 of 3 |
+| s2_placement | lab-lan | qwen2.5-1.5b-q4km-lab-gpu (median 0.04 s) | 3 | SUCCEEDED SUCCEEDED | 0 | 0 | 18.45 (18.45) | - | - | - | - | 100.0 % | 3.01 | - | 0 | 3 of 3 |
+| slot_blocked | lab-lan | qwen2.5-1.5b-q4km-lab-gpu (median 0.04 s) | 3 | FAILED SUCCEEDED | 0 | 0 | 8.20 (8.10) | - | 0.20 | 3 of 3 | 0 of 3 | 100.0 % | 3.04 | - | 0 | 3 of 3 |
+
+</details>
+
+Tolerance: Wall-clock runs are not bit-identical. Every cell must give the simulated run's outcomes, claims, verdicts and ground truth exactly, no safety violation, and no S0 tick without a chunk, a fallback or HOLD; outages must be classified by the deadlines; every execution's fallback coverage at least 99 %. Task time: local and lan within 15 % of the simulated run with the same time to first token when S0 kept its rate (overruns in under 1 % of its steps), within 30 % when it did not (a late loop delays every step, as on an emulated CPU); every profile at least 85 % of it.
+
+What it shows: on the lab's LAN, with a model on one GPU, S2 answers before any fallback runs out (0 of 6 expired). With the same model on the development host's CPU (3.8 s), S2's fallback ran out in every recovery of the VM experiment, and a recovery took 3.85 to 3.97 s. Here a recovery takes 0.20 s, 0.05 s more than in one process on simulated time; S2's heartbeat round trip through the tunnel is 3.0 ms (the network both ways, plus up to one loop period at each end). Every run gave the simulated run's outcomes, with no violation and no starvation. What it does not show: a robot, the Orin, a wireless or wide-area link, a direct connection without the tunnel, or S2 calling the model during a run (S2 waits a delay drawn from the measured distribution, as in the VM experiment). With a sub-second S2, this experiment says little more than the emulated `lan` profile.
+
+**Reproduce** (the scripts and logs are on the development host, in `~/src/omarchy-robots-evidence/R6-lab-gpu/`):
+
+1. On the server, install nix-portable in `~/.local/bin` and build llama.cpp with CUDA from the pinned nixpkgs (`llama-cuda.nix` there; `NP_RUNTIME=bwrap nix-portable nix build --impure --file llama-cuda.nix`).
+2. On the server, serve the model on one free GPU, on loopback only: `llama-server -m qwen2.5-1.5b-instruct-q4_k_m.gguf --host 127.0.0.1 --port 8090 -ngl 99 -c 4096 --parallel 1`, inside `nix-portable nix shell`, with `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH` set.
+3. Measure on the server: `omarchy-runtime ttft-measure --url http://127.0.0.1:8090/v1 --model qwen2.5-1.5b-instruct --n 50 --no-prompt-cache ...`.
+4. Measure from the development host through `ssh -N -L 8090:127.0.0.1:8090 <server>`, with `--network-path` naming the tunnel.
+5. For each run, start `omarchy-runtime s2 --listen 127.0.0.1:7447 --ttft-file <the server's distribution>` on the server, then `omarchy-runtime run <scenario> --clock wall --s2 127.0.0.1:7447 --tag profile=lab-lan` on the development host, through `ssh -N -L 7447:127.0.0.1:7447 <server>`.
+6. Gather: `omarchy-runtime placement runs/*/run-*/results.json --out table`.

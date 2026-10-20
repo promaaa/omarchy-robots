@@ -540,7 +540,11 @@ default held the cup, so the robot waited safely, never in HOLD, but for as
 long as the model took. S1's local reaction to a moved cup stayed at 0.10 s
 [0.09, 0.10] in every cell. So far: a model of this size on a desktop CPU is
 too slow for S2 to answer within its fallback; where S2 lives matters less
-than what it runs on, and the network adds little up to wan.
+than what it runs on, and the network adds little up to wan. On one GPU of
+the lab server laplace, the same model answers in 0.044 s; with S2 there and
+the robot process on the development host, over the lab's real LAN through an
+SSH tunnel, no fallback ran out and a recovery took 0.20 s (12 runs,
+2026-10-20; manual, "In the lab").
 
 ### Measured S2 latency
 

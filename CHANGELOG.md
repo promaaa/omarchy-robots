@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
+Milestone R6, part 6: the lab GPU server as S2's edge machine. Measured on
+lab machines, on the lab's real network; no robot.
+
+### Added
+
+- S2's time to first token on one GPU of the lab server laplace:
+  Qwen2.5-1.5B-Instruct Q4_K_M (the file of the 2026-10-07 measurement),
+  llama.cpp 9190 from the pinned nixpkgs built with CUDA 12.9 through Nix
+  without root (nix-portable). Median 0.044 s on laplace, 0.087 s from the
+  development host through an SSH tunnel, against 3.8 s on the development
+  host's CPU. Two distributions in `data/latency`, rows in the TTFT table.
+- `ttft-measure --network-path`: an SSH tunnel's URL is loopback, so the
+  path is stated instead of guessed.
+- The S2 placement experiment's four scenarios on the real lab LAN, the
+  robot process on the development host and S2 on laplace with the
+  measured distribution: 12 of 12 runs within tolerance, no fallback ran
+  out, a recovery took 0.20 s (manual, "In the lab").
+
 ## [0.0.3] - 2026-10-20
 
 ### Part 4 (2026-10-20)
