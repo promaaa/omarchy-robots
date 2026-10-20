@@ -226,6 +226,7 @@ def cmd_ttft_measure(args: argparse.Namespace) -> int:
             model_info=model,
             warmup=args.warmup,
             no_prompt_cache=args.no_prompt_cache,
+            network_path=args.network_path,
         )
     except OmarchyError as e:
         if "no API key" in str(e):
@@ -368,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quantization", help="e.g. Q4_K_M")
     p.add_argument("--license", help="the weights' license")
     p.add_argument("--no-prompt-cache", action="store_true", help="llama-server: process the whole prompt every time (cache_prompt false)")
+    p.add_argument("--network-path", help="how the requests travel, when the URL does not say it (an SSH tunnel)")
     p.add_argument("--api-key-env", default="OMARCHY_S2_API_KEY", help="environment variable with the API key (default OMARCHY_S2_API_KEY)")
     p.add_argument("--api-key-file", help="or a file with the API key, outside the repository")
     p.add_argument("--out", help="write the distribution file (JSON) there")

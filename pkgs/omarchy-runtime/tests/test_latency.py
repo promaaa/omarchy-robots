@@ -157,6 +157,9 @@ class TestTtftMeasure(unittest.TestCase):
         self.assertEqual(d["provenance"]["prompt_sha256"], ttft.prompt_sha256(ttft.messages(), ttft.MAX_TOKENS, 0.0))
         self.assertEqual(d["provenance"]["network_path"], "loopback on the measuring host")
         self.assertEqual(d["server_timings"][0]["prompt_n"], 512)
+        with server() as url:  # an SSH tunnel looks like loopback: the path is said, not guessed
+            d = ttft.measure(url, "m", 5, key=None, backend="stand-in", model_info={"name": "m"}, network_path="SSH tunnel to a lab server")
+        self.assertEqual(d["provenance"]["network_path"], "SSH tunnel to a lab server")
 
     def test_counts_failures_and_needs_a_key_for_a_remote_backend(self) -> None:
         with server() as url:

@@ -184,9 +184,12 @@ def measure(
     timeout: float = 120.0,
     no_prompt_cache: bool = False,
     temperature: float = 0.0,
+    network_path: str | None = None,
 ) -> Json:
     """`warmup` requests first, not counted (model load, first allocation),
-    then `n` requests, one after the other."""
+    then `n` requests, one after the other. `network_path` says how the
+    requests travel when the URL alone does not (an SSH tunnel to another
+    machine looks like loopback)."""
     if n < 5:
         raise ConfigError("ttft-measure: at least 5 requests")
     host_name = urlsplit(base).hostname or ""
@@ -222,6 +225,7 @@ def measure(
     if len(ttft) < 5:
         raise ConfigError(f"ttft-measure: {len(failures)} of {n} requests failed; first: {failures[0]['reason'] if failures else '-'}")
     path = "loopback on the measuring host" if host_name in LOOPBACK else f"the Internet, from the measuring host to {host_name}"
+    path = network_path or path
     return {
         "format": FORMAT,
         "kind": "s2_ttft",
