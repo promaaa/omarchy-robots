@@ -609,7 +609,7 @@ nix develop ../.. -c python3 -m unittest discover -s tests -t .
 
 ## Measured latencies
 
-> **Measured on the development host.** A desktop CPU (Intel i7-9700, 8 threads), no GPU, no robot.
+> **Measured on the development host and on a lab GPU server.** A desktop CPU (Intel i7-9700, 8 threads), and one GPU of the lab server laplace (see "In the lab"). No robot.
 
 The S2 placement experiment's 0.1 s, 1 s and 5 s stand in for a model's time to first token (TTFT). `omarchy-runtime ttft-measure` measures a real one: it sends a representative S2 prompt (choose the next rack spot for the cup from the belief S2 has when S1 gave up in `slot_blocked`, answer in JSON) N times, streaming, to an OpenAI-compatible endpoint, and records for each request the TTFT (from sending it to the first token of the answer), the total latency and any failure. The result is a latency distribution file (`omarchy_runtime/data/latency/`, the format in AGENTS.md) with its provenance: date, host, backend, model and its file's SHA-256, prompt hash, method, network path. Its label is "measured on host".
 
@@ -627,12 +627,14 @@ The model is Qwen2.5-1.5B-Instruct, quantized Q4_K_M, from its publisher's repos
 
 <!-- s2-ttft:begin -->
 
-S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host, never on a robot.
+S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host or a lab GPU server (each row's backend and network path say which), never on a robot.
 
 | distribution | label | backend | model | TTFT median s | p05 s | p95 s | n | failures | network path | date |
 |---|---|---|---|---|---|---|---|---|---|---|
 | qwen2.5-1.5b-q4km-host | measured on host | llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 8.505 | 8.354 | 8.889 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
 | qwen2.5-1.5b-q4km-host-avx2 | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock), built with AVX2, FMA, F16C, BMI2 (flake output llama-cpp-avx2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 3.804 | 3.539 | 3.945 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+| qwen2.5-1.5b-q4km-lab-gpu | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock of v0.0.3 part 4), built with CUDA 12.9 for sm_89 (Nix, nix-portable), all layers on one NVIDIA RTX 6000 Ada (driver 550.107.02), 1 slot, context 4096; on the lab GPU server laplace, with other users jobs on 4 of its 8 GPUs | Qwen2.5-1.5B-Instruct Q4_K_M | 0.044 | 0.036 | 0.045 | 50 | 0 | loopback on the measuring host | 2026-10-20 |
+| qwen2.5-1.5b-q4km-lab-gpu-tunnel | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock of v0.0.3 part 4), built with CUDA 12.9 for sm_89 (Nix, nix-portable), all layers on one NVIDIA RTX 6000 Ada (driver 550.107.02), 1 slot, context 4096; on the lab GPU server laplace, with other users jobs on 4 of its 8 GPUs | Qwen2.5-1.5B-Instruct Q4_K_M | 0.087 | 0.052 | 0.090 | 50 | 0 | an SSH tunnel (port forward) from the development host to laplace over the lab LAN (ping 0.64 ms) | 2026-10-20 |
 
 <!-- s2-ttft:end -->
 

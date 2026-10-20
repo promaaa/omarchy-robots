@@ -549,19 +549,24 @@ The 0.1 s, 1 s and 5 s above stand in for a model's time to first token.
 prompt (choose the rack spot for the cup from S2's belief, answer in JSON),
 50 times, streaming, to an OpenAI-compatible endpoint. On the development
 host, a small instruct model served by llama.cpp from nixpkgs (as packaged,
-and built for AVX2) gave the distributions below, committed with their
+and built for AVX2) gave the first two distributions below; the same model
+and llama.cpp, built with CUDA through Nix, on one GPU of the lab server
+laplace gave the last two, measured on laplace and from the development
+host through an SSH tunnel. All are committed with their
 provenance in `pkgs/omarchy-runtime/omarchy_runtime/data/latency/` (the
 format is in AGENTS.md). No cloud backend was measured: no API key was
 provided (`OMARCHY_S2_API_KEY`).
 
 <!-- s2-ttft:begin -->
 
-S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host, never on a robot.
+S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on the development host or a lab GPU server (each row's backend and network path say which), never on a robot.
 
 | distribution | label | backend | model | TTFT median s | p05 s | p95 s | n | failures | network path | date |
 |---|---|---|---|---|---|---|---|---|---|---|
 | qwen2.5-1.5b-q4km-host | measured on host | llama.cpp llama-server 9190 (b64739e) as packaged by nixpkgs (flake.lock; GGML_NATIVE off, no AVX2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 8.505 | 8.354 | 8.889 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
 | qwen2.5-1.5b-q4km-host-avx2 | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock), built with AVX2, FMA, F16C, BMI2 (flake output llama-cpp-avx2), CPU only, 8 threads, 1 slot, context 4096 | Qwen2.5-1.5B-Instruct Q4_K_M | 3.804 | 3.539 | 3.945 | 50 | 0 | loopback on the measuring host | 2026-10-07 |
+| qwen2.5-1.5b-q4km-lab-gpu | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock of v0.0.3 part 4), built with CUDA 12.9 for sm_89 (Nix, nix-portable), all layers on one NVIDIA RTX 6000 Ada (driver 550.107.02), 1 slot, context 4096; on the lab GPU server laplace, with other users jobs on 4 of its 8 GPUs | Qwen2.5-1.5B-Instruct Q4_K_M | 0.044 | 0.036 | 0.045 | 50 | 0 | loopback on the measuring host | 2026-10-20 |
+| qwen2.5-1.5b-q4km-lab-gpu-tunnel | measured on host | llama.cpp llama-server 9190 (b64739e) from nixpkgs (flake.lock of v0.0.3 part 4), built with CUDA 12.9 for sm_89 (Nix, nix-portable), all layers on one NVIDIA RTX 6000 Ada (driver 550.107.02), 1 slot, context 4096; on the lab GPU server laplace, with other users jobs on 4 of its 8 GPUs | Qwen2.5-1.5B-Instruct Q4_K_M | 0.087 | 0.052 | 0.090 | 50 | 0 | an SSH tunnel (port forward) from the development host to laplace over the lab LAN (ping 0.64 ms) | 2026-10-20 |
 
 <!-- s2-ttft:end -->
 

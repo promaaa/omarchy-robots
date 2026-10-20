@@ -300,6 +300,6 @@ def docs_table(names: list[str]) -> str:
     text = (
         "S2's time to first token, measured with `omarchy-runtime ttft-measure` (from sending a request to the first token "
         "of the answer; the prompt and the method are in each file's provenance, with the model file's SHA-256). Measured on "
-        "the development host, never on a robot."
+        "the development host or a lab GPU server (each row's backend and network path say which), never on a robot."
     )
     return "\n".join([text, "", *md_table(header, rows)])
