@@ -7,7 +7,72 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 
-## [0.0.3] - 2026-10-19
+## [0.0.3] - 2026-10-20
+
+### Part 4 (2026-10-20)
+
+Milestone R6: the fixes of an independent review of v0.0.3 parts 1 to 3.
+Three in the arms' backends, before any real arm runs them; one in the
+fidelity check; the scrubbing experiment's ablation and summary. Tested
+against fakes and in simulation only; no connection to a real robot was
+opened.
+
+#### Fixed
+
+- The Panda backend's wrench had the wrong sign. libfranka 0.9.2 reports
+  `O_F_ext_hat_K` as the force the robot applies to the environment
+  (`robot_state.h`); this runtime's wrench is the environment's on the
+  robot. `FrankaArm` negates it and takes its moment about the flange. The
+  fake Panda reported it the runtime's way, which hid the mistake; it now
+  reports it libfranka's way.
+- The Panda backend took Desk's end effector for the flange. It now takes
+  `F_T_EE` out of `O_T_EE`, asks for the flange's Jacobian, and moves the
+  wrench from the stiffness frame to the flange. The fake can set an end
+  effector (Franka's hand).
+- A second control loop with the same S0 broke the Panda's torque
+  continuity (a reflex): the loop's clock restarted at zero, behind S0's,
+  and the guard kept the last loop's torque. The robot's time now runs on
+  across loops, and each loop restarts S0 (`S0Loop.restart`): its first
+  torque is zero. The fake Panda now refuses a first torque that is not
+  zero, as its documentation said it did.
+- The PiPER backend read and commanded after its feedback stopped: the SDK
+  keeps its last values, and its `isOk()` turns false only 0.3 s later.
+  `PiperArm` now needs joint feedback received within
+  `feedback_timeout_s` (0.05 s) and `isOk()`, else `ArmError` and nothing
+  is sent, the motors' enabling included.
+- An accepted contact channel without a wrench, or an object intent
+  without a pose, read as faithful, and a failure went to INTENT. S0 now
+  counts them (`contact_unmeasured_ticks`, `object_unmeasured_ticks`), and
+  either fails the fidelity check: the failure goes to EXECUTION.
+- The scrubbing experiment's summary (v0.0.3 part 2, v0.0.3 part 3) said the contact
+  channel kept the force at its target, and motion only never touched the
+  plate when it was lower than believed. The contact runs were within 5 to
+  20 N for 93 to 95 % of the raster window (below 5 N for the rest, never
+  above), and two motion-only runs touched the lower plate, too lightly to
+  clean it. The manual now says so; the runs are unchanged.
+- v0.0.3 part 3's tag message says its release check ran "under QEMU TCG"; it
+  ran with KVM, as the same message's last paragraph and the check's log
+  say. The tag is left as published.
+- The manual and the README now say: the trace records the guard's
+  interventions as counts per supervisor step, without each one's time or
+  cause; an operator authorization is a declaration in the configuration,
+  not an authentication; the Panda's 15 N is an admission limit and a
+  reactive threshold, not a physical bound; the 500 us S0 tick time
+  includes the fake Panda's own Python; success in the scrubbing scene is
+  a simulated cleaning rule, and an attribution is the runtime's rule, not
+  an independent cause.
+
+#### Changed
+
+- The scrubbing experiment has a third condition: motion only with the
+  contact channel's stiffness (1500, 1500 and 800 N/m instead of 1000). It
+  behaves like motion only (no cleaning with the plate 1 or 2 cm lower,
+  13 N and 20 N on average with it 1 or 2 cm higher): the force
+  regulation, not the stiffness, keeps the force near its target. 75 runs.
+- `FrankaArm.run(s0, duration, before=None)` takes the S0 loop, which it
+  restarts, instead of its tick; `FrankaModel.zero_jacobian(frame, state)`
+  names the frame; `FrankaState` has `F_T_EE` and `EE_T_K`.
+
 
 ### Part 3 (2026-10-19)
 

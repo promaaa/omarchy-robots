@@ -20,10 +20,10 @@ that names the exact system it ran on. **The robot is simulated** and nothing
 is real-time: the runtime runs in simulated time, or on the wall clock as soft
 real-time Python, with S2 in its process or in its own, on another machine.
 
-**Status:** v0.0.3 part 3 (milestone R6: intents with contact and object channels,
+**Status:** v0.0.3 part 4 (milestone R6: intents with contact and object channels,
 S0 split into a guard and a controller, failure attribution, contact intent
 on a simulated Franka Panda, S0 backends for the lab's Panda and PiPER
-tested against fakes) runs and is tested in virtual machines, the Panda in
+tested against fakes, and the fixes of an independent review of them) runs and is tested in virtual machines, the Panda in
 simulation (MuJoCo), and the arms' backends against fakes only: the base
 system, the runtime's simulated scenarios (on a laptop and inside an Omarchy
 Robots VM), the runtime on the wall clock with S2 in its own process on a
@@ -826,7 +826,10 @@ coverage), v0.0.2 its second (measured S2 latency, repeated runs with
 intervals), v0.0.3 part 1 milestone R6's first part (intent contract v2, the S0
 guard and controller, fidelity and attribution), v0.0.3 part 2 its second
 (contact intent on a simulated Franka Panda, the scrubbing experiment),
-v0.0.3 part 3 its third (S0 backends for the lab's arms, tested against fakes). The first board booted and
+v0.0.3 part 3 its third (S0 backends for the lab's arms, tested against fakes),
+v0.0.3 part 4 the fixes of an independent review of the three (the Panda's force
+sign and frames, the PiPER's lost feedback, unmeasured channels, the
+experiment's ablation and summary). The first board booted and
 validated on hardware takes v0.1.0. The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; their changes are noted
