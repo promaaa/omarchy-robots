@@ -179,17 +179,20 @@ On the robot itself: set `runtime.enable = true;` in `robot.nix`, run
 | `slot_blocked`, `fallback_expiry` | a dish appears in the rack spot; S1 gives up, S0 runs S2's fallback, S2 chooses another spot; with a slow S2, S2's fallback runs out first and the capability's default holds the cup | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 | `ghost_verify` | a second detector sees the cup 30 cm off while the verifier looks: VIOLATED although the cup is in the rack, attributed to PERCEPTION | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
 | `gripper_stuck` | the gripper is stuck open; S1 plans the grasp again until the deadline; attributed to EXECUTION | FAILED/TIMEOUT |
-| `guard_controller_fault` | S0's controller emits NaN for 0.3 s; the guard replaces every command and the trace says so | SUCCEEDED |
+| `guard_controller_fault` | S0's controller emits NaN for 0.3 s; the guard replaces every command and the trace counts the replacements | SUCCEEDED |
 | `scrub_contact`, `scrub_motion`, `scrub_hover`, `scrub_occluded`, `scrub_weak` | the simulated Franka Panda wipes a plate (MuJoCo, development tools), below | SUCCEEDED twice; FAILED (INTENT); UNVERIFIED (PERCEPTION); FAILED (EXECUTION) |
 
 ### Contact intent on a simulated Franka Panda
 
 A Franka Emika Panda (the MuJoCo Menagerie model, Apache-2.0, pinned and
 fetched by Nix), simulated in MuJoCo on the CPU, wipes a plate whose height
-the belief has wrong by up to 2 cm. The same S1 path runs in two interface
-conditions: motion only, and motion with a contact channel (10 N, bounds 5
-to 20 N). S0 is a Cartesian impedance controller with normal-force
-regulation, joint torques behind the guard. Tested in simulation only:
+the belief has wrong by up to 2 cm. The same S1 path runs in three
+conditions: motion only; motion only with the contact channel's stiffness
+(the ablation); and motion with a contact channel (10 N, bounds 5 to 20 N).
+S0 is a Cartesian impedance controller with normal-force regulation, joint
+torques behind the guard. Success means a simulated cleaning rule (a cell is
+clean after 0.3 s under the sponge at 4 N or more; the goal needs 90 % of
+the cells seen clean), not a real cleanliness measure. Tested in simulation only:
 nothing here ran on a robot. Details, and what the table does not show, in
 the manual (Runtime, "Contact on a simulated Franka Panda").
 

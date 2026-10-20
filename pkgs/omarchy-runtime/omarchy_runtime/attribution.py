@@ -17,8 +17,10 @@ UNVERIFIED), the first rule that holds:
    contradictory on one of the goal's entities during the execution: two
    sources saw it at about the same time, confidently, too far apart.
 3. EXECUTION: S0 did not achieve the intent: the fidelity check failed (a
-   threshold missed, a command the guard replaced, a degraded chunk), or S0
-   reported a fault.
+   threshold missed, a command the guard replaced, a degraded chunk, a
+   channel S0 could not measure), or S0 reported a fault. An unmeasured
+   channel fails the check: nothing shows that S0 honoured it, so the
+   failure cannot be put on the intent.
 4. INTENT: S0 executed the intent faithfully, and the goal was not reached.
 
 An intent that cannot express something (a grasp, a contact) cannot be
@@ -66,6 +68,10 @@ def fidelity(c: S0Counters, limits: FidelityLimits) -> Json:
         failed.append(f"force within bounds {100 * force:.1f} % of the time in MAINTAIN, below {100 * limits.force:.0f} %")
     if obj is not None and obj > limits.object:
         failed.append(f"mean object error {obj:.4f} m above {limits.object} m")
+    if c.contact_unmeasured_ticks:
+        failed.append(f"the contact channel unmeasured on {c.contact_unmeasured_ticks} tick(s): no wrench")
+    if c.object_unmeasured_ticks:
+        failed.append(f"the object intent unmeasured on {c.object_unmeasured_ticks} tick(s): no pose of it")
     if c.guard_replacements:
         failed.append(f"the guard replaced {c.guard_replacements} command(s)")
     if c.degraded_chunks:

@@ -165,6 +165,12 @@ class S0Loop:
     def hold(self, fallback: bool = False) -> None:
         self.guard.hold(fallback)
 
+    def restart(self) -> None:
+        """The actuators start again from rest, as at each new control loop
+        of a Franka: the next tick is no late one, and its torque is zero."""
+        self._last = None
+        self.guard.restart()
+
     def history(self, since: Ns) -> S0History:
         n, size = self._h_count, len(self._h_t)
         order = np.arange(max(0, n - size), n) % size
@@ -261,6 +267,8 @@ class S0Loop:
                 error = float(np.linalg.norm(e))
             c["motion_ticks"] += 1
             f["motion_error_sum"] += error
+        if intent.contact and state.wrench is None:
+            c["contact_unmeasured_ticks"] += 1  # no evidence S0 honoured the contact channel
         if state.wrench is not None:
             for ci in intent.contact:
                 mode = ci.mode(now)
@@ -274,6 +282,8 @@ class S0Loop:
                     c["force_in_bounds_ticks"] += bool(np.all((value >= ci.lower) & (value <= ci.upper)))
         o = intent.object
         pose = scene.get(f"pose:{o.entity}") if o is not None else None
+        if o is not None and pose is None:
+            c["object_unmeasured_ticks"] += 1
         if o is not None and pose is not None:
             if o.poses is not None:
                 error = float(np.linalg.norm(sample(o.poses, o.timing, now)[:3] - pose[:3]))

@@ -18,12 +18,16 @@ Each arm is an S0 backend (`arms.py`): a `RobotIO` that S0, the guard and a cont
 | Command | joint torques, at 1 kHz, in libfranka's control loop | joint positions (MOVE J), at 200 Hz |
 | Controller | `cartesian_impedance` (the scrubbing scene's) | `motion_tracker` |
 | Honours | Cartesian motion in `franka.base`; contact on the flange up to 15 N | motion only |
-| The guard's limits | the Panda's joint, torque (87 and 12 Nm) and torque-rate (1000 Nm/s) limits, its workspace (from the pose the robot reports), 15 N on the flange | the PiPER's documented joint limits, rounded inwards; steps of 1 rad/s at most |
+| The guard's limits | the Panda's joint, torque (87 and 12 Nm) and torque-rate (1000 Nm/s) limits, its workspace (from the pose the robot reports), a 15 N threshold on the measured flange force | the PiPER's documented joint limits, rounded inwards; steps of 1 rad/s at most |
 | Read without authorization | `FrankaArm.read`, `state` | `PiperArm.state`, `status` |
 
-**Authorization.** Reading state needs nothing. Anything sent to an arm's actuators, enabling the PiPER's motors included, is refused (`NotAuthorized`) unless the arm's adapter table in the configuration names an operator authorization: `operator_authorization = "<who>, <date>, <where>"` in `[franka.kinematics.adapter]` or `[piper.kinematics.adapter]`. None is given in this repository.
+**Authorization.** Reading state needs nothing. Anything sent to an arm's actuators, enabling the PiPER's motors included, is refused (`NotAuthorized`) unless the arm's adapter table in the configuration names an operator authorization: `operator_authorization = "<who>, <date>, <where>"` in `[franka.kinematics.adapter]` or `[piper.kinematics.adapter]`. None is given in this repository. This is a declaration in the configuration, not an authentication of the operator: anyone who can edit the configuration can write it. It records a decision; it does not check one.
 
-**The guard is additional to each arm's own safety, never a replacement for it.** The Panda's reflexes and the PiPER's collision protection stay on. The guard's 15 N limit on the Panda's flange lies below the 20 N collision threshold libfranka's examples set, so that the robot's reflex stays the last resort. A torque command starts from zero and changes by at most the torque-rate limit times the tick's period: the first command the Panda gets is zero, as it requires.
+**The guard is additional to each arm's own safety, never a replacement for it.** The Panda's reflexes and the PiPER's collision protection stay on. The 15 N on the Panda's flange is two things: the largest force a contact intent may ask (larger is refused), and a threshold on the measured force (above it, the guard's own hold replaces the controller's torques). It reacts once the estimate has passed 15 N; it does not bound the force physically, and no test here shows the Panda's force regulation (the fake Panda's dynamics are too simple). It lies below the 20 N collision threshold libfranka's examples set, so that the robot's reflex stays the last resort. A torque command starts from zero and changes by at most the torque-rate limit times the tick's period: the first command of every control loop is zero, as the Panda requires (`FrankaArm.run` restarts S0 at each loop, and the robot's time runs on across loops).
+
+**What S0 sees of the Panda.** The flange, as the configuration declares it, whatever end effector Desk sets: `FrankaArm` takes Desk's end effector (`F_T_EE`) out of `O_T_EE`, asks libfranka for the flange's Jacobian, and turns `O_F_ext_hat_K` into this runtime's wrench. libfranka counts the force the robot applies to the environment as positive (its `robot_state.h`); this runtime counts the environment's force on the robot, so the backend negates it, and takes its moment about the flange.
+
+**The PiPER needs fresh feedback.** `PiperArm.state` and `apply` raise `ArmError` and send nothing unless joint feedback arrived within `feedback_timeout_s` (0.05 s; the arm sends it every 5 ms), by the CAN frames' receive time, and the SDK's `isOk()` holds. The SDK keeps its last values when frames stop, and its `isOk()` turned false only 0.3 s after the feedback stopped (against the fake, three times).
 
 **No connection here.** Each backend takes an interface object made elsewhere; no module imports a vendor library (`tests/test_arms.py` checks it).
 
@@ -31,13 +35,13 @@ Each arm is an S0 backend (`arms.py`): a `RobotIO` that S0, the guard and a cont
 
 ### The fakes
 
-**The fake Panda** (`sim/fake_franka.py`) reproduces what libfranka 0.9.2's documentation says, as far as a test needs: the Panda's kinematics (its published DH parameters; they match the MuJoCo Menagerie model at every pose tried) and limits; a control loop at 1 kHz whose first period is zero; NaN or infinity refused; the first torque zero and the torque rate within 1000 Nm/s, else the reflex `controller_torque_discontinuity`; a dropped command (a callback slower than its budget, or a drop injected) replaced by the last one, and 20 drops in a row the reflex `communication_constraints_violation`; a joint past its limit `joint_position_limits_violation`; a force on the flange above the collision threshold `cartesian_reflex`. A reflex stops the loop and leaves the robot in reflex mode until `automatic_error_recovery`. Its dynamics are simple (constant inertia and damping, gravity compensated as the robot does it): enough for the timing and the errors, not for force control.
+**The fake Panda** (`sim/fake_franka.py`) reproduces what libfranka 0.9.2's documentation says, as far as a test needs: the Panda's kinematics (its published DH parameters; they match the MuJoCo Menagerie model at every pose tried) and limits; an end effector away from the flange when the test sets one (Franka's hand, 10.34 cm along z); the external wrench with libfranka's sign; a control loop at 1 kHz whose first period is zero; NaN or infinity refused; the first torque of each loop zero and the torque rate within 1000 Nm/s, else the reflex `controller_torque_discontinuity`; a dropped command (a callback slower than its budget, or a drop injected) replaced by the last one, and 20 drops in a row the reflex `communication_constraints_violation`; a joint past its limit `joint_position_limits_violation`; a force on the flange above the collision threshold `cartesian_reflex`. A reflex stops the loop and leaves the robot in reflex mode until `automatic_error_recovery`. Its dynamics are simple (constant inertia and damping, gravity compensated as the robot does it): enough for the timing and the errors, not for force control.
 
-**The fake PiPER** (`sim/fake_piper.py`) sits under AgileX's own SDK: for a test's duration, python-can's `socketcan` is a fake bus that reaches it, so the SDK's real code encodes and decodes every frame and no socket opens. The arm decodes the SDK's frames by their CAN ids and big-endian layouts and answers as documented: status, joints and motors every 5 ms, drivers (with the enable bit) every 25 ms. It moves only enabled, in CAN command mode MOVE J, towards the last joint targets at its speed percentage. A target past a joint's limit is refused with status 0x04; an emergency stop stops it; a collision shows status 0x07. Two behaviours are assumptions, to check in the lab: the arm holds its last target when commands stop, and its maximum joint speed is 3 rad/s.
+**The fake PiPER** (`sim/fake_piper.py`) sits under AgileX's own SDK: for a test's duration, python-can's `socketcan` is a fake bus that reaches it, so the SDK's real code encodes and decodes every frame and no socket opens. The arm decodes the SDK's frames by their CAN ids and big-endian layouts and answers as documented: status, joints and motors every 5 ms, drivers (with the enable bit) every 25 ms. It moves only enabled, in CAN command mode MOVE J, towards the last joint targets at its speed percentage. A target past a joint's limit is refused with status 0x04; an emergency stop stops it; a collision shows status 0x07. Its frames carry their receive time, as socketcan stamps it, and a test can cut its feedback. Two behaviours are assumptions, to check in the lab: the arm holds its last target when commands stop, and its maximum joint speed is 3 rad/s.
 
 The fake PiPER found a mistake: the first configuration put joint 5's limit at 1.222 rad, which is 70.016 degrees, past the arm's 70; the guard clamped targets there, and the arm refused them. The limits are now rounded inwards.
 
-`tests/test_arms.py` runs both backends against their fakes: state without authorization and nothing sent; S0 moving each arm through its interface; the Panda's reflexes (collision, a torque jump, 20 dropped commands, a loop too slow for its budget) and recovery; the PiPER's refused target and collision.
+`tests/test_arms.py` runs both backends against their fakes: state without authorization and nothing sent; S0 moving each arm through its interface; the Panda's reflexes (collision, a torque jump, a first torque that is not zero, 20 dropped commands, a loop too slow for its budget) and recovery; two control loops in a row with the same S0; the flange and the wrench's sign with Franka's hand set in Desk; a contact channel without a wrench, never faithful; the PiPER's refused target and collision, and its feedback cut before the first command (nothing sent).
 
 ## The Franka Emika Panda: what its documentation says
 
@@ -59,7 +63,7 @@ Franka now calls the Panda "FER" (Franka Emika Robot). Its documentation moved t
 
 **Packaged.** `nix build .#libfranka` builds libfranka 0.9.2 with its examples (`pkgs/libfranka`; it is not in nixpkgs): built on the development host, x86_64, 2026-10-19 (CMake 4 needs `CMAKE_POLICY_VERSION_MINIMUM=3.5` for it). Not built for aarch64 yet.
 
-**A Python S0 cannot hold the Panda's 1 kHz loop.** One S0 tick of this runtime, the guard, the Cartesian impedance controller and the backend's state, took 500 us at the median and 562 us at the 99th percentile (1901 ticks against the fake Panda, measured on the development host on 2026-10-19, with VM tests running beside it), beside Franka's budget of 300 to 500 us for the whole loop, round trip included; and Python gives no guarantee at all. The guard is plain data so that it can become a native process: that is the step before any torque reaches a real Panda.
+**A Python S0 cannot hold the Panda's 1 kHz loop.** One S0 tick of this runtime, the guard, the Cartesian impedance controller and the backend's state, took 500 us at the median and 562 us at the 99th percentile (1901 ticks against the fake Panda, measured on the development host on 2026-10-19, with VM tests running beside it), beside Franka's budget of 300 to 500 us for the whole loop, round trip included; and Python gives no guarantee at all. Those 500 us include the fake Panda's own Python (its state and its dynamics), which a real robot does not run. The guard is plain data so that it can become a native process; that alone would not show that the whole callback fits, since the controller and the binding run in it too. Measuring the whole callback, native, on the lab's PC, is the step before any torque reaches a real Panda.
 
 Sources: [compatibility](https://frankarobotics.github.io/docs/compatibility.html), [libfranka CHANGELOG](https://github.com/frankarobotics/libfranka/blob/main/CHANGELOG.md), [update history](https://download.franka.de/Franka_Robotics_Update_History.pdf), [getting started](https://frankarobotics.github.io/docs/doc/libfranka/docs/getting_started.html), [overview](https://frankarobotics.github.io/docs/overview.html), [system requirements](https://frankarobotics.github.io/docs/doc/libfranka/docs/system_requirements.html), [real-time kernel](https://frankarobotics.github.io/docs/doc/libfranka/docs/real_time_kernel.html), [troubleshooting](https://frankarobotics.github.io/docs/troubleshooting.html), [robot specifications](https://frankarobotics.github.io/docs/robot_specifications.html), [libfranka 0.9.2 headers](https://github.com/frankarobotics/libfranka/tree/0.9.2/include/franka), [panda-py](https://github.com/JeanElsner/panda-py).
 
@@ -75,7 +79,7 @@ Sources: [compatibility](https://frankarobotics.github.io/docs/compatibility.htm
 
 **Limits.** J1 -150 to 150 degrees, J2 0 to 180, J3 -170 to 0, J4 -100 to 100, J5 -70 to 70, J6 -120 to 120. The SDK clamps nothing by default. No source gives the joints' maximum speed, or what the arm does when commands stop.
 
-**Errors.** With `judge_flag`, a missing or down CAN interface raises `ConnectionError`; a failed send is only logged; the reading thread stops on a CAN error, and `isOk()` turns false after about 250 ms without frames.
+**Errors.** With `judge_flag`, a missing or down CAN interface raises `ConnectionError`; a failed send is only logged; the reading thread stops on a CAN error, and `isOk()` turns false about 0.3 s after frames stop (0.305 s against the fake).
 
 Sources: [piper_sdk](https://github.com/agilexrobotics/piper_sdk) (0.6.2, and `asserts/V2/INTERFACE_V2.MD`, the Q&A and the demos of 0.7.0a1), [PyPI](https://pypi.org/project/piper-sdk/), [issue 80](https://github.com/agilexrobotics/piper_sdk/issues/80), [issue 27](https://github.com/agilexrobotics/piper_sdk/issues/27), [pyAgxArm](https://github.com/agilexrobotics/pyAgxArm).
 
@@ -121,7 +125,7 @@ Nothing here moves the arm. `echo_robot_state` calls `robot.read()` and `print_j
 4. Give that PC port a static address on Control's network (Franka's example: 172.16.0.1/24 for the PC, Control at 172.16.0.2).
 5. In Desk, activate FCI, and leave its pop-up open.
 6. On the PC, measure the round trip, and keep the output: `ping -c 100 <control-ip>`.
-7. On the PC, build libfranka 0.9.2: `nix build github:promaaa/omarchy-robots/v0.0.12#libfranka -o libfranka`.
+7. On the PC, build libfranka 0.9.2: `nix build github:promaaa/omarchy-robots/v0.0.13#libfranka -o libfranka`.
 8. Read 100 states, and keep the output: `./libfranka/bin/echo_robot_state <control-ip> > robot_state.txt`.
 9. Read the joint poses once, and keep the output: `./libfranka/bin/print_joint_poses <control-ip> > joint_poses.txt`.
 
@@ -136,12 +140,12 @@ The Panda:
 - Q1. Which robot system version does Desk show? 4.2.1 or 4.2.2 means libfranka 0.9.2; 4.0.x means 0.8.0.
 - Q2. Is FCI installed, and does its pop-up stay open?
 - Q3. What is Control's address, and can a PC be cabled straight to its LAN port?
-- Q4. Which end effector and load does Desk set? Zero-torque tests depend on them.
+- Q4. Which end effector and load does Desk set? Zero-torque tests depend on them, and the backend removes that end effector (`F_T_EE`) to find the flange.
 - Q5. Is an external activation device in reach, and is there a separate emergency stop?
 - Q6. Can a second client read the state while another one controls? Franka does not document it.
 - Q7. What round trip, and what `control_command_success_rate`, does the chosen PC reach?
 - Q8. For the Orin: which NIC, does its real-time kernel boot, and does Control serve an ARM64 model library to this Panda?
-- Q9. Does `O_F_ext_hat_K` read a positive z when a known weight hangs from the flange? The backend assumes the environment's wrench on the end-effector.
+- Q9. With a known weight m hanging from the flange, and Desk's load set without it, does `O_F_ext_hat_K` read about +m g in z, as libfranka's header says (the robot's force on the environment positive)? The backend negates it.
 
 The PiPER:
 

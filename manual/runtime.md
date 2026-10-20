@@ -97,7 +97,7 @@ A simulated kitchen in a vertical plane: a table with two cups, a counter with a
 | `fallback_expiry` | `slot_blocked` with S2 taking 2 s and a fallback that lasts 1.5 s: the fallback expires, S0 returns to HOLD with the cup held, then S2's new goal runs | FAILED/IMPLEMENTATION_ERROR, then SUCCEEDED |
 | `ghost_verify` | A second detector sees the cup 30 cm off while the verifier looks: the belief is contradictory, the verdict VIOLATED although the cup is in the rack; attributed to PERCEPTION. The retry finds the goal already satisfied | FAILED/VERIFICATION_FAILED, then SUCCEEDED |
 | `gripper_stuck` | The gripper is stuck open (an actuator fault). S1 keeps planning the grasp again until the deadline; S0 never achieved the intent: attributed to EXECUTION | FAILED/TIMEOUT |
-| `guard_controller_fault` | S0's controller emits NaN for 0.3 s while the arm carries the cup. The guard replaces each command by its own hold, the trace records it (`s0.guard`), S1 plans again | SUCCEEDED |
+| `guard_controller_fault` | S0's controller emits NaN for 0.3 s while the arm carries the cup. The guard replaces each command by its own hold, the trace counts the replacements (`s0.guard`), S1 plans again | SUCCEEDED |
 
 Each scenario is a TOML file in `pkgs/omarchy-runtime/omarchy_runtime/scenarios/`: seed, body, faults, S2's goals and latency, S1's inference latency, and the expected outcome of each execution.
 
@@ -217,7 +217,7 @@ S0 is two halves (`s0.S0Loop`). The **guard** (`guard.py`) is Omarchy's, minimal
 - the bounded step: a position never moves more than its velocity limit times the nominal tick period, a torque never changes more than its rate limit times the time since the last tick (at most that period), and starts from zero;
 - its own safe command: hold the position (position control), stop (velocity), or a joint spring and damper to where it took over (torque control, gravity being the robot's own, as a Franka compensates it).
 
-The **controller** (`contracts.S0Controller`, implementations in `controllers.py`) gets, at each tick, the active intent (S1's chunk or the fallback the guard engaged), the robot state (`RobotState`: positions, velocities, torques, the end-effector pose and twist, the external wrench, the Jacobian and Coriolis terms, each as the robot reports it), and the scene inputs it declares. It returns a command. The guard checks every one: a command that is not finite, computed for another tick, of another kind or shape, or from a controller that raised, is replaced by the guard's safe command; in torque control a breach no clamp fixes (a joint past its limit, too much force) is replaced too. A command out of its limits or steps is clamped. Both are counted (`limit_clamps`, `guard_replacements`) and recorded (`s0.guard` events, at most one per supervisor step). The guard is additional to a robot's own safety, never a replacement for it.
+The **controller** (`contracts.S0Controller`, implementations in `controllers.py`) gets, at each tick, the active intent (S1's chunk or the fallback the guard engaged), the robot state (`RobotState`: positions, velocities, torques, the end-effector pose and twist, the external wrench, the Jacobian and Coriolis terms, each as the robot reports it), and the scene inputs it declares. It returns a command. The guard checks every one: a command that is not finite, computed for another tick, of another kind or shape, or from a controller that raised, is replaced by the guard's safe command; in torque control a breach no clamp fixes (a joint past its limit, too much force) is replaced too. A command out of its limits or steps is clamped. Both are counted (`limit_clamps`, `guard_replacements`) and recorded as counts (`s0.guard` events, at most one per supervisor step): the trace holds how many commands were clamped or replaced since the last step, not when each was, nor why. The guard is additional to a robot's own safety, never a replacement for it.
 
 **Scene inputs.** A controller declares the sensor streams it consumes (`scene` in `[<body>.s0]`, such as `pose:plate`). They reach S0 from the robot side on the data plane, never through runtime events; S0 passes the controller the declared ones only. In simulation they come straight from the simulator.
 
@@ -238,14 +238,16 @@ Verification has two levels. The outcome verifier is unchanged: SUCCEEDED still 
 | `force` | 0.8 | the share within bounds is below it |
 | `object_m` | 0.01 | the mean object error is above it (m) |
 
-A command the guard replaced, or a chunk executed degraded, also makes the execution unfaithful. Every execution that ran has its `fidelity` in its summary.
+A command the guard replaced, or a chunk executed degraded, also makes the execution unfaithful. So does a channel S0 could not measure: a contact channel while the robot reports no wrench, an object intent while no pose of the object reaches S0 (`contact_unmeasured_ticks`, `object_unmeasured_ticks`). Nothing then shows that S0 honoured it, so a failure cannot be put on the intent. Every execution that ran has its `fidelity` in its summary.
 
 **Attribution.** An execution that ran and did not succeed (FAILED, UNVERIFIED) gets one category, with its reason, the first rule that holds:
 
 1. **INFRASTRUCTURE**: S1 stalled, S0 starved (a chunk ran out with no successor) or ticked late, or S2's link was lost during the execution.
 2. **PERCEPTION**: the verdict is inconclusive, or the belief was contradictory on one of the goal's entities during the execution: two sources saw it, confidently, at most 0.1 s apart, more than 5 cm apart (`contradiction_s`, `contradiction_m` in `[verification]`).
-3. **EXECUTION**: S0 did not achieve the intent: the fidelity check failed, or S0 reported a fault.
+3. **EXECUTION**: S0 did not achieve the intent: the fidelity check failed (an unmeasured channel included), or S0 reported a fault.
 4. **INTENT**: S0 executed the intent faithfully, and the goal was not reached.
+
+These are rules on the runtime's own counters, not an independent finding of the cause: INTENT says that S0's measurements show nothing wrong below S1.
 
 SUCCEEDED, REJECTED and ABORTED executions have none. The scenarios that produce each one, checked by `tests/test_attribution.py`:
 
@@ -282,7 +284,7 @@ They run with the development tools: `nix run .#omarchy-runtime-tools -- run scr
 
 ### The scrubbing experiment
 
-`omarchy-runtime scrub-experiment --seeds 5` runs both interface conditions (motion only; motion and the contact channel) x five errors in the plate's height in the belief (-2, -1, 0, +1, +2 cm) x seeds 1 to 5, each a whole run of `scrub_contact` with the condition and the error changed, one attempt each (S2 never retries). Every number comes from ground truth or from the execution's summary, the same way in both conditions; `--docs` writes the table below.
+`omarchy-runtime scrub-experiment --seeds 5` runs three conditions (motion only; motion only with the contact channel's stiffness; motion and the contact channel) x five errors in the plate's height in the belief (-2, -1, 0, +1, +2 cm) x seeds 1 to 5, each a whole run of `scrub_contact` with the condition and the error changed, one attempt each (S2 never retries). The contact channel changes two things in S0: it turns on the force regulation, and it sets the stiffness (1500, 1500 and 800 N/m, 60 Nm/rad, instead of the default 1000 N/m and 50 Nm/rad). The middle condition, motion only with that stiffness, separates the two. Every number comes from ground truth or from the execution's summary, the same way in every condition; `--docs` writes the table below.
 
 <!-- scrub:begin -->
 

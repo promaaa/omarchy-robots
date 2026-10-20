@@ -28,6 +28,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from omarchy_runtime.contracts import Array, BodySpec, Ns, OmarchyError, RobotState, matrix_quat
+from omarchy_runtime.wallclock import wall_ns
 
 
 class NotAuthorized(OmarchyError):
@@ -62,14 +63,19 @@ def _refuse(body: BodySpec, what: str) -> NotAuthorized:
 class FrankaState:
     """The fields of franka::RobotState this backend reads, by libfranka's names:
     joint positions, velocities and measured torques, the end-effector pose
-    (O_T_EE, 4 x 4 column-major), the estimated external wrench on it
-    (O_F_ext_hat_K, base frame), the robot's mode, the success rate of the
-    last 100 commands, and the errors it reports."""
+    (O_T_EE, 4 x 4 column-major), the end effector in the flange's frame
+    (F_T_EE, as Desk or setEE set it) and the stiffness frame in the end
+    effector's (EE_T_K), the estimated external wrench at K (O_F_ext_hat_K,
+    base frame: libfranka counts the force the robot applies to the
+    environment as positive), the robot's mode, the success rate of the last
+    100 commands, and the errors it reports."""
 
     q: Array
     dq: Array
     tau_J: Array
     O_T_EE: Array
+    F_T_EE: Array
+    EE_T_K: Array
     O_F_ext_hat_K: Array
     robot_mode: str
     control_command_success_rate: float
@@ -77,9 +83,10 @@ class FrankaState:
 
 
 class FrankaModel(Protocol):
-    """franka::Model: the end-effector Jacobian in the base frame (zeroJacobian, 6 x 7) and the Coriolis torques."""
+    """franka::Model: a frame's Jacobian in the base frame (zeroJacobian,
+    6 x 7; `frame` "flange" is franka::Frame::kFlange) and the Coriolis torques."""
 
-    def zero_jacobian(self, state: FrankaState) -> Array: ...
+    def zero_jacobian(self, frame: str, state: FrankaState) -> Array: ...
 
     def coriolis(self, state: FrankaState) -> Array: ...
 
@@ -113,9 +120,13 @@ class FrankaArm:
     in for libfranka's rate limiter and its low-pass filter, both off, as
     Franka advises when testing a new controller.
 
-    The sign of O_F_ext_hat_K against this runtime's wrench (applied by the
-    environment on the end-effector) is to be checked on the lab's robot
-    with a known weight; this backend takes them as equal."""
+    The end-effector S0 sees is the flange, as the configuration declares
+    it, whatever end effector Desk sets: the pose, the Jacobian and the
+    wrench are the flange's. The wrench is the environment's on the robot,
+    this runtime's convention: O_F_ext_hat_K negated (libfranka 0.9.2's
+    robot_state.h), its moment taken about the flange. The robot's time runs
+    on across control loops, and each loop restarts S0 (S0Loop.restart): its
+    first torque is zero."""
 
     def __init__(self, robot: FrankaLike, body: BodySpec) -> None:
         self.robot = robot
@@ -124,6 +135,7 @@ class FrankaArm:
         self.model = robot.load_model()
         self._state: FrankaState | None = None  # the loop's latest, while one runs
         self._torque = np.zeros(len(body.dims))
+        self._now: Ns = 0  # the robot's time, summed over its control loops' periods
 
     def read(self) -> FrankaState:
         """The robot's state, once: read-only, no authorization needed."""
@@ -131,8 +143,12 @@ class FrankaArm:
 
     def state(self, now: Ns) -> RobotState:
         s = self._state if self._state is not None else self.robot.read_once()
-        pose = np.asarray(s.O_T_EE, dtype=np.float64).reshape(4, 4, order="F")
-        jac = np.asarray(self.model.zero_jacobian(s), dtype=np.float64)
+        ee = np.asarray(s.O_T_EE, dtype=np.float64).reshape(4, 4, order="F")
+        pose = ee @ np.linalg.inv(np.asarray(s.F_T_EE, dtype=np.float64).reshape(4, 4, order="F"))  # the flange
+        k = (ee @ np.asarray(s.EE_T_K, dtype=np.float64).reshape(4, 4, order="F"))[:3, 3]  # where libfranka's wrench acts
+        wrench = -np.asarray(s.O_F_ext_hat_K, dtype=np.float64)
+        wrench[3:] += np.cross(k - pose[:3, 3], wrench[:3])  # its moment about the flange
+        jac = np.asarray(self.model.zero_jacobian("flange", s), dtype=np.float64)
         dq = np.asarray(s.dq, dtype=np.float64)
         return RobotState(
             now,
@@ -141,7 +157,7 @@ class FrankaArm:
             np.asarray(s.tau_J, dtype=np.float64),
             np.concatenate((pose[:3, 3], matrix_quat(pose[:3, :3]))),
             jac @ dq,
-            np.asarray(s.O_F_ext_hat_K, dtype=np.float64),
+            wrench,
             jac,
             np.asarray(self.model.coriolis(s), dtype=np.float64),
         )
@@ -156,20 +172,23 @@ class FrankaArm:
             raise ArmError(f"{self.body.id}: torques go to the robot inside its control loop only (run)")
         self._torque = command
 
-    def run(self, tick: Callable[[Ns], None], duration: Ns) -> None:
-        """libfranka's control loop for `duration`: each callback is one S0
-        tick (`tick`, S0Loop.tick) at the robot's time. Refused, before any
-        connection to the loop, without an operator authorization."""
+    def run(self, s0: Any, duration: Ns, before: Callable[[Ns], None] | None = None) -> None:
+        """libfranka's control loop for `duration`: each callback is one tick
+        of `s0` (an S0Loop, restarted first) at the robot's time, after
+        `before` if given. Refused, before any connection to the loop,
+        without an operator authorization."""
         if not self.authorized:
             raise _refuse(self.body, "torque control")
-        now = 0
+        end = self._now + duration
+        s0.restart()
 
         def callback(state: FrankaState, period: Ns) -> Array | None:
-            nonlocal now
-            now += period
+            self._now += period
             self._state = state
-            tick(now)
-            return None if now >= duration else self._torque.copy()
+            if before is not None:
+                before(self._now)
+            s0.tick(self._now)
+            return None if self._now >= end else self._torque.copy()
 
         try:
             self.robot.control(callback, limit_rate=False, cutoff_frequency=1000.0)
@@ -194,6 +213,8 @@ class PiperLike(Protocol):
 
     def GetArmEnableStatus(self) -> list[bool]: ...
 
+    def isOk(self) -> bool: ...
+
     def EnableArm(self, motor_num: int = 7, enable_flag: int = 0x02) -> None: ...
 
     def MotionCtrl_2(self, ctrl_mode: int, move_mode: int, move_spd_rate_ctrl: int, is_mit_mode: int = 0x00) -> None: ...
@@ -211,7 +232,13 @@ class PiperArm:
     estimate (from motor current: a joint torque estimate, no force sensor)
     without authorization. `apply` enables the motors once, sets CAN command
     mode MOVE J at `speed_percent`, and sends the joint targets the guard
-    let through: only with an operator authorization."""
+    let through: only with an operator authorization.
+
+    Both need fresh feedback: joints received within `feedback_timeout_s`
+    (0.05 s; the arm sends them every 5 ms), by the CAN frames' receive time,
+    and the SDK's reading thread well (isOk). Else ArmError, and nothing is
+    sent: the SDK keeps its last values when frames stop, and its isOk turns
+    false only after several hundred milliseconds."""
 
     def __init__(self, sdk: PiperLike, body: BodySpec) -> None:
         self.sdk = sdk
@@ -219,14 +246,23 @@ class PiperArm:
         self.authorized = authorization(body)
         adapter = body.kinematics.get("adapter", {})
         self.speed = int(adapter.get("speed_percent", 30))
+        self.timeout = float(adapter.get("feedback_timeout_s", 0.05))
         self._enabled = False
+
+    def _joints(self) -> Any:
+        """The SDK's latest joint feedback, if fresh; else ArmError."""
+        msgs = self.sdk.GetArmJointMsgs()
+        age = wall_ns() / 1e9 - msgs.time_stamp  # python-can's receive time: the system clock, as socketcan stamps it
+        if age > self.timeout or not self.sdk.isOk():
+            raise ArmError(f"{self.body.id}: no fresh feedback (joints {age:.3f} s old, SDK ok: {self.sdk.isOk()}): nothing sent")
+        return msgs.joint_state
 
     def status(self) -> Any:
         """The SDK's arm status (0x2A1): control mode, arm status code, motion status. Read-only."""
         return self.sdk.GetArmStatus().arm_status
 
     def state(self, now: Ns) -> RobotState:
-        j = self.sdk.GetArmJointMsgs().joint_state
+        j = self._joints()
         q = np.array([getattr(j, f"joint_{i}") for i in range(1, 7)], dtype=np.float64) * 0.001 * DEG
         motors = self.sdk.GetArmHighSpdInfoMsgs()
         dq = np.array([getattr(motors, f"motor_{i}").motor_speed for i in range(1, 7)], dtype=np.float64) * 0.001
@@ -239,6 +275,7 @@ class PiperArm:
     def apply(self, now: Ns, command: Array) -> None:
         if not self.authorized:
             raise _refuse(self.body, "a joint command")
+        self._joints()
         if not self._enabled:
             self.sdk.EnableArm(7, 0x02)
             self._enabled = all(self.sdk.GetArmEnableStatus())

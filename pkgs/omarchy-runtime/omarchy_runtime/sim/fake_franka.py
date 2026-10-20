@@ -13,9 +13,13 @@ replaced by the last one, and 20 drops in a row the reflex
 `joint_position_limits_violation`; an external force above the collision
 threshold the reflex `cartesian_reflex`. A reflex stops the loop with
 ArmError and leaves the robot in kReflex until automatic_error_recovery();
-read_once fails while a loop runs. Its dynamics are simple (constant joint
-inertia and damping, gravity compensated as the robot does it): enough for
-the timing and the errors, not for force control.
+read_once fails while a loop runs. Its end effector sits where `F_T_EE`
+puts it from the flange (the flange itself by default; Franka's hand is
+HAND), and it reports the external wrench as libfranka does: the force the
+robot applies to the environment, at the end effector. Its dynamics are
+simple (constant joint inertia and damping, gravity compensated as the
+robot does it): enough for the timing, the frames and the errors, not for
+force control.
 """
 
 from __future__ import annotations
@@ -39,6 +43,8 @@ DH = (
     (0.088, 0.0, np.pi / 2),
 )
 FLANGE = 0.107
+# Franka's hand from the flange: 0.1034 m along z, turned -45 degrees about z (Desk's default with the hand).
+HAND = np.array([[np.sqrt(0.5), np.sqrt(0.5), 0, 0], [-np.sqrt(0.5), np.sqrt(0.5), 0, 0], [0, 0, 1, 0.1034], [0, 0, 0, 1]])
 PERIOD = 1_000_000  # ns
 TAU_RATE = 1000.0  # Nm/s
 DROPS_IN_A_ROW = 20  # then communication_constraints_violation
@@ -67,7 +73,8 @@ def jacobian(q: Sequence[float] | Array) -> Array:
 
 
 class FakeModel:
-    def zero_jacobian(self, state: FrankaState) -> Array:
+    def zero_jacobian(self, frame: str, state: FrankaState) -> Array:
+        assert frame == "flange", "this fake gives the flange's Jacobian only"
         return jacobian(state.q)
 
     def coriolis(self, state: FrankaState) -> Array:
@@ -78,18 +85,28 @@ class FakeFranka:
     """`budget_ns`: a callback slower than this (wall clock) is a dropped
     command, as the robot sees it; None never drops on time. `drops`: the
     cycles whose command is dropped anyway. `force_threshold`: the collision
-    threshold on the end-effector force (N). Every command the robot
-    accepted is in `commands`."""
+    threshold on the end-effector force (N). `F_T_EE`: the end effector in
+    the flange's frame, as Desk sets it. Every command the robot accepted is
+    in `commands`."""
 
     INERTIA = np.array([0.5, 0.5, 0.3, 0.3, 0.05, 0.05, 0.02])  # kg m^2, constant
     DAMPING = np.array([2.0, 2.0, 1.5, 1.5, 0.3, 0.3, 0.1])  # Nm s/rad
 
-    def __init__(self, body: BodySpec, *, budget_ns: Ns | None = None, drops: Sequence[int] = (), force_threshold: float = 20.0) -> None:
+    def __init__(
+        self,
+        body: BodySpec,
+        *,
+        budget_ns: Ns | None = None,
+        drops: Sequence[int] = (),
+        force_threshold: float = 20.0,
+        F_T_EE: Array = np.eye(4),  # noqa: B008, N803 - libfranka's name; never mutated
+    ) -> None:
         self.body = body
+        self.F_T_EE = F_T_EE
         self.q = np.array(body.home, dtype=np.float64)
         self.dq = np.zeros(7)
         self.tau = np.zeros(7)
-        self.external = np.zeros(6)  # the wrench the environment applies on the end-effector, base frame
+        self.external = np.zeros(6)  # the wrench the environment applies on the flange (moment about it), base frame
         self.mode = "kIdle"
         self.errors: tuple[str, ...] = ()
         self.budget = budget_ns
@@ -101,11 +118,22 @@ class FakeFranka:
 
     def _state(self) -> FrankaState:
         flange = frames(self.q)[-1]
+        ee = flange @ self.F_T_EE
         rate = float(np.mean(self.success[-100:])) if self.success else 1.0
-        jac = jacobian(self.q)
-        tau_ext = jac.T @ self.external
+        tau_ext = jacobian(self.q).T @ self.external
+        force = self.external[:3]
+        moment = self.external[3:] + np.cross(flange[:3, 3] - ee[:3, 3], force)  # about K, the end effector
         return FrankaState(
-            self.q.copy(), self.dq.copy(), self.tau - tau_ext, flange.flatten(order="F"), self.external.copy(), self.mode, rate, self.errors
+            self.q.copy(),
+            self.dq.copy(),
+            self.tau - tau_ext,
+            ee.flatten(order="F"),
+            self.F_T_EE.flatten(order="F"),
+            np.eye(4).flatten(order="F"),
+            -np.concatenate((force, moment)),  # libfranka: the robot's on the environment
+            self.mode,
+            rate,
+            self.errors,
         )
 
     def read_once(self) -> FrankaState:
@@ -123,7 +151,7 @@ class FakeFranka:
         self.mode, self.errors = "kIdle", ()
 
     def push(self, force: Sequence[float]) -> None:
-        """The environment pushes on the end-effector (N, base frame), from now on."""
+        """The environment pushes on the flange (N, base frame), from now on."""
         self.external[:3] = force
 
     def _reflex(self, *errors: str) -> ArmError:
@@ -142,7 +170,7 @@ class FakeFranka:
         if limit_rate or cutoff_frequency < 1000.0:
             raise ArmError("this fake runs without libfranka's rate limiter and low-pass filter, as the adapter asks")
         self.running, self.mode, self.success = True, "kMove", []
-        cycle, in_a_row, period = 0, 0, 0
+        cycle, in_a_row, period, first = 0, 0, 0, True
         try:
             while True:
                 start = perf_ns()
@@ -162,8 +190,10 @@ class FakeFranka:
                         raise self._reflex("communication_constraints_violation")
                 else:
                     in_a_row = 0
-                    if np.any(np.abs(command - self.tau) > TAU_RATE * PERIOD / 1e9 + TOLERANCE):
+                    jump = np.any(np.abs(command - self.tau) > TAU_RATE * PERIOD / 1e9 + TOLERANCE)
+                    if jump or (first and np.any(np.abs(command) > TOLERANCE)):
                         raise self._reflex("controller_torque_discontinuity")
+                    first = False
                     self.tau = command
                     self.commands.append(command)
                 self._step()

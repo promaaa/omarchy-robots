@@ -104,8 +104,14 @@ class Guard:
         self.engaged: tuple[FallbackSpec, IntentChunk] | None = None  # the fallback running, as the intent S0 executes
         self.armed = False  # a chunk ran out, or the runtime asked: a fallback engages (not while awaiting a first chunk)
         self.held: Array | None = None  # where the guard's own safe command holds (torque control)
-        # The last command sent, for the bounded step of a torque: torques start from zero (a Franka requires it).
-        self.last: Array | None = np.zeros(len(body.dims)) if kind == "torque" else None
+        self.last: Array | None = None
+        self.restart()
+
+    def restart(self) -> None:
+        """The actuators start again from rest: the bounded step of a torque
+        starts from zero (a Franka requires it of every new control loop)."""
+        self.held = None
+        self.last = np.zeros(len(self.body.dims)) if self.kind == "torque" else None
 
     # What S0 executes.
 

@@ -160,6 +160,7 @@ safe_pose = [0.0, 0.5236, -0.5236, 0.0, 0.0, 0.0]
 [piper.kinematics.adapter]
 interface = "piper_sdk 0.6.2, C_PiperInterface_V2 (firmware V1.5-2 and later)"
 speed_percent = 30  # MOVE J speed, percent of the arm's maximum
+feedback_timeout_s = 0.05  # s: joint feedback older than this stops S0 (it comes every 5 ms)
 
 [piper.s0]
 controller = "motion_tracker"

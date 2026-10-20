@@ -164,8 +164,16 @@ class TestTorqueGuard(unittest.TestCase):
             with self.subTest(seed=seed):
                 self.assertTrue(np.isfinite(tau).all())
                 self.assertTrue(np.all(np.abs(tau) <= np.array([10, 10, 5]) + 1e-9))
+                np.testing.assert_array_equal(tau[0], np.zeros(3))  # the first torque too: from zero
                 self.assertTrue(np.all(np.abs(np.diff(tau, axis=0)) <= 1000 * 0.001 + 1e-9))
                 self.assertGreaterEqual(s0.status().counters.guard_replacements, sum(w in REPLACED for w in ctl.log))
+
+    def test_a_restart_starts_the_torque_from_zero_again(self) -> None:
+        arm, s0, _ = self.run_arm(0)
+        self.assertGreater(float(np.abs(arm.applied[-1]).max()), 0.0)
+        s0.restart()
+        s0.tick(800 * MS)
+        np.testing.assert_array_equal(arm.applied[-1], np.zeros(3))
 
     def test_too_much_force_hands_over_to_the_guard(self) -> None:
         arm, s0, ctl = self.run_arm(0, force=25.0)  # above the 20 N the guard allows: every tick is a breach

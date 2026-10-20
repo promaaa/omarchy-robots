@@ -1218,8 +1218,10 @@ class S0Counters:
     of position); `contact_mode_ticks` of `contact_ticks` (ticks of a steady
     mode, FREE or MAINTAIN, in the mode requested: in contact for MAINTAIN,
     out of it for FREE); `force_in_bounds_ticks` of `force_ticks` (MAINTAIN
-    ticks); `object_error_sum` over `object_ticks` (m). The maxima
-    (`max_*`, `force_peak`) run since S0 started."""
+    ticks); `object_error_sum` over `object_ticks` (m). A channel S0 could
+    not measure is counted apart: `contact_unmeasured_ticks` (a contact
+    channel and no wrench), `object_unmeasured_ticks` (an object intent and
+    no pose of it). The maxima (`max_*`, `force_peak`) run since S0 started."""
 
     ticks: int = 0
     starvation_events: int = 0
@@ -1244,6 +1246,8 @@ class S0Counters:
     force_peak: float = 0.0
     object_ticks: int = 0
     object_error_sum: float = 0.0
+    contact_unmeasured_ticks: int = 0
+    object_unmeasured_ticks: int = 0
 
     RUNNING = frozenset({"max_tracking_error", "max_interval_ns", "max_step", "force_peak"})
 

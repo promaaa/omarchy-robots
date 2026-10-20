@@ -83,6 +83,8 @@ class TestRules(unittest.TestCase):
         self.assertEqual(len(f["failed"]), 2)  # the contact mode and the object
         self.assertFalse(fidelity(S0Counters(guard_replacements=1), LIMITS)["faithful"])
         self.assertFalse(fidelity(S0Counters(degraded_chunks=1), LIMITS)["faithful"])
+        self.assertFalse(fidelity(S0Counters(contact_unmeasured_ticks=1), LIMITS)["faithful"])  # no evidence is no fidelity
+        self.assertFalse(fidelity(S0Counters(object_unmeasured_ticks=1), LIMITS)["faithful"])
 
 
 class TestContradictions(unittest.TestCase):

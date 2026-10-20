@@ -13,6 +13,8 @@ command mode MOVE J (0x151), towards the last joint targets (0x155 to
 0x157) at its speed percentage of MAX_SPEED. A target past a joint's limit
 is refused with status 0x04 (target exceeds limit); an emergency stop
 (0x150) stops it until resumed; `collide()` stops it with status 0x07.
+Each frame carries its receive time on the system clock, as socketcan
+stamps it; `silent` stops the feedback (a cable pulled), the arm moving on.
 What the arm does when commands stop is not documented: this fake holds
 the last target (an assumption to check on the lab's arm). Every frame
 received is in `received`. Development tools only: it imports python-can.
@@ -29,7 +31,7 @@ import can
 import numpy as np
 
 from omarchy_runtime.contracts import Array
-from omarchy_runtime.wallclock import monotonic_ns, sleep_until
+from omarchy_runtime.wallclock import monotonic_ns, sleep_until, wall_ns
 
 DEG = np.pi / 180
 LIMITS_DEG = ((-150, 150), (0, 180), (-170, 0), (-100, 100), (-70, 70), (-120, 120))  # the SDK's documented joint limits
@@ -50,6 +52,7 @@ class FakePiper:
         self.enabled = False
         self.ctrl_mode, self.move_mode, self.speed = 0x00, 0x00, 0
         self.status = STATUS_NORMAL
+        self.silent = False
         self.received: list[tuple[int, bytes]] = []
         self.lock = threading.Lock()
         self._pending = list(self.q / DEG * 1000)  # joint targets, 0.001 degree, as they arrive in pairs
@@ -99,7 +102,7 @@ class FakePiper:
     def _frames(self) -> list[can.Message]:
         def frame(can_id: int, *parts: tuple[int, int, bool]) -> can.Message:
             data = b"".join(v.to_bytes(n, "big", signed=signed) for v, n, signed in parts)
-            return can.Message(arbitration_id=can_id, data=data.ljust(8, b"\0"), is_extended_id=False)
+            return can.Message(timestamp=wall_ns() / 1e9, arbitration_id=can_id, data=data.ljust(8, b"\0"), is_extended_id=False)
 
         mdeg = [round(v / DEG * 1000) for v in self.q]
         motion = 0x00 if np.allclose(self.q, self.target, atol=1e-4) else 0x01
@@ -127,7 +130,7 @@ class FakePiper:
                 if now >= due:
                     self._move((now - self._last) / 1e9)
                     self._last, self._cycle = now, self._cycle + 1
-                    self._queue = self._frames()
+                    self._queue = [] if self.silent else self._frames()
                     continue
             if deadline is not None and deadline < due:
                 sleep_until(deadline)

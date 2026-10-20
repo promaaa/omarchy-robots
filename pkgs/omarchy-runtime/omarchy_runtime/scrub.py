@@ -1,9 +1,12 @@
 """The scrubbing experiment on the simulated Panda, its tables and its videos.
 
-Two interface conditions, the same S1 path in both: motion only, and motion
-with a contact channel (a target normal force within bounds). Each crossed
-with an error in the plate's height in the belief (perception error), each
-cell run with several seeds. Every number comes from ground truth (the
+Three conditions, the same S1 path in all: motion only; motion only with
+the contact channel's stiffness (the ablation: the contact channel also
+changes S0's stiffness, 1500, 1500 and 800 N/m instead of 1000, so this one
+separates the force regulation from the stiffness); and motion with a
+contact channel (a target normal force within bounds). Each crossed with an
+error in the plate's height in the belief (perception error), each cell run
+with several seeds. Every number comes from ground truth (the
 harness's) or from the execution's summary, the same way in both conditions:
 
 - coverage: the share of dirt cells clean at the end (ground truth);
@@ -30,12 +33,18 @@ from typing import Any
 
 import numpy as np
 
+from omarchy_runtime import config
 from omarchy_runtime.contracts import Json
 from omarchy_runtime.evaluate import agreement, md_table, table
 from omarchy_runtime.scenario import run
 
 SCENARIO = "scrub_contact"
-CONDITIONS = {"motion only": False, "motion + contact": True}
+# The condition: (a contact channel, S0's stiffness the contact channel's), and its runs' directory prefix.
+CONDITIONS = {
+    "motion only": (False, False, "motion"),
+    "motion only, stiffness matched": (False, True, "stiff"),
+    "motion + contact": (True, False, "contact"),
+}
 ERRORS = (-0.02, -0.01, 0.0, 0.01, 0.02)  # m added to the plate's height in the belief
 WINDOW_M = 0.02  # the raster window: the pad at most this far above the plate's top
 LABEL = (
@@ -44,9 +53,12 @@ LABEL = (
 )
 
 
-def _cell(args: tuple[str, int, float, bool, str]) -> Json:
-    scenario, seed, error, contact, run_dir = args
-    over = {"scenario": {"seed": seed, "s1": {"contact": contact}}, "world": {"sensor": {"plate_bias_z_m": error}}}
+def _cell(args: tuple[str, int, float, str, str]) -> Json:
+    scenario, seed, error, condition, run_dir = args
+    contact, matched, _ = CONDITIONS[condition]
+    over: Json = {"scenario": {"seed": seed, "s1": {"contact": contact}}, "world": {"sensor": {"plate_bias_z_m": error}}}
+    if matched:
+        over["body"] = {"kinematics": {"impedance": {"stiffness": config.effective(scenario)["scenario"]["s1"]["stiffness"]}}}
     r = run(scenario, Path(run_dir), overrides=over, record_s0=True)
     w: Any = r.world
     log, cfg = w.log(), r.cfg
@@ -62,7 +74,7 @@ def _cell(args: tuple[str, int, float, bool, str]) -> Json:
     verdict = s["verdict"] and s["verdict"]["kind"]
     fid = s["fidelity"] or {}
     return {
-        "condition": "motion + contact" if contact else "motion only",
+        "condition": condition,
         "error_m": error,
         "seed": seed,
         "run_dir": run_dir,
@@ -88,8 +100,8 @@ def experiment(out: Path, seeds: int = 5, jobs: int = 1, scenario: str = SCENARI
     """Every condition x error x seed (seeds 1..`seeds`), `jobs` runs at a time; writes results.json."""
     out.mkdir(parents=True, exist_ok=True)
     work = [
-        (scenario, seed, error, contact, str(out / f"{'contact' if contact else 'motion'}{error:+.2f}-s{seed}"))
-        for contact in CONDITIONS.values()
+        (scenario, seed, error, condition, str(out / f"{prefix}{error:+.2f}-s{seed}"))
+        for condition, (_, _, prefix) in CONDITIONS.items()
         for error in ERRORS
         for seed in range(1, seeds + 1)
     ]
