@@ -44,7 +44,7 @@ A check that did not run is never a `PASS`.
 | `power.mode` | `nvpmodel -q` matches `power.mode` | Jetson |
 | `thermal` | thermal zones are readable; temperatures recorded | Jetson |
 
-`--json` prints a report with a `schema` version (currently 1), the build identity, a timestamp, the kernel, and every check with its data. Schema changes are listed in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md).
+`--json` prints a report with a `schema` version (currently 1), the build identity, a timestamp, the kernel, and every check with its data. Each schema change is named in the commit that makes it.
 
 ## update
 

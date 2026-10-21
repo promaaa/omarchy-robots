@@ -1,834 +1,124 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
-[Semantic Versioning](https://semver.org/) (pre-1.0, see README).
-
-## [Unreleased]
-
-## [0.0.3] - 2026-10-20
-
-The steerable S0, milestone R6. S1 sends intents (contract v2) that S0's
-guard and controller carry out, with fidelity and the attribution of a
-failure; contact intent on a simulated Franka Panda, the scrubbing
-experiment; S0 backends for the lab's Panda and PiPER, tested against fakes;
-the fixes of an independent review of them; S2's latency on a lab GPU
-server. Tested in simulation, in VMs and against fakes; no real arm has run
-it. The five parts below are the steps of its development.
-
-### Part 5 (2026-10-20)
-
-Milestone R6, part 6: the lab GPU server as S2's edge machine. Measured on
-lab machines, on the lab's real network; no robot.
-
-Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
-on 9b3fe85, started 2026-10-20 15:18 KST, 32 min 29 s, on an Intel i7-9700
-with 62.7 GiB RAM and KVM: every check passed (221 runtime tests; placement
-14 of 14). Logs: `~/src/omarchy-robots-evidence/R6-v0.0.14/` and
-`R6-lab-gpu/` on the development host.
-
-#### Added
-
-- S2's time to first token on one GPU of the lab server laplace:
-  Qwen2.5-1.5B-Instruct Q4_K_M (the file of the 2026-10-07 measurement),
-  llama.cpp 9190 from the pinned nixpkgs built with CUDA 12.9 through Nix
-  without root (nix-portable). Median 0.044 s on laplace, 0.087 s from the
-  development host through an SSH tunnel, against 3.8 s on the development
-  host's CPU. Two distributions in `data/latency`, rows in the TTFT table.
-- `ttft-measure --network-path`: an SSH tunnel's URL is loopback, so the
-  path is stated instead of guessed.
-- The S2 placement experiment's four scenarios on the real lab LAN, the
-  robot process on the development host and S2 on laplace with the
-  measured distribution: 12 of 12 runs within tolerance, no fallback ran
-  out, a recovery took 0.20 s (manual, "In the lab").
-
-
-### Part 4 (2026-10-20)
-
-Milestone R6: the fixes of an independent review of v0.0.3 parts 1 to 3.
-Three in the arms' backends, before any real arm runs them; one in the
-fidelity check; the scrubbing experiment's ablation and summary. Tested
-against fakes and in simulation only; no connection to a real robot was
-opened.
-
-Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
-on 43225e2, started 2026-10-20 10:41 KST, 33 min 31 s, on an Intel i7-9700
-with 62.7 GiB RAM and KVM: every check passed (221 runtime tests; placement
-14 of 14). Logs: `~/src/omarchy-robots-evidence/R6-v0.0.13/` on the
-development host.
-
-#### Fixed
-
-- The Panda backend's wrench had the wrong sign. libfranka 0.9.2 reports
-  `O_F_ext_hat_K` as the force the robot applies to the environment
-  (`robot_state.h`); this runtime's wrench is the environment's on the
-  robot. `FrankaArm` negates it and takes its moment about the flange. The
-  fake Panda reported it the runtime's way, which hid the mistake; it now
-  reports it libfranka's way.
-- The Panda backend took Desk's end effector for the flange. It now takes
-  `F_T_EE` out of `O_T_EE`, asks for the flange's Jacobian, and moves the
-  wrench from the stiffness frame to the flange. The fake can set an end
-  effector (Franka's hand).
-- A second control loop with the same S0 broke the Panda's torque
-  continuity (a reflex): the loop's clock restarted at zero, behind S0's,
-  and the guard kept the last loop's torque. The robot's time now runs on
-  across loops, and each loop restarts S0 (`S0Loop.restart`): its first
-  torque is zero. The fake Panda now refuses a first torque that is not
-  zero, as its documentation said it did.
-- The PiPER backend read and commanded after its feedback stopped: the SDK
-  keeps its last values, and its `isOk()` turns false only 0.3 s later.
-  `PiperArm` now needs joint feedback received within
-  `feedback_timeout_s` (0.05 s) and `isOk()`, else `ArmError` and nothing
-  is sent, the motors' enabling included.
-- An accepted contact channel without a wrench, or an object intent
-  without a pose, read as faithful, and a failure went to INTENT. S0 now
-  counts them (`contact_unmeasured_ticks`, `object_unmeasured_ticks`), and
-  either fails the fidelity check: the failure goes to EXECUTION.
-- The scrubbing experiment's summary (v0.0.3 part 2, v0.0.3 part 3) said the contact
-  channel kept the force at its target, and motion only never touched the
-  plate when it was lower than believed. The contact runs were within 5 to
-  20 N for 93 to 95 % of the raster window (below 5 N for the rest, never
-  above), and two motion-only runs touched the lower plate, too lightly to
-  clean it. The manual now says so; the runs are unchanged.
-- v0.0.3 part 3's tag message says its release check ran "under QEMU TCG"; it
-  ran with KVM, as the same message's last paragraph and the check's log
-  say. The tag is left as published.
-- The manual and the README now say: the trace records the guard's
-  interventions as counts per supervisor step, without each one's time or
-  cause; an operator authorization is a declaration in the configuration,
-  not an authentication; the Panda's 15 N is an admission limit and a
-  reactive threshold, not a physical bound; the 500 us S0 tick time
-  includes the fake Panda's own Python; success in the scrubbing scene is
-  a simulated cleaning rule, and an attribution is the runtime's rule, not
-  an independent cause.
-
-#### Changed
-
-- The scrubbing experiment has a third condition: motion only with the
-  contact channel's stiffness (1500, 1500 and 800 N/m instead of 1000). It
-  behaves like motion only (no cleaning with the plate 1 or 2 cm lower,
-  13 N and 20 N on average with it 1 or 2 cm higher): the force
-  regulation, not the stiffness, keeps the force near its target. 75 runs.
-- `FrankaArm.run(s0, duration, before=None)` takes the S0 loop, which it
-  restarts, instead of its tick; `FrankaModel.zero_jacobian(frame, state)`
-  names the frame; `FrankaState` has `F_T_EE` and `EE_T_K`.
-
-
-### Part 3 (2026-10-19)
-
-Milestone R6, part 3: S0 backends for the lab's arms, a Franka Emika Panda
-and an AgileX PiPER, tested against fakes only. No connection to a real
-robot was opened.
-
-Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
-on df655c6, started 2026-10-19 18:42 KST, 31 min 40 s, on an Intel i7-9700
-with 62.7 GiB RAM and KVM: every check passed (placement 14 of 14). Logs:
-`~/src/omarchy-robots-evidence/R6-v0.0.12/` on the development host.
-
-#### Added
-
-- `arms.py`: the Panda as an S0 backend behind a libfranka-like interface
-  (torque control in libfranka's 1 kHz loop, Cartesian motion and contact
-  on the flange up to 15 N), and the PiPER through AgileX's official SDK
-  (joint positions, MOVE J, 200 Hz, motion only: its documentation proves
-  no force control). Each has its declaration in `bodies.toml` (`franka`,
-  `piper`). Reading state needs nothing; anything sent to the actuators,
-  enabling the PiPER's motors included, is refused (`NotAuthorized`)
-  unless the configuration names an operator authorization. The guard is
-  additional to each arm's own safety.
-- Fakes: a Panda behind the libfranka-like interface (its DH kinematics
-  and limits; 1 kHz, the first period zero; the reflexes for a torque
-  jump, 20 dropped commands, a joint limit, a collision; recovery), and a
-  PiPER on a fake CAN bus under the real SDK (python-can's socketcan
-  replaced for a test's duration; the SDK's frames decoded; feedback at
-  200 Hz; a refused target, an emergency stop, a collision).
-- Nix packages: `libfranka` 0.9.2 with its examples, the last release for
-  the Panda, built on x86_64 (not in nixpkgs); `piper-sdk` 0.6.2
-  (`python3Packages.piper-sdk`, not in nixpkgs); both in
-  `omarchy-runtime-tools` where needed.
-- The manual's chapter "In the lab": what each arm's documentation says,
-  with sources; where the Panda's 1 kHz loop can run (the Orin with
-  jetpack-nixos's PREEMPT_RT kernel, or an x86 PC with Linux's, both
-  evaluated, neither built); a first contact that only reads the Panda's
-  state (untested); the questions to answer in the lab; the lab GPU
-  server's experiment, prepared, with what it needs.
-
-#### Changed
-
-- The guard starts a torque from zero and bounds its change by the rate
-  limit times the time since the last tick: the first torque command is
-  zero (a Panda requires it). The scrubbing table is from a run with it.
-- `contracts.matrix_quat` (rotation matrix to quaternion), exact near half
-  turns.
-
-
-### Part 2 (2026-10-19)
-
-Milestone R6, part 2: contact intent on a simulated Franka Panda, scrubbing
-a plate. Tested in simulation (MuJoCo, CPU, simulated time): no real robot.
-
-Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
-on 4ba8d5f with KVM, 2026-10-19 18:30 KST, exit 0, after two interrupted
-attempts (a reboot to enable VT-x, a session restart; the checks they
-finished stayed cached: placement 14 of 14). Logs:
-`~/src/omarchy-robots-evidence/R6-v0.0.11/` on the development host.
-
-#### Added
-
-- The simulated Franka Emika Panda (`sim/panda.py`): the MuJoCo Menagerie
-  model (`franka_emika_panda/panda_nohand.xml`, Apache-2.0), fetched by Nix
-  at a pinned commit (`pkgs/mujoco-menagerie`, 62ab00f, a fixed-output
-  fetch of the Panda's directory); torque motors within the Panda's limits,
-  gravity compensated, a sponge, a table and a plate free to slide; physics
-  and S0 at 1 kHz. Dirt cells on the plate, a noisy and occludable dirt
-  sensor, and the `coverage` verifier for `clean(surface)`; a real
-  cleanliness verifier is future work.
-- S0's Cartesian impedance controller with normal-force regulation
-  (`cartesian_impedance`, joint torques behind the guard), declared for the
-  Panda body; the scripted wiper (`sim/wipe.py`), the same path in both
-  interface conditions; the capability `wipe` with its default fallback
-  `retreat` (leave contact upwards, compliant along z); the recovery policy
-  `give_up`.
-- Scenarios `scrub_contact`, `scrub_motion`, `scrub_hover` (INTENT),
-  `scrub_occluded` (PERCEPTION), `scrub_weak` (EXECUTION; fault kind
-  `weak_actuators`).
-- `omarchy-runtime scrub-experiment`: both conditions x five plate-height
-  errors x seeds, its table in the README and the manual;
-  `omarchy-runtime scrub-render`: an mp4 of a recorded run (software EGL,
-  no display), with its provenance.
-- `.#omarchy-runtime-tools`: the runtime with MuJoCo, the Menagerie model,
-  Mesa and ffmpeg; never in a robot's system. The robot's package stays
-  numpy only, and `eval` there says which scenarios it cannot run.
-
-#### Changed
-
-- Contracts: an observation may carry `coverage` (`contracts.Coverage`),
-  kept by the belief; proprioception's end-effector point is (x, z) or
-  (x, y, z); `S1Policy.step` may return an intent chunk (S1's host passes it
-  to S0, with its measured inference latency, and refuses a v1 corrector
-  with it). A scenario's `world` names its scene (`config/world_<name>.toml`)
-  and its `[sensor]` table changes the sensor's.
-- Trace schema 7: observations and the belief's snapshots carry coverage.
-- The test rigs of the resolver and the runtime use the `place_in`
-  capability they test; the tests of the configured capability lists and
-  of `unsupported_clean`'s candidates name `wipe` as well.
-
-
-### Part 1 (2026-10-19)
-
-Milestone R6, part 1: a steerable S0. The interface between S1 and S0
-carries intents, not only motion; S0 is a guard, Omarchy's, and a
-controller behind it; a fidelity check and failure attribution sit beside
-the outcome verifier. Simulated: nothing is real-time, and nothing has run
-on hardware.
-
-Release check, local runs on 5fc5a2c without KVM (QEMU TCG): the first,
-2026-10-19 15:33 KST, 61 min 53 s, passed every check but vm-s2-placement
-(13 of 14 cells: one 32 % over its simulated task time, 30 % allowed, the
-host loaded); vm-s2-placement alone on a quiet host passed (14 of 14); the
-full check again, every check built, exit 0. The tolerance was not changed.
-Logs: `~/src/omarchy-robots-evidence/R6-v0.0.10/` on the development host.
-
-#### Changed (contracts: every implementation of S0 is affected)
-
-- Intent contract v2 (`contracts.IntentChunk`): optional channels, each
-  validated on its own (`SHAPE`, `NOT_FINITE`, `BOUNDS`, naming the
-  channel): motion (joint targets, or Cartesian end-effector poses in a
-  declared frame), object (target poses, or 3D points and their flow), and
-  contact per end-effector (mode FREE, MAKE, MAINTAIN or BREAK; normal; a
-  target normal force or wrench with bounds; stiffness per axis). Each
-  channel keeps an action chunk's timing; a chunk runs while all its
-  channels are valid. A v1 `ActionChunk` is a motion-only intent
-  (`IntentChunk.from_v1`); `S0.submit_chunk` takes either.
-- Each S0 controller declares what it honours (`ControllerCapability`, from
-  `[<body>.s0]` in `config/bodies.toml`). An intent outside it is refused
-  with `UNSUPPORTED_INTENT`, unless the configuration names a degraded mode
-  (`drop_object`, `drop_contact`, `clamp_force`, `clamp_stiffness`); a
-  degradation is recorded in the chunk's metadata and counted, a refusal in
-  S0's status (`rejection`) and the trace (`chunk.rejected`).
-- S0 is split in two (`s0.S0Loop`): the guard (`guard.py`: what S0
-  executes, the starvation watchdog, fallback selection, position,
-  velocity, workspace, torque and force limits, the bounded step, its own
-  safe command) and a controller behind it (`contracts.S0Controller`,
-  `controllers.py`; today the motion tracker, S0's behaviour before). The
-  guard replaces a command that is not finite, stale, of another kind or
-  shape, or from a controller that raised, and clamps one out of its limits;
-  both are counted and traced (`s0.guard`). Controllers get the scene inputs
-  they declare, on the data plane (`RobotIO.scene`).
-- Fallbacks are intents: `FallbackSpec` takes a Cartesian `frame` (relative
-  orientations compose) and a `contact` channel, and becomes the intent the
-  controller executes when the guard engages it (`FallbackSpec.engage`).
-- `Detection` and the belief's estimates have a `y`, for 3D scenes; a body's
-  workspace has 4 values (x-z) or 6 (x-y-z).
-- Trace schema 6: the header names S0's controller and its declaration
-  (`s0`); `chunk` events list the channels and any degradation; new events
-  `chunk.rejected` and `s0.guard`; each execution summary has its
-  `fidelity` and, when it ran and did not succeed, its `attribution`.
-
-#### Added
-
-- A fidelity check (`attribution.py`, `[fidelity]` in `runtime.toml`): the
-  tracking error, the share of time in the contact mode requested, the share
-  of time with the force within bounds, the object's error, from S0's own
-  counters, accumulated tick by tick; the guard's replacements and degraded
-  chunks make an execution unfaithful.
-- Failure attribution, in traces and evaluation tables: INFRASTRUCTURE
-  (stall, starvation, late ticks, S2's link lost), PERCEPTION (inconclusive
-  verdict, or a contradictory belief: two sources too far apart at once),
-  EXECUTION (S0 did not achieve the intent), INTENT (it did, and the goal
-  was not reached). Rules in the manual (Runtime, "Fidelity and failure
-  attribution").
-- Scenarios `ghost_verify` (PERCEPTION), `gripper_stuck` (EXECUTION) and
-  `guard_controller_fault` (the guard replacing a NaN controller), with the
-  fault kinds `ghost`, `gripper_stuck` and `controller`. The existing
-  scenarios are unchanged and pass; their failures are attributed INTENT
-  (`slip_retry`, `slot_blocked`, `fallback_expiry`), PERCEPTION
-  (`occluded_long`) and INFRASTRUCTURE (`s1_stall_long`).
-- Tests: `test_intent.py`, `test_guard.py` (adversarial controllers, seeded,
-  position and torque control), `test_attribution.py`.
-
-#### Changed (checks and releases)
-
-- Every check, build, experiment and release check runs locally on the
-  development host; GitHub Actions runs nothing by itself. The workflows
-  are manual-only (`workflow_dispatch`): CI (it keeps the rules of a
-  push-time plan, unused) and the manual's deployment. AGENTS.md ("Checks
-  and releases") holds the rules: the relevant checks after each change,
-  the full `nix flake check` before every release, release evidence (commit,
-  command, start and duration, host, result) instead of CI links, logs kept
-  outside the repository (`~/src/omarchy-robots-evidence/`), Jetson builds by
-  aarch64 emulation, experiments labelled "measured in VMs on the host,
-  without KVM (QEMU TCG)".
-- Support matrix: every Jetson target builds (system, installer image and
-  flash script of the six boards), built on the development host at v0.0.2
-  under aarch64 emulation (2026-10-08, 7 h 33 min).
-
-#### Added
-
-- A `manual` check: the manual built with Jekyll and kramdown's GFM parser,
-  as GitHub Pages builds it; it fails when a chapter has no page or a page
-  keeps Markdown as text.
-
-#### Fixed
-
-- Two generated tables did not render in the manual (the before-and-after
-  comparison and the TTFT distributions): kramdown does not end a table on
-  an HTML comment, and each block's end marker followed its last row at
-  once. The generated blocks now have blank lines around their text; the
-  README rendered them on GitHub before as well.
-
-## [0.0.2] - 2026-10-07
-
-The simulated runtime, with S2 away from the robot, milestones R1 to R4.
-Goals in JSON, verified from fresh observations, with traces; the generic
-`pc` board; S2 in its own process and on another machine (TCP, the S2 link
-over WireGuard), with reconnection; scenes that change, and fallbacks
-installed before they are needed; S2's latency measured on the development
-host. Tested in simulation and in VMs. The six parts below are the steps of
-its development.
-
-### Part 6 (2026-10-07)
-
-Milestone R4, part 2: real S2 latencies and repeated runs. A small model's
-time to first token measured on the development host, committed with its
-provenance; the placement matrix run 6 times per cell with those measured
-TTFTs, each value a median with a 95 % interval. Measured on the host and
-in VMs: not hardware-tested, and nothing is real-time.
-
-Release check, a local run: `nix flake check -L --keep-going --max-jobs 1`
-on d05f84a, started 2026-10-07 22:46 KST, 4703 s, on an Intel i7-9700 with
-62.7 GiB RAM and no KVM (QEMU TCG): every check passed. Log:
-`~/src/omarchy-robots-evidence/v0.0.9/release-check/` on the development
-host. GitHub Actions could not run (account billing).
-
-#### Fixed
-
-- The runtime built the capability's default fallback at every supervisor
-  step to see whether its motion had changed: 50 µs of a 156 µs runtime step
-  (profiled on the host, simulated run), in the thread S0 shares on the wall
-  clock, and slower still on an emulated CPU, where the local nix flake check
-  (QEMU TCG) failed the placement test's task-time tolerance four runs in
-  five. Contract change: `FallbackGenerator.motion_key(body, status)`, a
-  cheap value that changes exactly when the motion would; the runtime builds
-  the fallback only then. The runtime step is back at 95 µs (v0.0.2 part 4: 93 µs).
-- S2's fallback is spent again once a chunk takes over after it engaged,
-  as before v0.0.2 part 5; the capability's default stays installed and engages
-  again. v0.0.2 part 5 kept S2's installed, so that every brief gap in S1's chunks
-  sent S0 towards S2's pose again: the inference matrix showed it when its
-  table was regenerated (cup_moved with the `mismatch` trigger at 300 ms,
-  whose S0 runs out of chunks again and again, took 20.45 s instead of
-  11.35 s, and with `blend` did not finish; no violation). Coverage does
-  not change: the default covers. None of the placement matrix's runs met
-  it: S2's fallback engaged there only after a failure, before the retry.
-
-#### Added
-
-- `omarchy-runtime ttft-measure`: an S2 backend's time to first token
-  (TTFT), measured with a representative S2 prompt (choose the rack spot for
-  the cup from the belief S2 has when S1 gave up in slot_blocked, answer in
-  JSON) sent N times, streaming, to an OpenAI-compatible endpoint: TTFT,
-  total latency, failures, valid answers, with provenance (date, host,
-  backend, model and its file's SHA-256, prompt hash, method, network path).
-  A key for a cloud backend comes from `OMARCHY_S2_API_KEY` or a file outside
-  the repository, and is never printed or written.
-- Latency distribution files (`latency.py`, format `omarchy-latency/1`,
-  kinds `s2_ttft` and `s1_inference`), checked when loaded and sampled at
-  random with replacement (`EmpiricalLatency`). Two are committed, both
-  "measured on host" (Intel i7-9700, 8 threads, no GPU), Qwen2.5-1.5B-Instruct
-  Q4_K_M from its publisher's repository: served by llama.cpp as nixpkgs
-  packages it (no AVX2), and built for AVX2. `ttft-docs` writes their table
-  into the README and the manual.
-- `--ttft-file` (run, s2): S2 draws its TTFT from a measured distribution.
-  `[s1] latency_file` in a scenario and `inference-matrix --delay-file` do the
-  same for S1's inference delay; AGENTS.md documents the format for a
-  collaborator's measurements.
-- The repeated placement matrix: every cell run 6 times, the measured TTFTs
-  besides 0.1, 1 and 5 s, one scenario per CI job (flake outputs
-  `s2-placement-repeated-<scenario>`, workflow dispatch with `repeated`);
-  `omarchy-runtime placement-merge` joins the parts. Each value is the
-  median of a cell's runs with a distribution-free confidence interval for
-  it from order statistics (with 6 runs, the smallest and largest, 96.9 %).
-- Flake outputs `llama-cpp` and `llama-cpp-avx2` (the same package with
-  AVX2, FMA, F16C and BMI2): the local backend of ttft-measure.
-
-#### Changed
-
-- The placement tables have one row for each cell (scenario, profile, TTFT)
-  over its runs; "cells within tolerance" became "runs within tolerance".
-
-
-### Part 5 (2026-10-07)
-
-Milestone R4, part 1: a fallback exists before it is needed. The
-capability's default fallback is installed by the runtime when an execution
-starts, S2's prediction travels with the goal, and S0 holds both, with no
-gap between them. Fallback coverage is measured for every execution, and
-the full-matrix check is strict again. Tested in simulation and in VMs:
-not hardware-tested, and nothing is real-time.
-
-#### Changed
-
-- Contract change, fallbacks exist before they are needed: S0 holds two
-  fallbacks and runs the first valid one, else HOLD. S2's (predicted with
-  the goal, or refined) takes precedence over the base fallback, a
-  capability's default computed by the runtime on the robot side. Both are
-  installed when an execution starts, before S1's first chunk;
-  `S0.install_fallback(spec, now, base=False)` replaces one in a single
-  step, so the one replaced stays valid until then. When S2's runs out, S0
-  goes on under the base in the same tick. A fallback engages when a chunk
-  ran out with no successor, or when the runtime asks after a failure; while
-  an execution awaits S1's first chunk, S0 holds. A chunk that takes over
-  no longer spends the fallback: it engages again the next time. Before,
-  S2 installed its fallback one decision after the execution started, and
-  with a 5 s TTFT S1 gave up before any fallback existed.
-- Contract change: `GoalRequest` carries S2's predicted fallback
-  (`fallback`, its window relative to the execution's start); link protocol
-  3 (protocol 2 peers are refused). `FallbackSpec` gains `relative` (per
-  dimension: offsets from where S0 is when it engages) and `S0Status`
-  `fallback_source`; `fallback_installed` now means a valid fallback is
-  installed, S2's or the base.
-- Contract change: S0 counts `fallback_cover_ns`, the time a valid fallback
-  is installed, tick by tick. Execution summaries carry
-  `fallback_coverage`, the fraction of their running time (from the start
-  to S1's claim or the failure) covered; evaluation requires at least 99 %
-  for every execution, and the placement experiment reports it per cell.
-- Trace schema 5: S0's per-tick record gains `fallback` (none, base or S2's,
-  the fallback S0 runs); `fallback.install` events carry the slot, the kind
-  (capability default, s2 predicted, s2 refined) and the window; the header
-  names each capability's default fallback generator.
-- The full-matrix test requires again that a fallback engages in every
-  recovery, and coverage of at least 99 % for every execution. The relaxed
-  check of v0.0.2 part 4 (the retry comes, with or without a fallback) is gone: the
-  strict one implies it.
-- A recovery's `fallback_expired` now means S2's fallback ran out before the
-  retry started and the capability's default took over (before: S0 went to
-  HOLD).
-
-#### Added
-
-- `FallbackGenerator` (contracts.py), with `hold` (every dimension holds
-  where S0 is, the gripper included) and `lift` (the same; holding an
-  object on a body with a `z` dimension, rise 2 cm first) in
-  `DEFAULT_FALLBACKS`. `capabilities.toml` names one per capability
-  (`default_fallback`; `place_in` uses `lift`). A default never moves the
-  gripper (contract test `FallbackGeneratorContract`). The runtime renews
-  it when the generator returns another motion, after a grasp or a release.
-- The scripted S2 sends its predicted fallback with each goal
-  (`[s2] fallback = true`) and refines it once the execution runs when
-  `refine_fallback = true` (scenario `fallback_installed`).
-- `omarchy-runtime placement-compare BEFORE AFTER [--docs FILE...]`: two
-  placement runs compared for each profile and TTFT (fallback coverage,
-  the fallback engaged in recoveries, S2's fallbacks expired, the HOLD time
-  while S2 decides, the recovery times), coverage and HOLD time computed
-  from both runs' traces the same way. The README and the manual show the
-  v0.0.2 part 4 matrix against this release's.
-
-
-### Part 4 (2026-10-06)
-
-Milestone R3, parts B and C: an experiment where S2's placement matters,
-and the seam for asynchronous inference. Scenes that change during a task,
-recovery under S2's fallback, the S2 placement matrix on them, and the
-chunk corrector and inference trigger extension points with a simulated
-baseline matrix. Tested in simulation and in VMs: not hardware-tested, and
-nothing is real-time.
-
-#### Changed
-
-- Contract change, chunk timing: `ActionChunk` carries `observed_at` (when
-  the observation it was computed from was taken) and `inference_ns` (how
-  long S1's inference took); the trace's `chunk` events carry both. Every S0
-  keeps a bounded history of its ticks (2 s in the simulated S0) and returns
-  it with `S0.history(since)` (`S0History`: tick times, commanded and
-  desired positions), for the robot side only.
-- Contract change, fallback duration: `FallbackSpec` gains `lasts`, how
-  long S0 holds the fallback's last row before it returns to HOLD (by
-  default, the rows' duration; `fallback_lasts_s` in a scenario's `[s2]`).
-  `S0.hold(fallback=True)` engages the installed fallback: when an execution
-  fails, the runtime now engages it instead of holding. S0's counters gain
-  `fallback_expiries`.
-- Trace schema 4: S0's per-tick record gains `observed_at`; `chunk` events
-  carry `observed_at` and `inference_ns`; S0's counters gain
-  `fallback_expiries`. Validators of schema 3 refuse these traces.
-- The simulated S1 plans its grasp again when its target moved by more than
-  1.5 cm, and gives up ("blocked") when an object stands in its place spot.
-
-#### Added
-
-- Scenes that change during a task: `[[faults]]` kinds `move` (an entity
-  moved by `x`) and `appear` (an object declared with `present = false`
-  placed at `x`). A new fault trigger, `moving`: the body's first motion,
-  after S2's first decision whatever its latency. Scenarios `cup_moved` (S1 reacts alone), `slot_blocked`
-  (S1 gives up, S0 waits under the fallback, S2 chooses another spot) and
-  `fallback_expiry` (the fallback expires before S2 answers). The recovery
-  policy `retry_elsewhere` retries with the first free spot of the
-  container (`{"place_x": x}`).
-- Evaluation measures the dynamics of each run (`dynamics` in
-  `results.json`): reaction time to a scene change, freeze time, recovery
-  time with the time in fallback and whether it expired, the discontinuity
-  at chunk switches, and the number of inferences.
-- The S2 placement experiment runs the dynamic scenarios too: the full
-  matrix is 4 scenarios x 7 profiles x 3 TTFTs. The table gains a summary
-  with one row for each profile and TTFT: the two-cup task time,
-  cup_moved's reaction, the recovery times, the fallback expiries and
-  safety; every cell follows in a collapsed section.
-- The asynchronous inference seam, on the robot side: `ChunkCorrector`
-  (`none`, `blend`), `InferenceTrigger` (`periodic`, `mismatch`) and
-  `InferenceContext`, chosen by id in `[extensions]` of `runtime.toml`, with
-  their parameters in `[s1_host]`, and contract tests (`CorrectorContract`,
-  `TriggerContract`). `omarchy-runtime
-  inference-matrix` runs S1's inference delay (50, 150, 300 ms) x corrector
-  x trigger on `nominal_a` and `cup_moved` in simulated time.
-
-
-### Part 3 (2026-10-06)
-
-Milestone R3, part A: hardening for hardware. Bounded S0 steps and late
-ticks; deterministic timing faults with regressions for the two S1 bugs of
-v0.0.2 part 2; reconnection to S2 after an outage, with idempotent requests; the S2
-link over WireGuard (`omarchy.robot.s2Link`); CI as parallel jobs. Tested in
-simulation and in VMs: not hardware-tested, and nothing is real-time.
-
-#### Changed
-
-- Contract change, bounded S0 steps: S0 never moves a dimension more in one
-  tick than its velocity limit times its nominal tick period, whatever the
-  real interval since the last tick. A tick later than a threshold (1.5
-  periods, `[s0] late_after_periods` in `world.toml`) is a late tick and
-  never produces a catch-up jump: S0 continues from its current state. Before,
-  a late tick on the wall clock moved up to the velocity limit times the real
-  interval in one step. `S0Counters` gains `late_ticks`, `max_interval_ns`
-  and `max_step` (the largest step as a fraction of the bound); the runtime
-  records each late tick (`s0.late`); evaluation checks the bound on every
-  tick. Every S0 implementation, a hardware one included, keeps this.
-- Trace schema 3: S0's counters gain `late_ticks`, `max_interval_ns` and
-  `max_step`; a new event type `s0.late`.
-- Contract change, link protocol 2: every message from S2 and every update
-  from the robot carries a link number `n`; heartbeats and echoes carry
-  `ack`; the hellos carry `ack` and the robot's a `session`; the robot says
-  `bye` at the end of the run. Protocol 1 peers are refused.
-- Contract change: a `GoalRequest` is idempotent by `request_id`. The same
-  request again creates no second execution, and its latest update comes
-  again; another request with a used id is still refused.
-- The simulated S1's inference latency is drawn for each chunk (`[s1]
-  latency_spread`, lognormal) and chunks reach S0 in the order they arrive.
-
-#### Changed (CI)
-
-- CI runs `nix flake check` as parallel jobs: a first job lists every check
-  of the flake, and a matrix builds one VM test per job, every board's
-  evaluation (with `nix flake check --no-build` and the aarch64 installer
-  images) in one, and the rest in one. No check is removed; a new check is
-  always included. `check=false` still dispatches only the chosen jobs.
-
-#### Added
-
-- `omarchy.robot.s2Link`: the link to S2 over a WireGuard tunnel declared in
-  `robot.nix` (`enable`, `address`, `listenPort`, `privateKeyFile`, `port`,
-  `peer.address`, `peer.publicKey` or `peer.publicKeyFile`,
-  `peer.endpoint`; `role = "s2"` on S2's machine). The private key is a
-  path read at run time, never in the Nix store (the build refuses one
-  there). `/etc/omarchy-robot/s2-link.json` names the tunnel: `omarchy-runtime
-  run --s2` then connects from and to tunnel addresses only, and
-  `omarchy-runtime s2` listens on the tunnel only. The VM test `vm-s2-link`
-  generates keys at test time, runs a task through the tunnel, captures the
-  LAN to show no S2 traffic in the clear, and checks the refusals outside
-  it. No TLS in the runtime: the OS owns transport security.
-- Reconnection: after a broken connection, or 3 s of silence from S2
-  (application heartbeats, not TCP timing), the robot connects again
-  without blocking its loop, with a bounded backoff (0.25 s doubling to
-  2 s; `[s2_link]` in `runtime.toml`). S2 keeps listening and resumes the
-  session of the same run id; both ends send again what the other has not
-  acknowledged and ignore repeats, so a resumed session neither repeats nor
-  loses a goal. TCP_USER_TIMEOUT (3 s) and keepalive bound TCP's
-  retransmission backoff. The trace records `s2.link` `closed` and
-  `reconnected` (time down, attempts, updates sent again). A new placement
-  profile, `outage_long`: the link down for 20 s during the first
-  execution.
-- Deterministic timing faults in simulated time, from a scenario's seed:
-  observation age (`[timing] observation_age_s`, `_spread`), S0 tick jitter
-  (`s0_skip_probability`), S0 stalls and whole-process pauses (`[[faults]]`
-  kinds `s0_stall` and `pause`), S1 latency distributions. Scenarios
-  `timing_observation_age` and `timing_pause_grasp` reproduce the two S1
-  bugs CI found in v0.0.2 part 2 and fail with the S1 behaviour of each bug
-  (`tests/test_timing.py`); `timing_s0_stall` and `timing_jitter` exercise
-  late ticks and noisy timing.
-
-
-### Part 2 (2026-10-06)
-
-Milestone R2: S2 in its own process, on the robot or on another machine,
-connected to the runtime over TCP; the runtime on the wall clock; and the S2
-placement experiment (RQ5) on two VMs with an emulated network. Soft
-real-time Python, an emulated network, VMs: not hardware-tested, and nothing
-is real-time.
-
-#### Changed
-
-- Contract change, the runtime's API is asynchronous: `RuntimeApi.submit()`
-  returns nothing; a `GoalRequest` carries a `request_id` chosen by its
-  sender; every `Update` carries that `request_id` and the runtime's time `t`
-  of the change. The runtime names an execution when it handles the request,
-  not when it is submitted. Every client changes: the scripted S2 names its
-  requests, learns the execution from the Updates, and opens a fallback's
-  window at the Update's `t` (the runtime's clock) instead of its own time.
-- Contract change for latency models: the `LATENCY` registry makes a model
-  from a median time to first token and a spread, `(seconds, spread)`;
-  `fixed` refuses a spread.
-- Contract change: `Message` includes `Heartbeat`, and the runtime's
-  `Params` gain the S2 link deadlines (`[s2_link]` in `runtime.toml`).
-- Trace schema 2: execution summaries and `request` events carry
-  `request_id`; the header names where S2 ran (`s2`) and the run's `tags`;
-  a new event type `s2.link`; `run.end` carries S2's liveness when S2 ran in
-  another process. Validators of schema 1 refuse these traces.
-
-#### Added
-
-- A wall-clock scheduler (`--clock wall`, `--s0-hz`): the same components,
-  stepped on the real clock with the real elapsed time, soft real-time in
-  Python. It records every component's loop intervals and step durations
-  (median, 99th percentile, maximum) and its overruns, and writes them into
-  `run.end`, labelled with where they were measured. On the wall clock S0
-  runs at 200 Hz (`[wall_rates_hz]` in `world.toml`): at 1 kHz, Python
-  overran in 6 to 20 % of S0's steps in a KVM VM; at 200 Hz, at most twice
-  per run. Simulated time stays the default (S0 at 1 kHz) and stays
-  deterministic. Only `wallclock.py` reads the clock or sleeps.
-- S2 in another process, maybe on another machine: `omarchy-runtime s2`
-  (the scripted S2, its recovery policy and latency model) and `run ...
-  --clock wall --s2 HOST:PORT` (the runtime, S1, S0, the world and the
-  sensor). One transport interface (`Transport`) and its first
-  implementation, newline-delimited JSON over TCP, standard library only.
-  S2 listens and the robot connects out. Only control-plane traffic
-  crosses: hellos (run identity, body spec), requests, fallback installs,
-  cancels, decisions, heartbeats, execution updates with summaries, echoes.
-- S2 liveness: S2 sends a heartbeat every 0.1 s and measures the round trip
-  from its echo; the runtime's supervisor records the link lost after 0.5 s
-  without one, and each outage with its class against the deadlines (short,
-  long from 2 s, unrecovered). Executions continue and S0 never waits.
-- The S2 placement experiment (RQ5): scenario `s2_placement` (the two-cup
-  task), the VM test `vm-s2-placement` (a robot VM and an edge VM, the link
-  shaped with tc netem; profiles local, lan, wifi, wan, degraded, outage)
-  and `omarchy-runtime placement` (one results.json and one table,
-  labelled emulated network, VMs, soft real-time, each cell compared with
-  the same task in one process on simulated time) and `placement-docs`
-  (writes the table into the README and the manual). `nix flake check`
-  runs lan, degraded and outage with S2 times to first token 0.1 and 1 s;
-  `nix build .#s2-placement` and the manual CI job (`placement`) run every
-  profile with 0.1, 1 and 5 s. The README and the manual hold the latest
-  table, written by `placement-docs`.
-- CI: workflow_dispatch inputs `placement` (the full matrix, alone on its
-  runner, results kept as an artifact) and `check` (on by default).
-- `run --ttft S [--ttft-spread X]`: S2's time to first token in one
-  process, instead of the scenario's latency.
-- `lognormal`: a latency model whose time to first token is sampled for
-  each decision (median and spread), registered in `extensions.py` and
-  held to `LatencyContract`.
-- `from_json()` for every message of the API (`message_from_json`), for
-  `Update` and for `BodySpec`, with a round-trip test.
-
-#### Fixed
-
-- The scripted S1 on the wall clock, found by `vm-s2-placement` in CI on a
-  starved runner. S1 compared the body it observed with its plan at its own
-  step time instead of the observation's time: an observation 15 ms old
-  made a gripper closing at 2/s look off the plan, and S1 replanned. A
-  replan into the gripper-closing waypoint moved the arm down and closed
-  together, so after a 283 ms stall the gripper caught a cup above the grasp
-  point (ground truth: held cup_2 5 mm into the table). S1 now compares an
-  observation with the plan at the time it was taken, and a replan into a
-  grasp or release reaches the spot first unless the body is there. With
-  every observation 20 ms old on the wall clock, the task now takes 18.67 s
-  (simulated: 18.45 s). Simulated scenarios give the same results.
-
-
-### Part 1 (2026-10-04)
-
-Milestone R1: the first slice of the runtime, simulated, on Omarchy Robots;
-and a generic `pc` board. Not hardware-tested, and nothing is real-time.
-
-#### Added
-
-- `omarchy-runtime` (`pkgs/omarchy-runtime`, Python with numpy): goals in,
-  verified executions and traces out. A deterministic resolver that records
-  every candidate and its reason; the execution lifecycle with outcomes
-  SUCCEEDED, FAILED, UNVERIFIED, REJECTED, ABORTED and eight failure
-  categories; a supervisor (deadline, S1 liveness, S0 fault); a belief built
-  only from observations; verification as a stepped phase whose verdict is
-  recorded apart from the executor's claim. Commands `demo`, `eval`, `run`,
-  `show`, `validate-trace`.
-- Contracts for action chunks, S0 status and fallbacks as plain data; a
-  simulated 1 kHz S0 that never waits (chunk, fallback or HOLD) and enforces
-  position, velocity and workspace limits; a scripted S1 per body; a planar
-  arm and a gantry with different action spaces; a scripted S2 with a
-  decision latency, using only the public API.
-- Twelve scenarios (nominal on both bodies, slip and retry, short and long
-  occlusion, short and long S1 stall, installed fallback, unsupported goal,
-  S2 latency 0.1, 1 and 5 s) and an evaluation harness that compares each
-  execution with the simulator's ground truth.
-- Trace schema 1: `run.json` (with the contents of
-  `/etc/omarchy-robot/build.json`, or null), `events.jsonl`,
-  `executions.jsonl`, optional `s0_<id>.npz`, `results.json`. Versioned
-  separately from releases and from the validation report.
-- Extension points for collaborators, each with a default and reusable
-  contract tests: ObservationFilter, Verifier (per predicate),
-  RecoveryPolicy, S2 latency model.
-- `omarchy.robot.runtime.enable`: the runtime on the robot, its runs in
-  `/var/lib/omarchy-runtime/runs`; `build.json` gains `runtime` (version or
-  null) and `omarchy-robot info` prints it. Validation report schema
-  unchanged (1).
-- Board `pc`: a generic x86_64 UEFI computer (NixOS generic hardware
-  support, redistributable firmware, Intel and AMD microcode, `/dev/nvme0n1`
-  by default) and its installer image `.#installer-pc`. `gpu.enable` and
-  `power.mode` are refused on it.
-- Checks: `omarchy-runtime` (ruff, mypy --strict, 97 tests with the
-  scenario matrix, no VM), `vm-runtime` (the runtime in a vm-board VM),
-  `vm-installer-pc`, `eval-pc`, `eval-runtime-orin-agx-devkit`,
-  `eval-runtime-pc`, refusals for `pc`.
-- `AGENTS.md` for collaborators and coding agents, `.github/CODEOWNERS`, the
-  manual's Runtime chapter and "Install on a spare PC".
-
-#### Changed
-
-- Versioning: v0.0.2 part 1 is milestone R1. The first board booted and validated
-  on hardware takes v0.1.0.
-- Jetson boards are the `boards.nix` entries with a `som`, instead of every
-  board but `vm`.
-- `nix develop` has python3 with numpy and mypy instead of python3 and mypy.
-
-## [0.0.1] - 2026-10-03
-
-The robot's OS from one file, milestone OS-1: NixOS and jetpack-nixos
-declared by `robot.nix`, updates and rollback, installer images, the manual,
-the logo and the boot screen. Tested in VMs; never booted on a board. The
-five parts below are the steps of its development.
-
-### Part 5 (2026-10-03)
-
-#### Changed
-
-- The boot screen (Jetson UEFI firmware, installer menus) shows only the
-  dotted wordmark, centred; the logo stays on the login banners.
-
-
-### Part 4 (2026-10-03)
-
-#### Added
-
-- The Omarchy Robots manual, ten chapters published to GitHub Pages
-  (`manual/`).
-
-#### Changed
-
-- New Omarchy Robots logo, Socket (tall slot eyes), and one wordmark, the
-  dotted one: `branding/omarchy-robots-wordmark.svg` (the plain wordmark is
-  removed). The Jetson UEFI boot screen, the installer menus, the login
-  banners, the README and the manual use them.
-
-
-### Part 3 (2026-10-03)
-
-Milestone OS-1 complete: the system of 0.0.1, VM-tested, with every
-Jetson target evaluating, the orin-agx-devkit system and every board's flash
-script building. Not hardware-tested.
-
-#### Changed
-
-- README: support matrix and measurements for the final builds (Thor flash
-  script, the branded orin-agx-devkit firmware, a local `nix flake check`),
-  and a boot time comparison of rc.1 and rc.2 (no difference within noise).
-
-
-### Part 2 (2026-10-02)
-
-#### Added
-
-- Omarchy Robots identity: os-release (`NAME="Omarchy Robots"`, version in
-  `PRETTY_NAME`, `ID_LIKE=nixos`), boot menu entries, installer menus, console
-  banner and SSH MOTD.
-- The Omarchy Robots logo and wordmark (`branding/`) replace NixOS's: on the
-  Jetson UEFI boot screen (jetpack-nixos's `firmware.uefi.logo`), the
-  installer's GRUB and syslinux menus, and as a half-block logo on the login
-  banners. Static files only.
-
-#### Changed
-
-- The boot menu waits 1 s instead of 5; users are managed by userborn instead
-  of a Perl script at each activation; `nixos-generate-config` and the nixpkgs
-  source are no longer in the system. The vm closure goes from 1.3 to 1.1 GiB.
-- Test VMs wait up to 15 minutes for their disk (slow hosts without KVM).
-
-
-### Part 1 (2026-10-02)
-
-First release candidate of milestone OS-1: a declarative, Nix-based robot OS,
-VM-validated and ready for Jetson bring-up. Not hardware-tested.
-
-#### Added
-
-- `robot.nix`, the one file that declares a robot, and the `omarchy.robot.*`
-  options: name, board, storage device, administrator and SSH keys, wired
-  network (DHCP or static), time zone, GPU stack, power mode, generations kept.
-- Base system: headless, SSH keys only, firewall admitting SSH only, flakes,
-  systemd-boot with a bounded number of entries, weekly garbage collection that
-  keeps those generations, bounded journal, disko layout on `storage.device`.
-- Boards: `vm` (QEMU, x86_64) and the Jetson developer kits `orin-agx-devkit`,
-  `orin-nx-devkit`, `orin-nx-super-devkit`, `orin-nano-devkit`,
-  `orin-nano-super-devkit` and `thor-agx-devkit`, mapped onto jetpack-nixos
-  (JetPack 6.2.3 / L4T 36.5.2 on Orin, JetPack 7.2.1 / L4T 39.2.1 on Thor).
-- Build identity in `/etc/omarchy-robot/build.json`: target, flake revision,
-  robot.nix hash, input revisions, kernel, board and JetPack/L4T versions.
-- `omarchy-robot` with `info`, `validate`, `update` and `rollback`.
-  Validation report schema 1.
-- Per-board flash scripts (jetpack-nixos, cross-built on x86_64) and
-  installation images that carry the system they install (`omarchy-install`).
-- Checks run by `nix flake check`: nixfmt, statix, deadnix, ruff, mypy, unit
-  tests on fixtures, per-board evaluation assertions, refusal of invalid
-  `robot.nix` combinations, and VM tests for the base system, update and
-  rollback across a reboot, and installation onto a blank disk.
-- GitHub Actions CI: `nix flake check` on x86_64; a manual arm64 job building
-  one Jetson system.
-
-[Unreleased]: https://github.com/promaaa/omarchy-robots/compare/v0.0.3...HEAD
-[0.0.3]: https://github.com/promaaa/omarchy-robots/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/promaaa/omarchy-robots/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/promaaa/omarchy-robots/releases/tag/v0.0.1
+Every release of Omarchy Robots, newest first. The same text is on each
+[GitHub release](https://github.com/promaaa/omarchy-robots/releases).
+
+## Unreleased
+
+## v0.0.3
+
+This release lets the robot ask its arm for more than a path. The motion policy (S1) can now tell the arm's controller (S0) to press at about 10 N, to keep contact, or to move an object, and a guard checks every command before it reaches the motors. It adds a simulated Franka Panda that scrubs a plate, and the first drivers for a real Franka Panda and an AgileX PiPER. Everything runs in simulation, in virtual machines, or against fake arms; no real arm has run it yet.
+
+### Highlights
+
+#### Ask the arm for force, contact and object motion
+
+A command can now carry motion, an object's target pose, and contact: a target force, its bounds and a stiffness. Each controller declares what it supports. A request it cannot honour is refused, or reduced only when the configuration allows it.
+
+#### Put a guard in front of every controller
+
+The guard checks every command against the arm's limits on position, speed, workspace, torque and force. It replaces a command that is broken or out of date with a safe one, and it counts every time it steps in.
+
+#### Know why a task failed
+
+Each failed task is put in one of four groups: the infrastructure (a stall, a lost link), perception (the robot saw it wrong), execution (the arm did not do what it was asked), or the request itself (the arm did it, and the goal was still missed).
+
+#### Scrub a plate on a simulated Franka Panda
+
+A simulated Panda in MuJoCo wipes a plate that it believes is up to 2 cm higher or lower than it is. When the plate is lower than it believes, moving alone never cleans it. Pressing at 10 N cleans it in every run.
+
+#### Drive the lab's Franka Panda and AgileX PiPER
+
+The Panda driver uses libfranka 0.9.2, with torque control at 1 kHz and contact up to 15 N. The PiPER driver uses AgileX's SDK, with joint motion at 200 Hz. Both are tested against fake arms. Nothing is sent to a motor unless the configuration names an operator authorization.
+
+#### Run the planner on a lab GPU server
+
+The planner's model answers in 0.044 s on one GPU of a lab server, and in 0.087 s from a laptop through an SSH tunnel, against 3.8 s on the laptop's CPU. On the lab's real network, all 12 test runs stayed within their time limit.
+
+### Improvements
+
+- Add `omarchy-runtime-tools`, with MuJoCo and video rendering, kept out of the robot's system
+- Add `omarchy-runtime scrub-render` to turn a recorded run into a video
+- Add the manual chapter "In the lab": the lab's arms, where the Panda's 1 kHz loop can run, and a first read-only test
+- Add `ttft-measure --network-path` to name the path to the model, such as an SSH tunnel
+- Build libfranka and the PiPER SDK with Nix
+- Run every check and release locally, so GitHub Actions only runs when started by hand
+
+### Fixes
+
+- Fix the Panda driver reading the contact force with the wrong sign
+- Fix the Panda driver taking the tool's frame for the flange
+- Fix a second control run tripping a Panda safety reflex
+- Fix the PiPER driver acting on feedback that had stopped
+- Fix contact or object requests that were never measured counting as done
+- Fix two tables that did not appear in the manual
+
+## v0.0.2
+
+This release adds the robot runtime. An agent asks for a goal, such as "put the cup in the rack", and the runtime carries it out, checks the result on fresh observations, and records a trace of what happened. The planner can now run on another machine. Everything runs in simulation and in virtual machines; no real robot has run it yet.
+
+### Highlights
+
+#### Carry out a goal and check the result
+
+The runtime takes a goal in JSON, chooses how to do it, and checks the result from what the robot sees, not from what the arm claims. A cup that slips out of the gripper is caught and tried again. Every run leaves a trace that names the exact system it ran on.
+
+#### Run the planner on another machine
+
+The planner (S2) can run in its own process, on the robot or on another machine, over TCP. Declare a WireGuard tunnel for it in `robot.nix` with `omarchy.robot.s2Link`. After a network outage the robot reconnects by itself, without losing or repeating a goal.
+
+#### Keep the robot safe while the planner thinks
+
+Every task starts with a fallback already in place. When a step fails, the arm holds still or lifts 2 cm until the planner answers, instead of waiting with nothing to do.
+
+#### Measure where the planner should live
+
+The placement experiment runs the same tasks with the planner on a second virtual machine, over an emulated LAN, Wi-Fi, WAN, a degraded link and outages. `omarchy-runtime ttft-measure` measures how long a real model takes to answer: 3.8 s for Qwen2.5 1.5B on a laptop CPU.
+
+#### Install on a spare PC
+
+The new `pc` board installs Omarchy Robots on any x86_64 UEFI computer.
+
+### Improvements
+
+- Add scenes that change during a task: a cup that moves, a dish that blocks the free spot
+- Add timing faults that can be replayed exactly: late observations, stalls, pauses
+- Add a real-time mode, next to the default simulated time
+- Limit how far the arm moves in one step, even after a late tick
+- Speed up each runtime step from 156 to 95 µs
+
+### Fixes
+
+- Fix the gripper closing above the cup when an observation arrived late
+- Fix the arm going back to the planner's safe pose after every short gap in its commands
+
+## v0.0.1
+
+The first release of Omarchy Robots: a headless operating system for robots, built on NixOS and declared by one file, `robot.nix`. It runs in a virtual machine today. It builds for six NVIDIA Jetson developer kits, but it has not yet booted on a real board.
+
+### Highlights
+
+#### Declare a robot in one file
+
+`robot.nix` sets the robot's name, board, disk, administrator and SSH keys, network, time zone, GPU stack and power mode. A combination that cannot work is refused when the system is built, not when the robot boots.
+
+#### Update and roll back
+
+`omarchy-robot update` switches the robot to a new system. `omarchy-robot rollback` returns to the previous one, also after a reboot. `omarchy-robot info` shows what runs, and `omarchy-robot validate` checks it.
+
+#### Build for Jetson
+
+A system, a flash script and an installer image for the Orin AGX, Orin NX, Orin NX Super, Orin Nano, Orin Nano Super and Thor AGX developer kits, on JetPack 6.2.3 (Orin) and JetPack 7.2.1 (Thor).
+
+#### Start from a locked-down base
+
+No desktop, SSH keys only, a firewall that admits only SSH, a bounded journal, and old systems cleaned up every week.
+
+### Improvements
+
+- Add the Omarchy Robots logo on the boot screen, the installer menus and the login banners
+- Add the manual at https://promaa.github.io/omarchy-robots/
+- Add installer images that carry the system they install
+- Make the boot menu wait 1 s instead of 5
+- Reduce the virtual machine's system from 1.3 to 1.1 GiB
+- Test the base system, updates, rollback and installation in virtual machines in every check

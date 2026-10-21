@@ -52,7 +52,7 @@ manual/              this manual
 
 ## Versions
 
-Before 1.0, releases count up, and a new release waits for a major feature: v0.0.1 is the base system from one file (milestone OS-1), v0.0.2 the simulated runtime with S2 away from the robot (milestones R1 to R4), v0.0.3 the steerable S0 (milestone R6). Work between two releases goes under "Unreleased" in the CHANGELOG; the parts of a release are the steps of its development, not releases. The first board booted and validated on hardware takes v0.1.0. The `validate` report schema and the runtime's trace schema are versioned separately. Every change is in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md).
+Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3. A new release comes only with a major feature. The first board booted and validated on hardware takes v0.1.0. The `validate` report schema and the runtime's trace schema are versioned separately. Each release's changes are in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md), and each change in detail in the commit history.
 
 ## This manual
 
