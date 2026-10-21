@@ -6,8 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-
 ## [0.0.3] - 2026-10-20
+
+The steerable S0, milestone R6. S1 sends intents (contract v2) that S0's
+guard and controller carry out, with fidelity and the attribution of a
+failure; contact intent on a simulated Franka Panda, the scrubbing
+experiment; S0 backends for the lab's Panda and PiPER, tested against fakes;
+the fixes of an independent review of them; S2's latency on a lab GPU
+server. Tested in simulation, in VMs and against fakes; no real arm has run
+it. The five parts below are the steps of its development.
 
 ### Part 5 (2026-10-20)
 
@@ -311,6 +318,14 @@ Logs: `~/src/omarchy-robots-evidence/R6-v0.0.10/` on the development host.
   README rendered them on GitHub before as well.
 
 ## [0.0.2] - 2026-10-07
+
+The simulated runtime, with S2 away from the robot, milestones R1 to R4.
+Goals in JSON, verified from fresh observations, with traces; the generic
+`pc` board; S2 in its own process and on another machine (TCP, the S2 link
+over WireGuard), with reconnection; scenes that change, and fallbacks
+installed before they are needed; S2's latency measured on the development
+host. Tested in simulation and in VMs. The six parts below are the steps of
+its development.
 
 ### Part 6 (2026-10-07)
 
@@ -721,6 +736,11 @@ and a generic `pc` board. Not hardware-tested, and nothing is real-time.
 - `nix develop` has python3 with numpy and mypy instead of python3 and mypy.
 
 ## [0.0.1] - 2026-10-03
+
+The robot's OS from one file, milestone OS-1: NixOS and jetpack-nixos
+declared by `robot.nix`, updates and rollback, installer images, the manual,
+the logo and the boot screen. Tested in VMs; never booted on a board. The
+five parts below are the steps of its development.
 
 ### Part 5 (2026-10-03)
 

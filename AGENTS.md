@@ -15,6 +15,9 @@ manual (`manual/`) the user guide, CHANGELOG the releases.
 - Small, coherent commits that pass `nix flake check`, in Conventional
   Commits style; `flake.lock` updates in their own commits. Do not
   force-push or rewrite published history without asking.
+- A new release waits for a major feature (a milestone), not for each
+  step: steps go under `[Unreleased]` in the CHANGELOG, as "Part 1",
+  "Part 2", and the release turns them into its section. Ask before you tag.
 - Releases are source only: no images, no NVIDIA binaries. A release bumps
   `version` in `flake.nix` and in `pkgs/omarchy-runtime/pyproject.toml` (a
   check keeps them equal), adds its CHANGELOG section and an annotated tag.

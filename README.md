@@ -824,25 +824,20 @@ to which component and how to extend the runtime.
 
 ## Versioning
 
-Before 1.0, releases count up: v0.0.1 part 3 to v0.0.1 were milestone OS-1 (the base system,
-VM-validated), v0.0.2 part 1 milestone R1 (the runtime, simulated, and the pc
-board), v0.0.2 part 2 is milestone R2 (S2 in its own process, the wall clock, the S2
-placement experiment), v0.0.2 part 3 is milestone R3's hardening (bounded S0
-steps, timing faults, reconnection, the S2 link over WireGuard), v0.0.2 part 4
-milestone R3's experiment (scenes that change, recovery under the fallback,
-the S2 placement matrix on them, the asynchronous inference seam), v0.0.2 part 5
-milestone R4's first part (fallbacks before they are needed, fallback
-coverage), v0.0.2 its second (measured S2 latency, repeated runs with
-intervals), v0.0.3 part 1 milestone R6's first part (intent contract v2, the S0
-guard and controller, fidelity and attribution), v0.0.3 part 2 its second
-(contact intent on a simulated Franka Panda, the scrubbing experiment),
-v0.0.3 part 3 its third (S0 backends for the lab's arms, tested against fakes),
-v0.0.3 part 4 the fixes of an independent review of the three (the Panda's force
-sign and frames, the PiPER's lost feedback, unmeasured channels, the
-experiment's ablation and summary), v0.0.3 its last part (the lab GPU
-server as S2's edge machine, on the lab's real network). The first board
-booted and
-validated on hardware takes v0.1.0. The validation report schema
+Before 1.0, releases count up, and a new release waits for a major
+feature. v0.0.1 is milestone OS-1: the base system from one `robot.nix`,
+VM-validated, with the manual, the logo and the boot screen. v0.0.2 is the
+simulated runtime with S2 away from the robot, milestones R1 to R4: goals
+verified from fresh observations, S2 in its own process and on another
+machine, reconnection, fallbacks installed before they are needed, S2's
+latency measured. v0.0.3 is the steerable S0, milestone R6: intent contract
+v2, the S0 guard and controller, attribution, contact intent on a simulated
+Franka Panda, backends for the lab's Panda and PiPER against fakes, the
+fixes of an independent review, S2 on a lab GPU server. Work between two
+releases goes under "Unreleased" in the CHANGELOG. The parts of a release
+("Part 1", "Part 2") are the steps of its development, not releases. Until
+2026-10-21 each part had its own tag (v0.0.1-rc.1 to v0.0.14). The first
+board booted and validated on hardware takes v0.1.0. The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; their changes are noted
 in [`CHANGELOG.md`](CHANGELOG.md). Releases are source only: no images, no

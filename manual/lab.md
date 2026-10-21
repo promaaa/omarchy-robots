@@ -125,7 +125,7 @@ Nothing here moves the arm. `echo_robot_state` calls `robot.read()` and `print_j
 4. Give that PC port a static address on Control's network (Franka's example: 172.16.0.1/24 for the PC, Control at 172.16.0.2).
 5. In Desk, activate FCI, and leave its pop-up open.
 6. On the PC, measure the round trip, and keep the output: `ping -c 100 <control-ip>`.
-7. On the PC, build libfranka 0.9.2: `nix build github:promaaa/omarchy-robots/v0.0.13#libfranka -o libfranka`.
+7. On the PC, build libfranka 0.9.2: `nix build github:promaaa/omarchy-robots/v0.0.3#libfranka -o libfranka`.
 8. Read 100 states, and keep the output: `./libfranka/bin/echo_robot_state <control-ip> > robot_state.txt`.
 9. Read the joint poses once, and keep the output: `./libfranka/bin/print_joint_poses <control-ip> > joint_poses.txt`.
 
