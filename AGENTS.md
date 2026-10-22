@@ -23,7 +23,9 @@ manual (`manual/`) the user guide, CHANGELOG the releases.
   internal jargon; release evidence goes to the evidence folder.
 - Releases are source only: no images, no NVIDIA binaries. A release bumps
   `version` in `flake.nix` and in `pkgs/omarchy-runtime/pyproject.toml` (a
-  check keeps them equal), adds its CHANGELOG section and an annotated tag.
+  check keeps them equal), adds its CHANGELOG section and a lightweight
+  tag (`git tag vX.Y.Z`, no message). The text goes in the GitHub release,
+  titled with the version only, the same as its CHANGELOG section.
   The first board validated on hardware takes v0.1.0.
 - The logos in `branding/` come from the maintainer; regenerate `boot.svg`
   and `logo.txt` when they change. See NOTICE for the trademark note.
