@@ -94,6 +94,49 @@ frames = ["panda.base"]
 max_force_n = 30.0
 stiffness = [[0, 3000], [0, 3000], [0, 3000], [0, 300], [0, 300], [0, 300]]
 
+[panda_droid]  # the same simulated Panda as DROID's robot: a Robotiq 2F-85 drawn on its flange holds the sponge (world_vla.toml), DROID's start pose
+kind = "mujoco_panda"
+action_space = "panda.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+max_velocity = [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61]
+workspace = [0.2, 1.0, -0.45, 0.45, -0.02, 0.8]  # x0, x1, y0, y1, z0, z1 of the pad: the table's top is z = 0
+features = ["contact"]
+home = [0.0, -0.6283, 0.0, -2.5133, 0.0, 1.885, 0.0]  # DROID's reset pose: the pad at (0.360, 0, 0.320), pointing down
+safe_pose = [0.0, -0.6283, 0.0, -2.5133, 0.0, 1.885, 0.0]
+
+[panda_droid.kinematics.limits]
+torque_nm = [87, 87, 87, 87, 12, 12, 12]
+torque_rate_nm_s = [1000, 1000, 1000, 1000, 1000, 1000, 1000]
+force_n = 40.0
+hold_stiffness = [60, 60, 60, 60, 20, 20, 10]
+hold_damping = [10, 10, 10, 10, 3, 3, 2]
+
+[panda_droid.kinematics.cartesian]
+action_space = "panda.ee_pose.v1"
+frame = "panda.base"
+ee = "pad"
+orientation = [0.0, -0.38268343, 0.92387953, 0.0]  # the pad pointing down, as in DROID's reset pose
+
+[panda_droid.kinematics.impedance]
+stiffness = [1000, 1000, 1000, 50, 50, 50]
+
+[panda_droid.s0]
+controller = "cartesian_impedance"
+command = "torque"
+dt_s = [0.001, 1.0]
+motion = ["panda.ee_pose.v1"]
+frames = ["panda.base"]
+object = ["pose"]
+scene = ["pose:plate"]
+
+[panda_droid.s0.contact]
+ees = ["pad"]
+frames = ["panda.base"]
+max_force_n = 30.0
+stiffness = [[0, 3000], [0, 3000], [0, 3000], [0, 300], [0, 300], [0, 300]]
+
 # The lab's arms, behind arms.py. Declared here for S0 (the guard and its
 # controller); no scenario runs them, and nothing here connects to them. Their
 # workspaces are placeholders: set them for the cell in the lab. Anything sent

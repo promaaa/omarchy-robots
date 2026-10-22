@@ -244,6 +244,10 @@ def _body_side(
         s0 = S0Loop(body, controller, world, capacity, nominal=period, late_after=late)
         sensor = panda.PandaSensor(world, np.random.default_rng([seed, 2]), sensor_cfg, faults.occlusions)
         params = cfg["scenario"]["s1"]
+        if params.get("policy", "script") == "pi05_droid":
+            from omarchy_runtime.sim.vla import Pi05Wiper  # openpi-client: development tools only
+
+            return world, s0, sensor, lambda i: Pi05Wiper(i, params, world)
         return world, s0, sensor, lambda i: ScriptedWiper(i, params)
     if controller_id != "motion_tracker" or faults.weak:
         raise ConfigError(f"body {body.id}: the planar simulator runs the motion tracker, not {controller_id}, and has no weak actuators")
@@ -442,7 +446,13 @@ def run(
         contradiction_m=verification["contradiction_m"],
         contradiction_s=verification["contradiction_s"],
     )
-    implementations = {b.implementation: (lambda i=b.implementation: policy(i)) for b in config.bindings(cfg)}
+    made: list[S1Policy] = []  # every S1 the runtime started, for what they record (a VLA's inputs and answers)
+
+    def make(i: str) -> S1Policy:
+        made.append(policy(i))
+        return made[-1]
+
+    implementations = {b.implementation: (lambda i=b.implementation: make(i)) for b in config.bindings(cfg)}
     runtime = Runtime(
         body=body,
         capabilities=capabilities,
@@ -557,6 +567,10 @@ def run(
         log = getattr(world, "log", None)
         if log is not None:  # the MuJoCo scene: its ground truth, tick by tick, for the harness and the video
             np.savez_compressed(run_dir / "world.npz", **log())
+        for p in made:
+            save = getattr(p, "save", None)
+            if save is not None:
+                save(run_dir)
     return result
 
 

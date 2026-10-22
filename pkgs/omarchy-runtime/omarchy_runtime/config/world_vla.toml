@@ -1,0 +1,112 @@
+# The scrubbing scene as the DROID robot would meet it, for a VLA trained on
+# DROID (sim/vla.py): the same Panda, now with a Robotiq 2F-85 drawn on its
+# flange holding the sponge (drawn only: the sponge is what touches), mounted
+# at the edge of a table whose top is level with its base, and two cameras
+# placed as DROID's: one beside the robot, one on the wrist. The physics, S0
+# and the dirt are those of world_scrub.toml. Metres, the robot's base frame:
+# x forward, y to the left, z up.
+
+[table]
+center = [0.6, 0.0, -0.375]
+half = [0.4, 0.6, 0.375]  # its top at z = 0, level with the robot's base
+
+[plate]
+center = [0.6, 0.0]  # x, y; it rests on the table
+half = 0.12  # a 24 cm square
+thickness = 0.015
+mass_kg = 0.4
+friction = 1.0
+
+[sponge]
+half = [0.022, 0.045, 0.02]  # across the fingers, along them, and its depth
+held_m = 0.13  # the sponge's top this far from the flange, between the fingertips
+mass_kg = 0.05
+friction = 0.3
+solref_s = 0.05  # a soft contact
+scrub_layer = [0.16, 0.5, 0.22, 1.0]  # drawn only: the green scouring side, down
+
+[gripper]
+ctrl = 140  # closed on the sponge (0 open, 255 shut)
+
+[dirt]
+cells = 10  # a 10 x 10 grid of 2 cm cells
+margin_m = 0.02
+f_min_n = 4.0
+t_min_s = 0.3
+clean_share = 0.9
+rgba = [0.3, 0.19, 0.08, 1.0]  # drawn: dark stains
+
+[force_sensor]
+noise_n = 0.5
+filter = 0.1
+
+[sensor]  # the runtime's simulated detector (the belief), as in world_scrub.toml; the VLA reads the cameras instead
+source = "sim.camera"
+noise_m = 0.002
+plate_bias_z_m = 0.0
+dirt_flip = 0.03
+confidence = 0.95
+
+[look]  # drawn only
+floor_z = -0.75
+floor = [0.3, 0.3, 0.32, 1.0]
+table = [0.56, 0.47, 0.38, 1.0]
+props = [
+  [[0.0, 0.0, -0.375], [0.16, 0.16, 0.375], [0.18, 0.18, 0.2, 1.0]],  # the robot's stand
+  [[1.6, 0.0, 0.5], [0.02, 2.5, 1.25], [0.86, 0.84, 0.8, 1.0]],  # the wall behind the table
+  [[0.4, -1.4, 0.5], [2.0, 0.02, 1.25], [0.8, 0.82, 0.84, 1.0]],  # the wall on the right
+  [[-0.9, 0.0, 0.5], [0.02, 2.5, 1.25], [0.82, 0.82, 0.8, 1.0]],  # the wall behind the robot
+  [[0.4, 1.6, 0.5], [2.0, 0.02, 1.25], [0.8, 0.82, 0.84, 1.0]],  # the wall on the left
+]
+lamps = [[[0.6, 0.0, 1.5], [0.0, 0.0, -1.0]], [[0.0, 1.0, 1.2], [0.3, -0.6, -1.0]]]
+# Photographs (Poly Haven, CC0), from the directory OMARCHY_TEXTURES names; plain colours without it.
+textures = { table = ["wood_table_001.png", [3, 3]], floor = ["concrete_floor_02.png", [4, 4]], walls = ["painted_plaster_wall.png", [1, 1]] }
+
+[cameras.exterior]  # DROID's exterior ZED 2 (left image): beside and behind the arm, 1280 x 720
+pos = [0.12, 0.62, 0.42]
+target = [0.58, -0.04, 0.04]
+up = [0.0, 0.0, 1.0]
+fovy = 62.0
+
+[cameras.wrist]  # DROID's ZED Mini on the wrist: the fingertips at the bottom of its image
+on = "gripper"
+pos = [0.0, -0.10, 0.0]
+target = [0.0, -0.02, 0.30]
+up = [0.0, -1.0, 0.0]
+fovy = 58.0
+
+[cameras.studio]  # for the videos only: never shown to the VLA
+pos = [1.35, 0.95, 0.75]
+target = [0.5, 0.0, 0.1]
+up = [0.0, 0.0, 1.0]
+fovy = 40.0
+
+[objects.plate]
+width = 0.24
+height = 0.015
+x = 0.6
+
+[surfaces.table]
+x0 = 0.2
+x1 = 1.0
+z = 0.0
+
+[regions.above_table]
+x0 = 0.2
+x1 = 1.0
+z0 = -0.05
+z1 = 0.2
+
+[s0]
+late_after_periods = 1.5
+
+[rates_hz]  # simulated: physics and S0 at 1 kHz, S1's host at 20 Hz (the VLA infers every 8 of its 15 Hz rows)
+s0 = 1000
+s1 = 20
+supervisor = 20
+observation = 10
+s2 = 10
+
+[wall_rates_hz]
+s0 = 200
+link = 1000

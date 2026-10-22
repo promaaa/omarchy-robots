@@ -76,7 +76,8 @@ def build(world: Json) -> mujoco.MjModel:
             b.gravcomp = 1
     t, p, s, d = world["table"], world["plate"], world["sponge"], world["dirt"]
     half = _get(s, "half")
-    sponge = spec.body("attachment").add_body(name="sponge", pos=[0, 0, half[2]], gravcomp=1)
+    held = float(s.get("held_m", 0.0))  # how far from the flange a gripper holds the sponge's top
+    sponge = spec.body("attachment").add_body(name="sponge", pos=[0, 0, held + half[2]], gravcomp=1)
     sponge.add_geom(
         name="sponge",
         type=mujoco.mjtGeom.mjGEOM_BOX,
@@ -88,10 +89,55 @@ def build(world: Json) -> mujoco.MjModel:
         solref=[float(s["solref_s"]), 1.0],  # soft: a sponge
     )
     sponge.add_site(name="pad", pos=[0, 0, half[2]])
+    if "scrub_layer" in s:  # drawn only: the green scouring side
+        sponge.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=[0, 0, half[2] - 0.002],
+            size=[half[0] + 0.0005, half[1] + 0.0005, 0.0025],
+            rgba=s["scrub_layer"],
+            contype=0,
+            conaffinity=0,
+            density=0,
+        )
+    if "gripper" in world:
+        _gripper(spec, world["gripper"])
     w = spec.worldbody
-    w.add_light(name="sun", pos=[0.5, -0.5, 2.0], dir=[0, 0.3, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
-    w.add_geom(name="floor", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[2, 2, 0.1], rgba=[0.35, 0.37, 0.4, 1])
-    w.add_geom(name="table", type=mujoco.mjtGeom.mjGEOM_BOX, pos=_get(t, "center"), size=_get(t, "half"), rgba=[0.55, 0.42, 0.3, 1])
+    look = world.get("look", {})
+    sun = w.add_light(name="sun", pos=[0.5, -0.5, 2.0], dir=[0, 0.3, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL, castshadow=bool(look))
+    if look:  # a room's soft light, for the cameras
+        sun.diffuse, sun.specular = [float(look.get("sun", 0.55))] * 3, [0.15] * 3
+        sun.dir = look.get("sun_dir", [0.2, 0.3, -1.0])
+        spec.visual.headlight.ambient = [float(look.get("ambient", 0.35))] * 3
+        spec.visual.headlight.diffuse = [float(look.get("headlight", 0.25))] * 3
+        spec.visual.headlight.specular = [0.05] * 3
+        spec.visual.quality.shadowsize = 8192
+        for n, (pos, towards) in enumerate(look.get("lamps", [])):
+            w.add_light(name=f"lamp{n}", pos=pos, dir=towards, diffuse=[0.3] * 3, specular=[0.05] * 3, castshadow=False)
+    w.add_geom(
+        name="floor",
+        type=mujoco.mjtGeom.mjGEOM_PLANE,
+        pos=[0, 0, float(look.get("floor_z", 0.0))],
+        size=[2, 2, 0.1],
+        rgba=look.get("floor", [0.35, 0.37, 0.4, 1]),
+    )
+    w.add_geom(
+        name="table", type=mujoco.mjtGeom.mjGEOM_BOX, pos=_get(t, "center"), size=_get(t, "half"), rgba=look.get("table", [0.55, 0.42, 0.3, 1])
+    )
+    for n, (pos, size, rgba) in enumerate(look.get("props", [])):  # drawn only: walls, the robot's stand
+        w.add_geom(name=f"prop{n}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=pos, size=size, rgba=rgba, contype=0, conaffinity=0)
+    photos = os.environ.get("OMARCHY_TEXTURES")  # photographs for the surfaces (look.textures), if given
+    for geom, (file, repeat) in look.get("textures", {}).items() if photos else ():
+        name = f"photo_{geom}"
+        spec.add_texture(name=name, type=mujoco.mjtTexture.mjTEXTURE_2D, file=str(Path(photos) / file))
+        mat = spec.add_material(name=name, texrepeat=repeat, texuniform=True, specular=0.1, shininess=0.2)
+        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = name
+        for g in [x for x in spec.geoms if x.name == geom or (geom == "walls" and x.name.startswith("prop") and x.name != "prop0")]:
+            g.material, g.rgba = name, [1, 1, 1, 1]
+    if "cameras" in world:  # HD720, as DROID's cameras
+        spec.visual.global_.offwidth, spec.visual.global_.offheight = 1280, 720
+    for name, c in world.get("cameras", {}).items():
+        parent = w if c.get("on", "world") == "world" else spec.body(c["on"])
+        _camera(parent, name, _get(c, "pos"), _get(c, "target"), _get(c, "up"), float(c["fovy"]))
     side, thick = float(p["half"]), float(p["thickness"])
     top = float(t["center"][2] + t["half"][2])
     plate = w.add_body(name="plate", pos=[*p["center"], top + thick / 2])
@@ -112,11 +158,67 @@ def build(world: Json) -> mujoco.MjModel:
             type=mujoco.mjtGeom.mjGEOM_BOX,
             pos=[cx, cy, thick / 2 + 0.0005],
             size=[size * 0.92, size * 0.92, 0.0005],
-            rgba=[0.45, 0.3, 0.12, 1],
+            rgba=d.get("rgba", [0.45, 0.3, 0.12, 1]),
             contype=0,
             conaffinity=0,
         )
     return spec.compile()
+
+
+GRIPPER = "robotiq_2f85/2f85.xml"
+
+
+def _gripper(spec: mujoco.MjSpec, g: Json) -> None:
+    """A Robotiq 2F-85 on the flange (the DROID robot's gripper), closed by
+    its actuator to `ctrl` (0 open, 255 shut) around the sponge, then baked:
+    its visual meshes only, rigid, massless and without contacts, so the arm's
+    dynamics stay those of the scene without it (a real Panda is told its
+    load). Drawn for the cameras; the sponge is what touches."""
+    path = menagerie() / GRIPPER
+    if not path.exists():
+        raise ConfigError(f"no {GRIPPER} in the Menagerie at {path.parent.parent}")
+    m = mujoco.MjSpec.from_file(str(path)).compile()
+    d = mujoco.MjData(m)
+    m.opt.gravity[:] = 0
+    d.ctrl[0] = float(g["ctrl"])
+    for _ in range(3000):
+        mujoco.mj_step(m, d)
+    body = spec.body("attachment").add_body(name="gripper")
+    added: set[str] = set()
+    for i in range(m.ngeom):
+        if m.geom_contype[i] or m.geom_type[i] != mujoco.mjtGeom.mjGEOM_MESH:
+            continue  # its collision geoms
+        k = int(m.geom_dataid[i])
+        mesh = m.mesh(k).name
+        if mesh not in added:
+            spec.add_mesh(name=f"2f85_{mesh}", file=str(path.parent / "assets" / f"{mesh}.stl"), scale=[0.001] * 3)
+            added.add(mesh)
+        # The compiled geom frame includes the mesh's own offset; the new mesh will get it again.
+        offset = np.zeros(9)
+        mujoco.mju_quat2Mat(offset, m.mesh_quat[k])
+        rot = d.geom_xmat[i].reshape(3, 3) @ offset.reshape(3, 3).T
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, rot.ravel())
+        rgba = m.mat_rgba[m.geom_matid[i]] if m.geom_matid[i] >= 0 else m.geom_rgba[i]
+        body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_MESH,
+            meshname=f"2f85_{mesh}",
+            pos=d.geom_xpos[i] - rot @ m.mesh_pos[k],
+            quat=quat,
+            rgba=rgba,
+            contype=0,
+            conaffinity=0,
+            density=0,
+            group=2,
+        )
+
+
+def _camera(parent: mujoco.MjsBody, name: str, pos: Array, target: Array, up: Array, fovy: float) -> None:
+    """A camera at `pos` looking at `target`, `up` up in its image, in `parent`'s frame."""
+    f = (target - pos) / np.linalg.norm(target - pos)
+    x = np.cross(f, up)
+    x /= np.linalg.norm(x)
+    parent.add_camera(name=name, pos=pos, xyaxes=[*x, *np.cross(x, f)], fovy=fovy)
 
 
 def cells(world: Json) -> Array:

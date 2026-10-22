@@ -40,5 +40,5 @@ default_fallback = "retreat"  # leave contact upwards, compliant along z (Cartes
 capability = "wipe"
 implementation = "wipe.panda"
 version = "1"
-bodies = ["panda"]
+bodies = ["panda", "panda_droid"]
 priority = 10

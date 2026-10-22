@@ -1,0 +1,42 @@
+description = """clean(plate) on the simulated Panda of world_vla.toml, S1 a real VLA:
+pi0.5-DROID (openpi), from two rendered cameras, its joint angles and an
+instruction, its joint targets turned into the motion channel; with
+`contact`, a rule adds the contact channel near the plate (MAKE, MAINTAIN
+10 N within [5, 20] N, BREAK). S0, Cartesian impedance with force regulation
+behind the guard. The policy server is not part of the runtime: start it
+first (openpi, on a GPU) and name it in s1.server."""
+seed = 1
+body = "panda_droid"
+world = "vla"
+limit_s = 40.0
+
+[extensions]
+recovery = "give_up"  # first attempts only
+
+[fidelity]
+tracking = 0.01
+
+[s1]
+policy = "pi05_droid"  # "script": the scripted wiper of scrub_contact, in this scene
+server = "127.0.0.1:8000"
+prompt = "wipe the plate with the sponge"
+open_loop = 8  # rows executed per chunk, as DROID's client
+duration_s = 30.0
+latency_s = 0.1  # simulated time from the observation to the chunk at S0: set from the measured inference
+contact = true
+force_n = 10.0
+force_min_n = 5.0
+force_max_n = 20.0
+stiffness = [1500, 1500, 800, 60, 60, 60]
+band_m = 0.03  # the contact channel presses where the path runs less than this above the believed top
+# The scripted wiper's, when policy = "script":
+press_m = 0.010
+line_spacing_m = 0.035
+margin_m = 0.05
+transfer_m_s = 0.15
+descend_m_s = 0.03
+wipe_m_s = 0.05
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "clean", args = ["plate"] }]
