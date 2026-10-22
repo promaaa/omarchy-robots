@@ -245,7 +245,7 @@ class TestProperties(unittest.TestCase):
                     "implementation": "wipe.panda",
                     "version": "1",
                     "accepted": False,
-                    "reason": "not bound to body arm3 (bodies: panda)",
+                    "reason": "not bound to body arm3 (bodies: panda, panda_droid)",
                 },
             ],
         )

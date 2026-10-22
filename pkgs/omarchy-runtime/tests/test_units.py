@@ -318,7 +318,7 @@ class TestResolver(unittest.TestCase):
         self.assertEqual([c.reason for c in r.candidates], ["achieves in, not clean"])
         everything = resolve(Goal("clean", ("cup_1",)), belief(), ARM, config.capabilities(ARM_CFG), config.bindings(ARM_CFG), 0)
         self.assertIs(everything.category, Category.NO_CAPABILITY)  # wiping is the Panda's, not this arm's
-        self.assertIn("not bound to body arm3 (bodies: panda)", [c.reason for c in everything.candidates])
+        self.assertIn("not bound to body arm3 (bodies: panda, panda_droid)", [c.reason for c in everything.candidates])
         self.assertEqual([c.id for c in config.capabilities(ARM_CFG)], ["place_in", "wipe"])
 
     def test_preconditions(self) -> None:

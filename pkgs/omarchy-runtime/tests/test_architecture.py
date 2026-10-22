@@ -1,8 +1,8 @@
 """Binding principles that the import graph can show: contracts and the runtime
 core never import the simulator, nothing imports ROS, only wallclock.py reads
 the wall clock, and numpy is the only dependency outside the standard library
-(the development tools aside: MuJoCo, in two modules that only a command
-imports, inside a function)."""
+(the development tools aside: MuJoCo and openpi-client, in modules that only
+a command imports, inside a function)."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def imports(path: Path) -> set[str]:
 
 # The development tools, in the omarchy-runtime-tools package only: what each may import besides,
 # and the modules that may import them, never at their top level.
-TOOLS = {"sim.panda": {"mujoco"}, "scrub": {"mujoco"}, "sim.fake_piper": {"can"}}
+TOOLS = {"sim.panda": {"mujoco"}, "scrub": {"mujoco"}, "sim.fake_piper": {"can"}, "sim.vla": {"mujoco", "openpi_client"}}
 TOOL_USERS = {"cli", "scenario", "scrub"}
 
 TMP = tempfile.TemporaryDirectory()

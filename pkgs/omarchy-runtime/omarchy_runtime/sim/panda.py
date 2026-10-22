@@ -103,7 +103,9 @@ def build(world: Json) -> mujoco.MjModel:
         _gripper(spec, world["gripper"])
     w = spec.worldbody
     look = world.get("look", {})
-    sun = w.add_light(name="sun", pos=[0.5, -0.5, 2.0], dir=[0, 0.3, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL, castshadow=bool(look))
+    sun = w.add_light(
+        name="sun", pos=[0.5, -0.5, 2.0], dir=[0, 0.3, -1], type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL, castshadow=bool(look)
+    )
     if look:  # a room's soft light, for the cameras
         sun.diffuse, sun.specular = [float(look.get("sun", 0.55))] * 3, [0.15] * 3
         sun.dir = look.get("sun_dir", [0.2, 0.3, -1.0])
@@ -121,18 +123,23 @@ def build(world: Json) -> mujoco.MjModel:
         rgba=look.get("floor", [0.35, 0.37, 0.4, 1]),
     )
     w.add_geom(
-        name="table", type=mujoco.mjtGeom.mjGEOM_BOX, pos=_get(t, "center"), size=_get(t, "half"), rgba=look.get("table", [0.55, 0.42, 0.3, 1])
+        name="table",
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        pos=_get(t, "center"),
+        size=_get(t, "half"),
+        rgba=look.get("table", [0.55, 0.42, 0.3, 1]),
     )
     for n, (pos, size, rgba) in enumerate(look.get("props", [])):  # drawn only: walls, the robot's stand
         w.add_geom(name=f"prop{n}", type=mujoco.mjtGeom.mjGEOM_BOX, pos=pos, size=size, rgba=rgba, contype=0, conaffinity=0)
     photos = os.environ.get("OMARCHY_TEXTURES")  # photographs for the surfaces (look.textures), if given
-    for geom, (file, repeat) in look.get("textures", {}).items() if photos else ():
-        name = f"photo_{geom}"
-        spec.add_texture(name=name, type=mujoco.mjtTexture.mjTEXTURE_2D, file=str(Path(photos) / file))
-        mat = spec.add_material(name=name, texrepeat=repeat, texuniform=True, specular=0.1, shininess=0.2)
-        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = name
-        for g in [x for x in spec.geoms if x.name == geom or (geom == "walls" and x.name.startswith("prop") and x.name != "prop0")]:
-            g.material, g.rgba = name, [1, 1, 1, 1]
+    if photos:
+        for geom, (file, repeat) in look.get("textures", {}).items():
+            name = f"photo_{geom}"
+            spec.add_texture(name=name, type=mujoco.mjtTexture.mjTEXTURE_2D, file=str(Path(photos) / file))
+            mat = spec.add_material(name=name, texrepeat=repeat, texuniform=True, specular=0.1, shininess=0.2)
+            mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = name
+            for g in [x for x in spec.geoms if x.name == geom or (geom == "walls" and x.name.startswith("prop") and x.name != "prop0")]:
+                g.material, g.rgba = name, [1, 1, 1, 1]
     if "cameras" in world:  # HD720, as DROID's cameras
         spec.visual.global_.offwidth, spec.visual.global_.offheight = 1280, 720
     for name, c in world.get("cameras", {}).items():

@@ -21,7 +21,6 @@ Development tools only: it needs MuJoCo (the cameras) and openpi-client.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,7 @@ from typing import Any
 import mujoco
 import numpy as np
 
+from omarchy_runtime import wallclock
 from omarchy_runtime.contracts import (
     CARTESIAN,
     BodySpec,
@@ -144,16 +144,17 @@ class Pi05Wiper:
         d = self.world.data
         joints = np.array(d.qpos[: self._n])
         views = self.cameras.views()
+        exterior, wrist = resize_with_pad(views["exterior"]), resize_with_pad(views["wrist"])
         request = {
-            "observation/exterior_image_1_left": resize_with_pad(views["exterior"]),
-            "observation/wrist_image_left": resize_with_pad(views["wrist"]),
+            "observation/exterior_image_1_left": exterior,
+            "observation/wrist_image_left": wrist,
             "observation/joint_position": joints,
             "observation/gripper_position": np.array([self.gripper]),
             "prompt": self.prompt,
         }
-        started = time.perf_counter()
+        started = wallclock.perf_ns()
         answer = self.client.infer(request)
-        wall = time.perf_counter() - started
+        wall = (wallclock.perf_ns() - started) / 1e9  # the round trip to the policy server, for the record only
         actions = np.asarray(answer["actions"], dtype=np.float64)
         rows = [self._pose(a[: self._n]) for a in actions]
         horizon = len(rows)
@@ -168,12 +169,14 @@ class Pi05Wiper:
                 modes.append((ContactMode.MAINTAIN if self._pressing else ContactMode.MAKE) if near else ContactMode.BREAK)
                 self._pressing = near
             lo, hi = self.bounds
-            contact.append(ContactIntent.make(timing, self._ee, self._frame, (0, 0, 1), modes, [[self.force]] * horizon, [lo], [hi], self.stiffness))
+            contact.append(
+                ContactIntent.make(timing, self._ee, self._frame, (0, 0, 1), modes, [[self.force]] * horizon, [lo], [hi], self.stiffness)
+            )
             self._pressing = modes[min(self.open_loop, horizon) - 1] is not ContactMode.BREAK
         self._seq += 1
         self._next = now + self.open_loop * DT
-        self.frames["exterior"].append(request["observation/exterior_image_1_left"])
-        self.frames["wrist"].append(request["observation/wrist_image_left"])
+        self.frames["exterior"].append(exterior)
+        self.frames["wrist"].append(wrist)
         self.log.append(
             {
                 "seq": self._seq,
@@ -198,4 +201,5 @@ class Pi05Wiper:
         import json
 
         (run_dir / "vla.json").write_text(json.dumps({"prompt": self.prompt, "contact": self.contact, "chunks": self.log}, indent=1) + "\n")
-        np.savez_compressed(run_dir / "vla_frames.npz", **{k: np.array(v, dtype=np.uint8) for k, v in self.frames.items() if v})
+        frames: dict[str, Any] = {k: np.array(v, dtype=np.uint8) for k, v in self.frames.items() if v}
+        np.savez_compressed(run_dir / "vla_frames.npz", **frames)

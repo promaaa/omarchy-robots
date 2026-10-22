@@ -28,6 +28,6 @@ select = ["E", "F", "W", "B", "UP", "I", "PLW", "BLE", "EXE"]
 [tool.mypy]
 strict = true
 
-[[tool.mypy.overrides]]  # MuJoCo ships no type information; sim/panda.py is the only module that imports it
-module = ["mujoco", "mujoco.*", "piper_sdk", "piper_sdk.*"]
+[[tool.mypy.overrides]]  # MuJoCo and openpi-client ship no type information; sim/panda.py and sim/vla.py import them
+module = ["mujoco", "mujoco.*", "piper_sdk", "piper_sdk.*", "openpi_client", "openpi_client.*"]
 ignore_missing_imports = true

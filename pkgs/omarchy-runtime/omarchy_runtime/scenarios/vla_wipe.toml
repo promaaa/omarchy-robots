@@ -3,8 +3,9 @@ pi0.5-DROID (openpi), from two rendered cameras, its joint angles and an
 instruction, its joint targets turned into the motion channel; with
 `contact`, a rule adds the contact channel near the plate (MAKE, MAINTAIN
 10 N within [5, 20] N, BREAK). S0, Cartesian impedance with force regulation
-behind the guard. The policy server is not part of the runtime: start it
-first (openpi, on a GPU) and name it in s1.server."""
+behind the guard. By default S1 is the scripted wiper, as in scrub_contact:
+the VLA needs its policy server (openpi, on a GPU), named in s1.server, and
+s1.policy = "pi05_droid" (omarchy_runtime.vla_runs)."""
 seed = 1
 body = "panda_droid"
 world = "vla"
@@ -17,7 +18,7 @@ recovery = "give_up"  # first attempts only
 tracking = 0.01
 
 [s1]
-policy = "pi05_droid"  # "script": the scripted wiper of scrub_contact, in this scene
+policy = "script"  # the scripted wiper of scrub_contact, in this scene; "pi05_droid" for the VLA (vla_runs.py sets it)
 server = "127.0.0.1:8000"
 prompt = "wipe the plate with the sponge"
 open_loop = 8  # rows executed per chunk, as DROID's client
@@ -40,3 +41,9 @@ wipe_m_s = 0.05
 [s2]
 latency_s = 0.1
 goals = [{ predicate = "clean", args = ["plate"] }]
+
+[[expect]]  # the scripted wiper's
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

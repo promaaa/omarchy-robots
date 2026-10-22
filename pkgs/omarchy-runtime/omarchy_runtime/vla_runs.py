@@ -111,9 +111,15 @@ def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = N
         for seed in range(1, seeds + 1):
             name = condition.replace(" + ", "+").replace(", ", "-").replace(" ", "-")
             c = cell(condition, seed, out / f"{name}-s{seed}", s1)
-            print(json.dumps({k: c[k] for k in ("condition", "seed", "outcome", "coverage", "touching_s", "force_peak_n", "guard_interventions")}))
+            print(
+                json.dumps(
+                    {k: c[k] for k in ("condition", "seed", "outcome", "coverage", "touching_s", "force_peak_n", "guard_interventions")}
+                )
+            )
             cells.append(c)
-            (out / "results.json").write_text(json.dumps({"label": LABEL, "scenario": SCENARIO, "cells": cells}, indent=1, default=str) + "\n")
+            (out / "results.json").write_text(
+                json.dumps({"label": LABEL, "scenario": SCENARIO, "cells": cells}, indent=1, default=str) + "\n"
+            )
     return {"label": LABEL, "cells": cells}
 
 
