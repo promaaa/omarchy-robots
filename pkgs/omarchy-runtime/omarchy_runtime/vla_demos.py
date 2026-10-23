@@ -26,7 +26,6 @@ import numpy as np
 
 from omarchy_runtime import scenario as composition
 from omarchy_runtime.contracts import ContactMode
-from omarchy_runtime.sim import panda
 from omarchy_runtime.sim.vla import DT, Cameras, resize_with_pad
 from omarchy_runtime.sim.wipe import ScriptedWiper
 from omarchy_runtime.vla_runs import SCENARIO, plate_at
@@ -47,9 +46,9 @@ def ik(model: mujoco.MjModel, data: mujoco.MjData, site: int, n: int, q0: np.nda
     """Joint angles near q0 that put `site` at target (x, y, z, qw, qx, qy, qz): damped least squares."""
     q = q0.copy()
     jp, jr = np.zeros((3, model.nv)), np.zeros((3, model.nv))
-    want = np.zeros(9)
-    mujoco.mju_quat2Mat(want, target[3:7])
-    want = want.reshape(3, 3)
+    flat = np.zeros(9)
+    mujoco.mju_quat2Mat(flat, target[3:7])
+    want = flat.reshape(3, 3)
     for _ in range(30):
         data.qpos[:n] = q
         mujoco.mj_kinematics(model, data)
@@ -107,7 +106,7 @@ def episode(seed: int, out: Path, board_m: float) -> dict[str, Any]:
         frames["actions"].append(np.concatenate((q_next, [press])))
         t += DT
     cams.renderer.close()
-    arrays = {k: np.array(v) for k, v in frames.items()}
+    arrays: dict[str, Any] = {k: np.array(v) for k, v in frames.items()}
     np.savez_compressed(out / f"demo-{seed:04d}.npz", prompt=PROMPT, **arrays)
     summary = r.summaries[0]
     return {
@@ -126,7 +125,7 @@ def main() -> None:
     first, last = int(sys.argv[2]), int(sys.argv[3])
     board = float(sys.argv[4]) if len(sys.argv) > 4 else 0.02
     out.mkdir(parents=True, exist_ok=True)
-    composition.ScriptedWiper = Teacher  # type: ignore[misc]  # the composition root builds the teacher; keep its plan
+    composition.ScriptedWiper = Teacher  # type: ignore[attr-defined]  # the composition root builds the teacher: keep its plan
     for seed in range(first, last + 1):
         info = episode(seed, out, board)
         print(json.dumps(info), flush=True)

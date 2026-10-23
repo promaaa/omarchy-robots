@@ -115,7 +115,8 @@ def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = N
     """Every condition x board height (the world's when None) x seed (1..`seeds`); writes results.json as it goes."""
     out.mkdir(parents=True, exist_ok=True)
     cells = []
-    for condition, board, seed in [(c, b, s) for c in conditions for b in (boards or [None]) for s in range(1, seeds + 1)]:
+    heights: list[float | None] = list(boards) if boards else [None]
+    for condition, board, seed in [(c, b, s) for c in conditions for b in heights for s in range(1, seeds + 1)]:
         name = condition.replace(" + ", "+").replace(", ", "-").replace(" ", "-")
         name += "" if board is None else f"-b{round(board * 1000):02d}mm"
         c = cell(condition, seed, out / f"{name}-s{seed}", s1, board)
