@@ -29,6 +29,9 @@ CONDITIONS: dict[str, Json] = {
     "vla, motion only": {"policy": "pi05_droid", "contact": False},
     "vla + contact": {"policy": "pi05_droid", "contact": True},
     "script + contact": {"policy": "script", "contact": True},
+    # pi0.5 fine-tuned on the script's demonstrations (vla_demos.py): alone, or with S0 told where it presses.
+    "student alone": {"policy": "pi05_droid", "contact": False},
+    "student + S0": {"policy": "pi05_droid", "contact": True, "contact_from": "flag"},
 }
 SHIFT_M = 0.03  # the plate moves by up to this much in x and y, per seed
 WINDOW_M = 0.02  # the pad over the plate, at most this far above its top
@@ -45,16 +48,19 @@ def plate_at(seed: int) -> list[float]:
     return [round(float(centre[0] + shift[0]), 4), round(float(centre[1] + shift[1]), 4)]
 
 
-def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None) -> Json:
+def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None, board_m: float | None = None) -> Json:
     over: Json = {
         "scenario": {"seed": seed, "s1": CONDITIONS[condition] | (s1 or {})},
         "world": {"plate": {"center": plate_at(seed)}, "objects": {"plate": {"x": plate_at(seed)[0]}}},
     }
+    if board_m is not None:
+        over["world"]["plate"]["board_m"] = board_m
     r = run(SCENARIO, run_dir, overrides=over, record_s0=True)
     w: Any = r.world
     log, cfg = w.log(), r.cfg
     lo, hi = cfg["scenario"]["s1"]["force_min_n"], cfg["scenario"]["s1"]["force_max_n"]
-    top = cfg["world"]["table"]["center"][2] + cfg["world"]["table"]["half"][2] + cfg["world"]["plate"]["thickness"]
+    plate = cfg["world"]["plate"]
+    top = cfg["world"]["table"]["center"][2] + cfg["world"]["table"]["half"][2] + plate["thickness"] + plate.get("board_m", 0.0)
     inner = cfg["world"]["plate"]["half"]
     centre = np.array(cfg["world"]["plate"]["center"])
     ee, force = log["ee"], log["force"]
@@ -68,6 +74,7 @@ def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None) -> Js
     out = {
         "condition": condition,
         "seed": seed,
+        "board_m": plate.get("board_m", 0.0),
         "plate": plate_at(seed),
         "run_dir": str(run_dir),
         "outcome": s.get("outcome"),
@@ -104,26 +111,22 @@ def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None) -> Js
     return out
 
 
-def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = None) -> Json:
+def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = None, boards: list[float] | None = None) -> Json:
+    """Every condition x board height (the world's when None) x seed (1..`seeds`); writes results.json as it goes."""
     out.mkdir(parents=True, exist_ok=True)
     cells = []
-    for condition in conditions:
-        for seed in range(1, seeds + 1):
-            name = condition.replace(" + ", "+").replace(", ", "-").replace(" ", "-")
-            c = cell(condition, seed, out / f"{name}-s{seed}", s1)
-            print(
-                json.dumps(
-                    {k: c[k] for k in ("condition", "seed", "outcome", "coverage", "touching_s", "force_peak_n", "guard_interventions")}
-                )
-            )
-            cells.append(c)
-            (out / "results.json").write_text(
-                json.dumps({"label": LABEL, "scenario": SCENARIO, "cells": cells}, indent=1, default=str) + "\n"
-            )
+    for condition, board, seed in [(c, b, s) for c in conditions for b in (boards or [None]) for s in range(1, seeds + 1)]:
+        name = condition.replace(" + ", "+").replace(", ", "-").replace(" ", "-")
+        name += "" if board is None else f"-b{round(board * 1000):02d}mm"
+        c = cell(condition, seed, out / f"{name}-s{seed}", s1, board)
+        print(json.dumps({k: c[k] for k in ("condition", "board_m", "seed", "outcome", "coverage", "force_peak_n")}), flush=True)
+        cells.append(c)
+        (out / "results.json").write_text(json.dumps({"label": LABEL, "scenario": SCENARIO, "cells": cells}, indent=1, default=str) + "\n")
     return {"label": LABEL, "cells": cells}
 
 
 if __name__ == "__main__":
     import sys
 
-    experiment(Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None)
+    boards = [float(b) for b in sys.argv[5].split(",")] if len(sys.argv) > 5 else None
+    experiment(Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None, boards)

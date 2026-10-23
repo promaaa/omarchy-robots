@@ -147,6 +147,17 @@ def build(world: Json) -> mujoco.MjModel:
         _camera(parent, name, _get(c, "pos"), _get(c, "target"), _get(c, "up"), float(c["fovy"]))
     side, thick = float(p["half"]), float(p["thickness"])
     top = float(t["center"][2] + t["half"][2])
+    board = float(p.get("board_m", 0.0))  # a cutting board under the plate: the plate's height changes with it
+    if board > 0:
+        w.add_geom(
+            name="board",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=[*p["center"], top + board / 2],
+            size=[side + 0.03, side + 0.03, board / 2],
+            rgba=look.get("board", [0.78, 0.66, 0.5, 1]),
+            friction=[float(p["friction"]), 0.005, 0.0001],
+        )
+        top += board
     plate = w.add_body(name="plate", pos=[*p["center"], top + thick / 2])
     plate.add_freejoint(name="plate")
     plate.add_geom(

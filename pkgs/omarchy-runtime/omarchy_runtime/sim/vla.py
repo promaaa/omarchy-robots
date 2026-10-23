@@ -90,6 +90,7 @@ class Pi05Wiper:
             self.bounds = (float(params["force_min_n"]), float(params["force_max_n"]))
             self.stiffness = tuple(float(v) for v in params["stiffness"])
             self.band = float(params["band_m"])
+            self.flag = str(params.get("contact_from", "rule")) == "flag"  # a fine-tuned VLA says where to press
         except (KeyError, TypeError, ValueError) as e:
             raise ConfigError(f"scenario s1: the VLA wiper needs {e}") from e
         from openpi_client import websocket_client_policy
@@ -164,8 +165,11 @@ class Pi05Wiper:
         contact = []
         modes = []
         if self.contact:
-            for r in rows:
-                near = r[2] - self._top <= self.band and bool(np.all(np.abs(np.array(r[:2]) - self._centre) <= self._reach))
+            for k, r in enumerate(rows):
+                if self.flag:  # the gripper's dimension, fine-tuned into a press flag (vla_demos.py)
+                    near = bool(actions[k, 7] > 0.5)
+                else:
+                    near = r[2] - self._top <= self.band and bool(np.all(np.abs(np.array(r[:2]) - self._centre) <= self._reach))
                 modes.append((ContactMode.MAINTAIN if self._pressing else ContactMode.MAKE) if near else ContactMode.BREAK)
                 self._pressing = near
             lo, hi = self.bounds
