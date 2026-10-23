@@ -86,7 +86,7 @@ def build(world: Json) -> mujoco.MjModel:
         mass=float(s["mass_kg"]),
         friction=[float(s["friction"]), 0.005, 0.0001],
         priority=2,
-        solref=[float(s["solref_s"]), 1.0],  # soft: a sponge
+        solref=s.get("solref", [float(s["solref_s"]), 1.0]),  # soft: a sponge; [-stiffness N/m, -damping N s/m] gives the spring directly
     )
     sponge.add_site(name="pad", pos=[0, 0, half[2]])
     if "scrub_layer" in s:  # drawn only: the green scouring side

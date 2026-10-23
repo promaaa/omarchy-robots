@@ -31,6 +31,8 @@ CONDITIONS: dict[str, Json] = {
     "script + contact": {"policy": "script", "contact": True},
     # pi0.5 fine-tuned on the script's demonstrations (vla_demos.py): alone, or with S0 told where it presses.
     "student alone": {"policy": "pi05_droid", "contact": False},
+    # The control: alone, with S0's stiffness set to the contact part's (as scrub.py's "stiffness matched").
+    "student alone, matched": {"policy": "pi05_droid", "contact": False},
     "student + S0": {"policy": "pi05_droid", "contact": True, "contact_from": "flag"},
 }
 SHIFT_M = 0.03  # the plate moves by up to this much in x and y, per seed
@@ -48,13 +50,16 @@ def plate_at(seed: int) -> list[float]:
     return [round(float(centre[0] + shift[0]), 4), round(float(centre[1] + shift[1]), 4)]
 
 
-def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None, board_m: float | None = None) -> Json:
+def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None, board_m: float | None = None, world: Json | None = None) -> Json:
     over: Json = {
         "scenario": {"seed": seed, "s1": CONDITIONS[condition] | (s1 or {})},
         "world": {"plate": {"center": plate_at(seed)}, "objects": {"plate": {"x": plate_at(seed)[0]}}},
     }
     if board_m is not None:
         over["world"]["plate"]["board_m"] = board_m
+    over["world"] = config.merge(over["world"], world or {})  # e.g. a thinner sponge
+    if condition.endswith("matched"):
+        over["body"] = {"kinematics": {"impedance": {"stiffness": config.effective(SCENARIO)["scenario"]["s1"]["stiffness"]}}}
     r = run(SCENARIO, run_dir, overrides=over, record_s0=True)
     w: Any = r.world
     log, cfg = w.log(), r.cfg
@@ -111,7 +116,9 @@ def cell(condition: str, seed: int, run_dir: Path, s1: Json | None = None, board
     return out
 
 
-def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = None, boards: list[float] | None = None) -> Json:
+def experiment(
+    out: Path, seeds: int, conditions: list[str], s1: Json | None = None, boards: list[float] | None = None, world: Json | None = None
+) -> Json:
     """Every condition x board height (the world's when None) x seed (1..`seeds`); writes results.json as it goes."""
     out.mkdir(parents=True, exist_ok=True)
     cells = []
@@ -119,7 +126,7 @@ def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = N
     for condition, board, seed in [(c, b, s) for c in conditions for b in heights for s in range(1, seeds + 1)]:
         name = condition.replace(" + ", "+").replace(", ", "-").replace(" ", "-")
         name += "" if board is None else f"-b{round(board * 1000):02d}mm"
-        c = cell(condition, seed, out / f"{name}-s{seed}", s1, board)
+        c = cell(condition, seed, out / f"{name}-s{seed}", s1, board, world)
         print(json.dumps({k: c[k] for k in ("condition", "board_m", "seed", "outcome", "coverage", "force_peak_n")}), flush=True)
         cells.append(c)
         (out / "results.json").write_text(json.dumps({"label": LABEL, "scenario": SCENARIO, "cells": cells}, indent=1, default=str) + "\n")
@@ -129,5 +136,6 @@ def experiment(out: Path, seeds: int, conditions: list[str], s1: Json | None = N
 if __name__ == "__main__":
     import sys
 
-    boards = [float(b) for b in sys.argv[5].split(",")] if len(sys.argv) > 5 else None
-    experiment(Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None, boards)
+    boards = [float(b) for b in sys.argv[5].split(",")] if len(sys.argv) > 5 and sys.argv[5] else None
+    world = json.loads(sys.argv[6]) if len(sys.argv) > 6 else None
+    experiment(Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None, boards, world)
