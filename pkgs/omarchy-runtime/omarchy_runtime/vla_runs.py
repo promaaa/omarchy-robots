@@ -138,4 +138,6 @@ if __name__ == "__main__":
 
     boards = [float(b) for b in sys.argv[5].split(",")] if len(sys.argv) > 5 and sys.argv[5] else None
     world = json.loads(sys.argv[6]) if len(sys.argv) > 6 else None
-    experiment(Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None, boards, world)
+    experiment(
+        Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3].split(";"), json.loads(sys.argv[4]) if len(sys.argv) > 4 else None, boards, world
+    )
