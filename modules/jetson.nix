@@ -15,8 +15,18 @@ let
   cudaProbe = pkgs.writeShellScriptBin "omarchy-cuda-probe" ''
     exec "$(find ${cudaPackages.cuda-samples} -type f -name deviceQuery -perm -u+x | head -n 1)" "$@"
   '';
+  # NVIDIA replaced the sample data this nixpkgs pins: tensorrt_sample_data_20251106.zip
+  # answers 404. Its successor in the same release has the mnist/ files the probe reads.
+  tensorrtSamples = cudaPackages.tensorrt-samples.overrideAttrs (old: {
+    passthru = old.passthru // {
+      sample-data = pkgs.fetchzip {
+        url = "https://github.com/NVIDIA/TensorRT/releases/download/v10.14/tensorrt_sample_data_20260128.zip";
+        hash = "sha256-KSUKJsBaOSRHJKDp5SUzmfHNWlcEP1TwTgXja3nhVKI=";
+      };
+    };
+  });
   tensorrtProbe = pkgs.writeShellScriptBin "omarchy-tensorrt-probe" ''
-    exec ${lib.getExe cudaPackages.tensorrt-samples.passthru.testers.sample_onnx_mnist.default} "$@"
+    exec ${lib.getExe tensorrtSamples.passthru.testers.sample_onnx_mnist.default} "$@"
   '';
 
   # NVIDIA's licenses (CUDA, cuDNN, TensorRT...; all published on nvidia.com)
