@@ -5,6 +5,10 @@ Every release of Omarchy Robots, newest first. The same text is on each
 
 ## Unreleased
 
+### Fixes
+
+- Fix the firmware check that failed right after a flash on a Jetson: the robot now expects the firmware its flash script writes
+
 ## v0.0.3
 
 This release lets the robot ask its arm for more than a path. The motion policy (S1) can now tell the arm's controller (S0) to press at about 10 N, to keep contact, or to move an object, and a guard checks every command before it reaches the motors. It adds a simulated Franka Panda that scrubs a plate, and the first drivers for a real Franka Panda and an AgileX PiPER. Everything runs in simulation, in virtual machines, or against fake arms; no real arm has run it yet.
