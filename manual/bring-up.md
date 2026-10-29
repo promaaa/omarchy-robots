@@ -4,7 +4,7 @@ title: Bring-up on a Jetson
 permalink: /bring-up/
 ---
 
-> **Prepared, not yet run on hardware.** Every command here has been built or rehearsed on the `vm` board or an x86_64 host. Board facts (buttons, ports, USB IDs, part numbers) come from NVIDIA's developer kit guides, the Jetson Linux documentation and jetpack-nixos, and none has been checked against a physical board yet. If something below is wrong, it is the first thing to fix.
+> **Run on hardware once, on a Jetson AGX Orin developer kit.** For the other boards, every command here has been built or rehearsed on the `vm` board or an x86_64 host only. Board facts (buttons, ports, USB IDs, part numbers) come from NVIDIA's developer kit guides, the Jetson Linux documentation and jetpack-nixos; on the AGX Orin kit, the flashing port and the USB ID in recovery matched them. If something below is wrong, it is the first thing to fix.
 
 Bring-up has three parts: flash the board's firmware from your computer, install the system from a USB stick, then check it. Nothing is compiled on the robot.
 
@@ -41,7 +41,7 @@ nix build .#packages.aarch64-linux.installer -o installer -L
 
 For the GPU checks, set `gpu.enable = true` before this step. Otherwise `validate` will skip them.
 
-**2. Flash the firmware.** Board in recovery mode, flashing port to the host.
+**2. Flash the firmware.** Board in recovery mode, flashing port to the host. From a Linux running on the board, `sudo systemctl reboot --reboot-argument=forced-recovery` enters recovery mode without the buttons.
 
 ```sh
 lsusb | grep -i 0955:

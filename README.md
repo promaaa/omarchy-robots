@@ -116,7 +116,7 @@ timestamp, the kernel and every check with its data.
 
 > **Simulated.** Bodies, controller, policy and camera are Python simulations
 > running in simulated time, or on the wall clock as soft real-time Python.
-> Nothing is real-time and nothing has run on hardware. Every number says
+> Nothing is real-time and the runtime has not run on hardware. Every number says
 > whether it is simulated or wall-clock time, and where it was measured.
 
 `omarchy-runtime` is the control plane between a slow planner (S2), a policy
@@ -585,13 +585,13 @@ chunk corrector, inference trigger).
 Status levels, lowest to highest: **evaluates** (the system, its GPU variant,
 flash script and installer image evaluate, with the per-board assertions of
 `nix flake check`), **builds** (built on the host named below), **VM-tested**,
-**hardware-tested**. No target is hardware-tested yet.
+**hardware-tested**. Only `orin-agx-devkit` is hardware-tested.
 
 | Target (`board`) | Status | System closure | Built | Last verified |
 |---|---|---|---|---|
 | `vm` | VM-tested: boot, SSH, firewall, identity, validate; update and rollback across a reboot; installation onto a blank disk; the runbook rehearsed (installer, `nixos-rebuild --target-host`, rollback, cold boots); the runtime's reduced scenario set inside the VM, traces carrying its identity; the runtime on the wall clock with S2 in its own process, on the VM or on a second VM over an emulated network (`vm-s2-placement`) | 1.1 GiB; 1.33 GiB with `runtime.enable` (+230 MiB: Python 3, numpy and its BLAS) | system, VM, installer image (1.5 GiB) | 2026-10-06 |
 | `pc` | builds: system, installer image; install path VM-tested: the installer image onto an emulated NVMe drive, boot, validate. Not hardware-tested | 1.9 GiB (all redistributable firmware) | system, installer image (1.5 GiB) | 2026-10-04 |
-| `orin-agx-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation; the system also natively, on a GitHub arm64 runner (2026-10-02) | 2026-10-08 |
+| `orin-agx-devkit` | hardware-tested on one developer kit (module P3701-0005, 64 GB; a 1 TB NVMe drive), with `gpu.enable`: firmware flashed (36.5.2), installed from a USB stick, `validate` all PASS but `camera` SKIPPED (none connected), GPU, CUDA 12.6 and TensorRT included; update and rollback across reboots; boot 33 to 35 s, 18 s of it in the firmware | 1.21 GiB; 3.8 GiB with `gpu.enable` | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation; the system also natively, on a GitHub arm64 runner (2026-10-02); with `gpu.enable`, the system and installer image (2.66 GiB) on the development host (2026-10-27) | 2026-10-29 |
 | `orin-nx-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.73 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
 | `orin-nx-super-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.73 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
 | `orin-nano-devkit` | builds: system, installer image, flash script | 1.21 GiB | system, installer image (1.41 GiB), flash script (1.74 GiB closure), on the development host under aarch64 emulation | 2026-10-08 |
@@ -654,11 +654,12 @@ the lan profile.
 
 ## Bring-up runbook
 
-> **Prepared, not yet run on hardware.** Every command below has been built or
-> rehearsed on the vm board or an x86_64 host only. Board facts (buttons, ports,
-> USB IDs, part numbers) are taken from NVIDIA's developer kit user guides and
-> Jetson Linux r36.5/r39.2 documentation and from jetpack-nixos; none has been
-> checked against a physical board yet.
+> **Run on hardware once: a Jetson AGX Orin developer kit (2026-10-29).** For
+> the other boards, every command below has been built or rehearsed on the vm
+> board or an x86_64 host only. Board facts (buttons, ports, USB IDs, part
+> numbers) are taken from NVIDIA's developer kit user guides and Jetson Linux
+> r36.5/r39.2 documentation and from jetpack-nixos; on the AGX Orin kit, the
+> flashing port and the USB ID in recovery matched them.
 
 ### What to arrange beforehand
 
@@ -710,6 +711,8 @@ nix build .#flash -o flash -L
 nix build .#packages.aarch64-linux.installer -o installer -L
 
 # 2. Flash the QSPI firmware: board in recovery mode, flashing port to the host.
+#    From a Linux running on the board, without the buttons:
+#    sudo systemctl reboot --reboot-argument=forced-recovery
 lsusb | grep -i 0955:                        # the ID from the table
 sudo ./flash/bin/initrd-flash-orin-agx-devkit  # the script for your board (table)
 # It boots a small Linux on the board over USB, writes the firmware and reboots
@@ -775,6 +778,7 @@ closure over SSH; nothing is compiled on the robot.
 
 | Symptom | First command |
 |---|---|
+| The board boots its system instead of entering recovery mode | From a Linux running on the board: `sudo systemctl reboot --reboot-argument=forced-recovery`; otherwise the buttons again |
 | Firmware and L4T disagree: `jetson.l4t` fails, NVIDIA's logo instead of ours at power-on, or the board stops in UEFI or early in the kernel | `ota-check-firmware -b` (or `cat /sys/class/dmi/id/bios_version`); flash again with step 2 |
 | GPU device node missing: `gpu.device` fails | `lsmod \| grep nvgpu; ls -l /dev/nvgpu/igpu0; dmesg \| grep -i nvgpu` |
 | NVMe not seen by UEFI or by the installer | in the installer: `lsblk; dmesg \| grep -i nvme; lspci`; reseat the SSD in the Key M slot |

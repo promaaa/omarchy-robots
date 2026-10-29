@@ -11,7 +11,8 @@ manual (`manual/`) the user guide, CHANGELOG the releases.
 - **No em-dashes**, anywhere: code, comments, docs, commit messages, tags,
   release notes. Use a colon, a comma, parentheses or a new sentence.
 - Never claim a level you did not verify (evaluates, builds, VM-tested,
-  hardware-tested). No Jetson and no PC has run this yet.
+  hardware-tested). Of the boards, only a Jetson AGX Orin developer kit has
+  run the OS on hardware; no PC has, and the runtime has not.
 - Small, coherent commits that pass `nix flake check`, in Conventional
   Commits style; `flake.lock` updates in their own commits. Do not
   force-push or rewrite published history without asking.

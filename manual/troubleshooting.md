@@ -10,10 +10,11 @@ Start with the checklist. It names what is wrong more often than not:
 sudo omarchy-robot validate
 ```
 
-These are the failure points expected at bring-up. None has been met on hardware yet, so this list will change after the first board.
+These are the failure points expected at bring-up. The first board, an AGX Orin developer kit, met one more, now in the table: it booted its system instead of entering recovery mode.
 
 | Symptom | First command |
 |---|---|
+| The board boots its system instead of entering recovery mode | From a Linux running on the board: `sudo systemctl reboot --reboot-argument=forced-recovery`; otherwise the buttons again |
 | Firmware and L4T disagree: `jetson.l4t` fails, NVIDIA's logo instead of ours at power-on, or the board stops in UEFI or early in the kernel | `ota-check-firmware -b` (or `cat /sys/class/dmi/id/bios_version`), then flash again with step 2 of the [bring-up](../bring-up/) |
 | `gpu.device` fails, no GPU device node | `lsmod \| grep nvgpu; ls -l /dev/nvgpu/igpu0; dmesg \| grep -i nvgpu` |
 | The NVMe is not seen by UEFI or the installer | In the installer: `lsblk; dmesg \| grep -i nvme; lspci`. Reseat the SSD in the Key M slot |
