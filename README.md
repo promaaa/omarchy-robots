@@ -20,7 +20,10 @@ that names the exact system it ran on. **The robot is simulated** and nothing
 is real-time: the runtime runs in simulated time, or on the wall clock as soft
 real-time Python, with S2 in its process or in its own, on another machine.
 
-**Status:** v0.0.3 (milestone R6: intents with contact and object channels,
+**Status:** v0.1.0 runs on a Jetson AGX Orin developer kit: flashed,
+installed from a USB stick, checked with `validate` on hardware, and updated
+and rolled back across reboots. The rest is as in v0.0.3 (milestone R6:
+intents with contact and object channels,
 S0 split into a guard and a controller, failure attribution, contact intent
 on a simulated Franka Panda, S0 backends for the lab's Panda and PiPER
 tested against fakes, the fixes of an independent review of them, and S2's
@@ -29,9 +32,9 @@ simulation (MuJoCo), and the arms' backends against fakes only: the base
 system, the runtime's simulated scenarios (on a laptop and inside an Omarchy
 Robots VM), the runtime on the wall clock with S2 in its own process on a
 second VM over an emulated network (the S2 placement experiment), and the
-installation of a generic PC onto an emulated disk. The Jetson and pc
-targets build (system, installer image and, on a Jetson, flash script); none
-has run on hardware yet (see the [support matrix](#support-matrix)).
+installation of a generic PC onto an emulated disk. The other Jetson targets
+and pc build (system, installer image and, on a Jetson, flash script) but
+have not run on hardware yet (see the [support matrix](#support-matrix)).
 
 ## One file
 
@@ -828,10 +831,11 @@ to which component and how to extend the runtime.
 
 ## Versioning
 
-Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3. A new release
+Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3, v0.1.0. A new release
 comes only with a major feature: v0.0.1 is the OS from one file, v0.0.2 the
 runtime with the planner on another machine, v0.0.3 force and contact for
-the arm. The first board booted and validated on hardware takes v0.1.0. The validation report schema
+the arm, v0.1.0 the first board booted and validated on hardware (a Jetson
+AGX Orin developer kit). The validation report schema
 (`schema` in its JSON) and the runtime's trace schema (`trace_schema` in
 `run.json`) are versioned separately from releases; each change is named
 in the commit that makes it. Releases are source only: no images, no

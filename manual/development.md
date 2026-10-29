@@ -52,7 +52,7 @@ manual/              this manual
 
 ## Versions
 
-Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3. A new release comes only with a major feature. The first board booted and validated on hardware takes v0.1.0. The `validate` report schema and the runtime's trace schema are versioned separately. Each release's changes are in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md), and each change in detail in the commit history.
+Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3, v0.1.0. A new release comes only with a major feature. v0.1.0 is the first board booted and validated on hardware, a Jetson AGX Orin developer kit. The `validate` report schema and the runtime's trace schema are versioned separately. Each release's changes are in the [CHANGELOG](https://github.com/promaaa/omarchy-robots/blob/main/CHANGELOG.md), and each change in detail in the commit history.
 
 ## This manual
 
