@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 1
+SCHEMA = 2  # 2: adds the clocks check
 BUILD_JSON = "/etc/omarchy-robot/build.json"
 PROFILE = "/nix/var/nix/profiles/system"
 PASS, FAIL, SKIPPED, NOT_APPLICABLE = "PASS", "FAIL", "SKIPPED", "NOT_APPLICABLE"
@@ -282,12 +282,20 @@ def check_camera(s: System, b: Build) -> Result:
     return Result(PASS, ", ".join(f"/dev/{d}: {n}" for d, n in devices.items()), {"devices": devices})
 
 
-def check_power_mode(s: System, b: Build) -> Result:
+def nvpmodel_mode(s: System) -> tuple[int, str] | str:
+    """The power mode nvpmodel reports, as (ID, name), or why it could not tell."""
     code, out = s.run("nvpmodel", "-q")
     mode = re.search(r"NV Power Mode:\s*(.+)\n\s*(\d+)", out)
     if code != 0 or not mode:
-        return Result(FAIL, f"nvpmodel -q exited {code}: {tail(out)}")
-    name, number = mode.group(1).strip(), int(mode.group(2))
+        return f"nvpmodel -q exited {code}: {tail(out)}"
+    return int(mode.group(2)), mode.group(1).strip()
+
+
+def check_power_mode(s: System, b: Build) -> Result:
+    mode = nvpmodel_mode(s)
+    if isinstance(mode, str):
+        return Result(FAIL, mode)
+    number, name = mode
     want = b["robot"]["powerMode"]
     data = {"mode": number, "name": name, "configured": want}
     if want is None:
@@ -295,6 +303,100 @@ def check_power_mode(s: System, b: Build) -> Result:
     if number != want:
         return Result(FAIL, f"mode {number} ({name}), robot.nix sets {want}", data)
     return Result(PASS, f"mode {number} ({name}), as robot.nix sets", data)
+
+
+def nvpmodel_clocks(conf: str) -> tuple[dict[str, dict[str, str]], dict[int, tuple[str, dict[str, int]]]]:
+    """An nvpmodel.conf's clocks and modes: for each clock, the files its PARAM
+    section names (MAX_FREQ, FREQ_TABLE, and _KNEXT variants for newer
+    kernels); for each mode, its name and the MAX_FREQ it sets per clock."""
+    files: dict[str, dict[str, str]] = {}
+    modes: dict[int, tuple[str, dict[str, int]]] = {}
+    clock: str | None = None
+    mode: int | None = None
+    for raw in conf.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line.startswith("<"):
+            attrs = dict(re.findall(r"(\w+)=([^\s>]+)", line))
+            kind = (line.strip("<> ").split() or [""])[0]
+            clock = attrs.get("NAME") if kind == "PARAM" and attrs.get("TYPE") == "CLOCK" else None
+            mode = int(attrs["ID"]) if kind == "POWER_MODEL" else None
+            if clock is not None:
+                files[clock] = {}
+            if mode is not None:
+                modes[mode] = (attrs.get("NAME", "?"), {})
+            continue
+        words = line.split()
+        if clock is not None and len(words) == 2:
+            files[clock][words[0]] = words[1]
+        elif mode is not None and len(words) == 3 and words[1] == "MAX_FREQ" and words[0] in files:
+            modes[mode][1][words[0]] = int(words[2])
+    return files, modes
+
+
+def read_first(s: System, *paths: str | None) -> tuple[str, str] | None:
+    """The first of these files that can be read, and its stripped content."""
+    for p in paths:
+        text = s.read(p) if p else None
+        if p and text is not None:
+            return p, text.strip()
+    return None
+
+
+def mhz(path: str, value: int) -> str:
+    """A frequency read from `path`, in MHz: cpufreq files count kHz, the others Hz."""
+    return f"{value / (1e3 if '/cpufreq/' in path else 1e6):g} MHz"
+
+
+NVPMODEL_CONF = "/etc/nvpmodel.conf"
+# Current rates that sit elsewhere than next to the cap: the memory clock's, in the BPMP's debugfs (root only).
+CURRENT_RATE = {"EMC": "/sys/kernel/debug/bpmp/debug/clk/emc/rate"}
+
+
+def check_clocks(s: System, b: Build) -> Result:
+    """The power mode's clock caps, read back from the files nvpmodel wrote them
+    to. -1 in nvpmodel.conf means the clock's top frequency: the top of its
+    FREQ_TABLE, or nothing to compare for a clock without a table (EMC, the
+    memory clock). Current rates are recorded, not judged: they follow the load."""
+    mode = nvpmodel_mode(s)
+    if isinstance(mode, str):
+        return Result(FAIL, mode)
+    number, name = mode
+    conf = s.read(NVPMODEL_CONF)
+    if conf is None:
+        return Result(FAIL, f"{NVPMODEL_CONF} is missing")
+    files, modes = nvpmodel_clocks(conf)
+    if number not in modes or modes[number][0] != name:
+        return Result(FAIL, f"nvpmodel reports mode {number} ({name}), which {NVPMODEL_CONF} does not define")
+    if not modes[number][1]:
+        return Result(SKIPPED, f"mode {number} ({name}) caps no clock in {NVPMODEL_CONF}")
+    clocks: dict[str, dict[str, Any]] = {}
+    shown, wrong, unread = [], [], []
+    for clock, value in modes[number][1].items():
+        f = files[clock]
+        cap = read_first(s, f.get("MAX_FREQ"), f.get("MAX_FREQ_KNEXT"))
+        if cap is None or not cap[1].lstrip("-").isdigit():
+            unread.append(clock)
+            continue
+        path, observed = cap[0], int(cap[1])
+        table = (read_first(s, f.get("FREQ_TABLE"), f.get("FREQ_TABLE_KNEXT")) or ("", ""))[1].split()
+        want = value if value != -1 else max((int(t) for t in table if t.isdigit()), default=None)
+        folder = path.rsplit("/", 1)[0]
+        now = read_first(s, CURRENT_RATE.get(clock), f"{folder}/scaling_cur_freq", f"{folder}/cur_freq")
+        current = (now[0], int(now[1])) if now and now[1].isdigit() else None
+        clocks[clock] = {"cap_file": path, "mode_value": value, "expected": want, "cap": observed,
+                         "current_file": current and current[0], "current": current and current[1]}
+        # ponytail: a cap lowered by thermal throttling would read as not applied; tell them apart if a hot board shows it
+        if want is not None and observed != want:
+            wrong.append(f"{clock} cap {mhz(path, observed)}, the mode sets {mhz(path, want)}")
+        shown.append(f"{clock} {mhz(path, observed) if want is not None else 'no cap'}"
+                     + (f" (current {mhz(*current)})" if current else ""))
+    data = {"mode": number, "name": name, "clocks": clocks}
+    warnings = [f"no readable cap file for {', '.join(unread)}: not checked"] if unread else []
+    if all(c["expected"] is None for c in clocks.values()):
+        return Result(FAIL, f"mode {number} ({name}): no clock cap could be compared", data, warnings)
+    if wrong:
+        return Result(FAIL, f"mode {number} ({name}): " + "; ".join(wrong), data, warnings)
+    return Result(PASS, f"mode {number} ({name}): " + ", ".join(shown), data, warnings)
 
 
 def check_thermal(s: System, b: Build) -> Result:
@@ -321,6 +423,7 @@ CHECKS: list[tuple[str, str, bool, Callable[[System, Build], Result]]] = [
     ("tensorrt.runtime", "TensorRT sample_onnx_mnist runs", True, check_tensorrt),
     ("camera", "V4L2 camera devices", True, check_camera),
     ("power.mode", "nvpmodel power mode matches robot.nix", True, check_power_mode),
+    ("clocks", "the power mode's clock caps are applied; current rates", True, check_clocks),
     ("thermal", "thermal zones readable", True, check_thermal),
 ]
 

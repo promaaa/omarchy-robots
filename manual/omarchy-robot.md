@@ -42,9 +42,12 @@ A check that did not run is never a `PASS`.
 | `tensorrt.runtime` | TensorRT `sample_onnx_mnist` passes | Jetson, `gpu.enable` |
 | `camera` | V4L2 devices are present; `SKIPPED` when none is connected | Jetson |
 | `power.mode` | `nvpmodel -q` matches `power.mode` | Jetson |
+| `clocks` | the clock caps of the reported power mode are the ones in force: each is read back from the file `/etc/nvpmodel.conf` names for it; the current CPU, GPU and memory clock rates are recorded, not judged, since they follow the load | Jetson |
 | `thermal` | thermal zones are readable; temperatures recorded | Jetson |
 
-`--json` prints a report with a `schema` version (currently 1), the build identity, a timestamp, the kernel, and every check with its data. Each schema change is named in the commit that makes it.
+A power mode caps the frequency of the CPU, GPU and other clocks, and in some modes the memory clock's (on the AGX Orin with L4T 36.5.2, only `MODE_15W` caps it). `power.mode` says which mode is selected; `clocks` says whether its caps are in force. A cap of `-1` in `/etc/nvpmodel.conf` means the clock's highest frequency: `clocks` compares it with the top of the clock's frequency table, and records a clock without a table (the memory clock) without comparing it.
+
+`--json` prints a report with a `schema` version (currently 2), the build identity, a timestamp, the kernel, and every check with its data. Each schema change is named in the commit that makes it. Schema 2 adds `clocks`.
 
 ## update
 

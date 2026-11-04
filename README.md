@@ -92,7 +92,7 @@ the same (the repository is private: Nix needs a GitHub token, for example
 
 `validate` reports each check as `PASS`, `FAIL`, `SKIPPED` (with the reason)
 or `NOT_APPLICABLE`; a check that did not run is never a `PASS`. The JSON
-report has a `schema` version (currently 1), the build identity, the
+report has a `schema` version (currently 2), the build identity, the
 timestamp, the kernel and every check with its data.
 
 | Check | Measures | Applies to |
@@ -110,6 +110,7 @@ timestamp, the kernel and every check with its data.
 | `tensorrt.runtime` | TensorRT `sample_onnx_mnist` passes | Jetson, `gpu.enable` |
 | `camera` | V4L2 devices; `SKIPPED` when none is connected | Jetson |
 | `power.mode` | `nvpmodel -q` against `power.mode` | Jetson |
+| `clocks` | the clock caps of the reported power mode, read back from the files `/etc/nvpmodel.conf` names; current CPU, GPU and memory clock rates recorded | Jetson |
 | `thermal` | thermal zones readable; temperatures recorded | Jetson |
 
 ## Runtime

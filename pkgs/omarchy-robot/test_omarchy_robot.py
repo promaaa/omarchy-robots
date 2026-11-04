@@ -95,6 +95,16 @@ class Fake(o.System):
                 "/sys/class/thermal/thermal_zone0/temp": "45250\n",
                 "/sys/class/thermal/thermal_zone1/type": "gpu-thermal\n",
                 "/sys/class/thermal/thermal_zone1/temp": "44000\n",
+                # MAXN's caps, read back; no DLA cap file (its driver absent)
+                o.NVPMODEL_CONF: fixture("nvpmodel.conf"),
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies": "729600 1113600 1728000 2201600\n",
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq": "2201600\n",
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq": "1113600\n",
+                "/sys/devices/platform/17000000.gpu/devfreq_dev/available_frequencies": "306000000 612000000 1300500000\n",
+                "/sys/devices/platform/17000000.gpu/devfreq_dev/max_freq": "1300500000\n",
+                "/sys/devices/platform/17000000.gpu/devfreq_dev/cur_freq": "306000000\n",
+                "/sys/kernel/nvpmodel_clk_cap/emc": "0\n",
+                "/sys/kernel/debug/bpmp/debug/clk/emc/rate": "3199000000\n",
             })
             self.commands.update({
                 "ota-check-firmware -b": (0, fixture("ota-check-firmware.txt")),
@@ -186,6 +196,45 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(result["status"], o.FAIL)
         self.assertEqual(result["data"], {"mode": 0, "name": "MAXN", "configured": 2})
 
+    def test_clocks_read_back_the_mode_caps(self) -> None:
+        result = check(o.validate(Fake(build("orin-agx-devkit"))), "clocks")
+        self.assertEqual(result["status"], o.PASS, result["detail"])
+        clocks = result["data"]["clocks"]
+        self.assertEqual(clocks["GPU"]["expected"], 1300500000)  # MAXN's -1: the top of the GPU's table
+        self.assertEqual(clocks["GPU"]["cap_file"], "/sys/devices/platform/17000000.gpu/devfreq_dev/max_freq")  # the _KNEXT file
+        self.assertEqual((clocks["CPU_A78_0"]["current"], clocks["GPU"]["current"]), (1113600, 306000000))
+        self.assertEqual((clocks["EMC"]["expected"], clocks["EMC"]["current"]), (None, 3199000000))  # no table: recorded, not judged
+        self.assertIn("EMC no cap (current 3199 MHz)", result["detail"])
+        self.assertEqual(result["warnings"], ["no readable cap file for DLA0_CORE: not checked"])
+
+    def test_clock_cap_not_applied_fails(self) -> None:
+        mode_30w = {"nvpmodel -q": (0, "NV Power Mode: MODE_30W\n2\n")}
+        caps = {
+            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq": "1728000\n",
+            "/sys/devices/platform/17000000.gpu/devfreq_dev/max_freq": "612000000\n",
+        }
+        applied = check(o.validate(Fake(build("orin-agx-devkit"), files=caps, commands=mode_30w)), "clocks")
+        self.assertEqual(applied["status"], o.PASS, applied["detail"])
+        self.assertIn("mode 2 (MODE_30W): CPU_A78_0 1728 MHz (current 1113.6 MHz), GPU 612 MHz", applied["detail"])
+        left = check(o.validate(Fake(build("orin-agx-devkit"), commands=mode_30w)), "clocks")  # MAXN's caps still in place
+        self.assertEqual(left["status"], o.FAIL)
+        self.assertIn("GPU cap 1300.5 MHz, the mode sets 612 MHz", left["detail"])
+
+    def test_clocks_need_the_conf_and_its_mode(self) -> None:
+        fake = Fake(build("orin-agx-devkit"))
+        fake.path(o.NVPMODEL_CONF).unlink()
+        self.assertEqual(check(o.validate(fake), "clocks")["detail"], f"{o.NVPMODEL_CONF} is missing")
+        other = Fake(build("orin-agx-devkit"), commands={"nvpmodel -q": (0, "NV Power Mode: MODE_50W\n3\n")})
+        self.assertEqual(check(o.validate(other), "clocks")["status"], o.FAIL)
+        nothing = {
+            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq": "",
+            "/sys/devices/platform/17000000.gpu/devfreq_dev/max_freq": "",
+        }
+        unread = check(o.validate(Fake(build("orin-agx-devkit"), files=nothing)), "clocks")
+        self.assertEqual(unread["status"], o.FAIL)  # only EMC was read, and it has no cap to compare: nothing was checked
+        self.assertEqual(unread["detail"], "mode 0 (MAXN): no clock cap could be compared")
+        self.assertEqual(unread["warnings"], ["no readable cap file for CPU_A78_0, GPU, DLA0_CORE: not checked"])
+
     def test_cuda_failure_and_wrong_capability_fail(self) -> None:
         failing = {"omarchy-cuda-probe": (1, "cudaGetDeviceCount returned 100\nResult = FAIL\n")}
         broken = Fake(build("orin-agx-devkit", gpu=True), commands=failing)
@@ -254,7 +303,7 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(o.report_errors(json.loads(json.dumps(report))), [])
         self.assertTrue(o.report_errors([]))
         damages: list[Callable[[dict[str, Any]], object]] = [
-            lambda r: r.update(schema=2),
+            lambda r: r.update(schema=o.SCHEMA + 1),
             lambda r: r["checks"].pop(),
             lambda r: r["checks"][0].update(status="WARN"),
             lambda r: r["checks"][1].pop("detail"),

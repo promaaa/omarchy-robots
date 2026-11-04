@@ -5,6 +5,10 @@ Every release of Omarchy Robots, newest first. The same text is on each
 
 ## Unreleased
 
+### Improvements
+
+- Add a `clocks` check to `validate`: it reads back the clock limits of the power mode, and records the current CPU, GPU and memory clock rates (the report is now schema 2)
+
 ### Fixes
 
 - Fix the firmware check that failed right after a flash on a Jetson: the robot now expects the firmware its flash script writes
