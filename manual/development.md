@@ -56,7 +56,7 @@ Before 1.0, releases count up: v0.0.1, v0.0.2, v0.0.3, v0.1.0. A new release com
 
 ## This manual
 
-The pages are Markdown in `manual/`, one file per chapter, listed in order in `manual/_data/chapters.yml`. A push to `main` that touches `manual/` publishes it to GitHub Pages. When a change in the code makes a page wrong, fix the page in the same commit.
+The pages are Markdown in `manual/`, one file per chapter, listed in order in `manual/_data/chapters.yml`. The workflow `pages.yml` publishes them to GitHub Pages. It starts only by hand, with `gh workflow run pages.yml --ref main`, never on a push. When a change in the code makes a page wrong, fix the page in the same commit.
 
 ## License
 
