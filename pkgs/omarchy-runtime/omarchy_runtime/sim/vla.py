@@ -95,7 +95,13 @@ class Pi05Wiper:
             raise ConfigError(f"scenario s1: the VLA wiper needs {e}") from e
         from openpi_client import websocket_client_policy
 
-        self.client = websocket_client_policy.WebsocketClientPolicy(host, int(port))
+        for attempt in range(6):  # a busy server answers the handshake late (20 runs on one policy server)
+            try:
+                self.client = websocket_client_policy.WebsocketClientPolicy(host, int(port))
+                break
+            except TimeoutError:
+                if attempt == 5:
+                    raise
         self.world = world
         self.cameras = Cameras(world.model, world.data)
         self.fk = mujoco.MjData(world.model)  # S1's own copy, for forward kinematics only
