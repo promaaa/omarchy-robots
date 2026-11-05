@@ -12,7 +12,7 @@ to slide, are added. Physics steps every millisecond.
 Ground truth, read only by the sensors here and the evaluation harness:
 the plate's pose; the dirt, a grid of cells on the plate, a cell clean once
 the sponge has pressed on it with at least `f_min_n` for `t_min_s` in all;
-the true contact force. The runtime never sees this module. Development
+the true contact force. A clean cell disappears from every camera. The runtime never sees this module. Development
 tools only (`omarchy-runtime-tools`): the robot's package has no MuJoCo.
 """
 
@@ -272,6 +272,7 @@ class PandaWorld:
         self.data.qpos[: self.n] = body.home
         mujoco.mj_forward(m, self.data)
         self.cells = cells(world)
+        self.dirt = np.array([m.geom(f"dirt{n}").id for n in range(len(self.cells))])  # drawn: hidden once clean
         self.thick = float(world["plate"]["thickness"])
         self.half = _get(world["sponge"], "half")
         d = world["dirt"]
@@ -418,6 +419,8 @@ class PandaWorld:
             self.dwell[under] += seconds(STEP)
             done = (self.dwell >= self.t_min) & (self.clean_at < 0)
             self.clean_at[done] = now
+            if done.any():  # every camera now sees the cell clean (the demonstrations' frames were drawn so)
+                self.model.geom_rgba[self.dirt[done], 3] = 0.0
         if normal > PRESSED_N and len(self.violations) < 1000:
             self.violations.append((now, f"the sponge pressed {normal:.1f} N on the plate, more than {PRESSED_N:.0f} N"))
         q = d.qpos[: self.n]
