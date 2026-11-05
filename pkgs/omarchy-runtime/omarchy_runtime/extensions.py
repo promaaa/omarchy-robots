@@ -141,6 +141,23 @@ class RetryElsewhere:
         return RetryOnce().decide(goal, summary, belief)
 
 
+class RetryTwice:
+    """Retry at most twice, unchanged, while the verifier sees the goal
+    violated (a partly wiped plate: the next try starts from what is left);
+    give up after anything else."""
+
+    id = "retry_twice"
+    version = "1"
+
+    def decide(self, goal: Goal, summary: Json, belief: Json) -> Retry | GiveUp:
+        if summary["category"] != "VERIFICATION_FAILED":
+            return GiveUp(f"no retry after {summary['outcome']}/{summary['category']}")
+        tries = int(summary["conditioning"].get("tries", 0))
+        if tries >= 2:
+            return GiveUp("already retried twice")
+        return Retry(goal, {"tries": tries + 1}, f"verification failed ({summary['verdict']['reason']}): try {tries + 2} of 3")
+
+
 class NoRetry:
     """Never retry: one execution per goal (the scrubbing experiment compares first attempts)."""
 
@@ -364,7 +381,12 @@ RETREAT_STIFFNESS = (1000.0, 1000.0, 200.0, 50.0, 50.0, 50.0)
 
 FILTERS: Mapping[str, Callable[[], ObservationFilter]] = {"identity": IdentityFilter}
 VERIFIERS: Mapping[str, Callable[[], Verifier]] = {"geometric": GeometricVerifier, "coverage": CoverageVerifier}
-RECOVERY: Mapping[str, Callable[[], RecoveryPolicy]] = {"retry_once": RetryOnce, "retry_elsewhere": RetryElsewhere, "give_up": NoRetry}
+RECOVERY: Mapping[str, Callable[[], RecoveryPolicy]] = {
+    "retry_once": RetryOnce,
+    "retry_twice": RetryTwice,
+    "retry_elsewhere": RetryElsewhere,
+    "give_up": NoRetry,
+}
 # Robot-side S1 extensions take their parameter table, [s1_host] in runtime.toml.
 CORRECTORS: Mapping[str, Callable[[Json], ChunkCorrector]] = {
     "none": lambda p: NoCorrection(),
