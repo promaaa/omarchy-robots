@@ -208,7 +208,11 @@ class Memory:
         self.cost = float(cfg.get("cost", 0.03))  # with "vpi": what one task of S1 costs, in share of the plate
         self.prior_sd = float(cfg.get("prior_sd", 0.15))  # with "vpi": the habit's uncertainty after one teacher episode
         self.obs_sd = float(cfg.get("obs_sd", 0.05))  # with "vpi": the spread of one task's outcome
-        self.data: Json = json.loads(path.read_text()) if path.exists() else {"episodes": [], "programs": [], "model": None, "demoted": 0}
+        self.data: Json = json.loads(path.read_text()) if path.exists() else {"episodes": [], "programs": [], "models": {}, "demoted": 0}
+        # One contact model per context (the tool or surface the task names), as the brain's many paired models chosen
+        # by context (Wolpert and Kawato's modules, note 162): learning one does not overwrite another. With
+        # `shared_model`, every context writes the same model (the ablation: interference between contexts).
+        self.context = "shared" if cfg.get("shared_model") else str(cfg.get("context", "default"))
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -216,7 +220,8 @@ class Memory:
         tmp.replace(self.path)
 
     def model(self, half: float) -> ContactModel:
-        m = self.data.get("model")
+        """This context's contact model, a new one if the context is new."""
+        m = self.data.setdefault("models", {}).get(self.context)
         return ContactModel.from_json(m) if m else ContactModel(half)
 
     def program(self, half: float, margin: float, spacing: float) -> Program:
@@ -278,7 +283,7 @@ class Memory:
         version from what it saw: the cells it observed clean after the
         teacher's run, the cells it observed dirty after its own run."""
         self.data["episodes"].append(episode)
-        self.data["model"] = model.to_json()
+        self.data.setdefault("models", {})[self.context] = model.to_json()
         kr = np.array(episode["kr_clean"], dtype=bool)
         changed = False
         if episode["driver"] == "teacher":

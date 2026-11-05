@@ -69,6 +69,7 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
         "kr_coverage": float(kr.mean()),
         "coverage": m["coverage"],
         "s1_calls": learned["s1_calls"],
+        "context": memory.context,
     }
     after = memory.consolidate(record, program, model, learning.cells_of(cfg["world"]), limit=half - 0.03)
     return (
@@ -86,6 +87,7 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
             "teaching_mm": 1000 * float(teaching[0] / teaching[1]) if teaching[1] > 0 else None,  # mean |feedback offset| in steady contact
             "steady_s": float(teaching[1]),
             "model_learned_s": learned["model_learned_s"],
+            "context": memory.context,
         }
     )
 
