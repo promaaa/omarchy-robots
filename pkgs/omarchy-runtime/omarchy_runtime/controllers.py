@@ -69,13 +69,15 @@ class CartesianImpedance:
     deeper while it presses that hard, and a measured force above the bound
     brings the set-point back at once to where the spring gives the target
     force (a reflex, without the `approach` rate limit); in MAINTAIN it follows
-    the force error faster (`FOLLOW`), so a surface that moves stays pressed.
+    the force error faster (`FOLLOW`, `DEEPER`: it backs off faster than it
+    presses deeper), so a surface that moves stays pressed.
     Without `limit`, the force is regulated at `approach` speed only, as
     before 5 November 2026."""
 
     APPROACH = 0.03  # m/s: the most the force offset moves
     GAIN = 0.004  # m per N s: how fast it follows the force error
-    FOLLOW = (0.2, 0.02)  # with `limit`, in MAINTAIN: m/s and m per N s: a surface that moves is followed
+    FOLLOW = (0.2, 0.01)  # with `limit`, in MAINTAIN: m/s and m per N s: a surface that moves is followed
+    DEEPER = 0.1  # with `limit`, in MAINTAIN: m/s, the most it presses deeper (it backs off at FOLLOW's rate)
     REACH = 0.04  # m: the most it may move from the motion's set-point
     INERTIA = (2.0, 2.0, 2.0, 0.05, 0.05, 0.05)  # kg, kg m^2: for critical damping
     NULL = (10.0, 2.0)  # Nm/rad, Nm s/rad: the null-space posture spring and damper
@@ -137,7 +139,8 @@ class CartesianImpedance:
             else:
                 wanted = float(sample(c.target, c.timing, now)[0]) * self._press(intent, scene, now)
                 rate, gain = self.FOLLOW if self.limit and mode is ContactMode.MAINTAIN else (self.APPROACH, self.GAIN)
-                step = float(np.clip(gain * (measured - wanted), -rate, rate)) * dt
+                deeper = self.DEEPER if self.limit and mode is ContactMode.MAINTAIN else rate
+                step = float(np.clip(gain * (measured - wanted), -deeper, rate)) * dt
                 if measured > upper:  # the reflex: back to the target force's set-point, now
                     self.reflexes += 1
                     step = max(step, -wanted / kn - gap - self._offset)
