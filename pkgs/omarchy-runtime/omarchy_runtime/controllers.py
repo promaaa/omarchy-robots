@@ -82,13 +82,17 @@ class CartesianImpedance:
     contact, per cell of the surface), on a vertical contact normal, the
     set-point along the normal is the motion's, plus a feedforward from the
     model's prediction (the height that gives the target force there,
-    reached at `FF_RATE` at most), plus the feedback offset above. While the
+    reached at `FF_RATE` at most; going down, at `APPROACH` in MAKE and
+    within `SLOW_M` of the expected surface, so the pad never meets the
+    surface faster than without a model), plus the feedback offset above. While the
     contact is steady in MAINTAIN, the model learns where the pad rests,
     and what it learns moves from the feedback offset into the feedforward,
     with no jump in the set-point: feedback-error learning, so the
     correction the feedback must hold shrinks as the model learns. Before
-    contact, the feedback offset goes no deeper while the pad is still above
-    the predicted surface: the feedforward brings it there. Touching while
+    contact, the feedback offset goes no deeper while the pad is still more
+    than `ABOVE_M` above the set-point: the feedforward brings it there
+    (at the set-point without contact, the surface is lower than predicted,
+    and the feedback searches deeper, as without a model). Touching while
     still above the predicted surface, the feedforward goes no deeper: the
     feedback regulates the force, and the model learns the new height. `teaching` sums
     the feedback offset's size over steady contact (m s, and s), with or
@@ -106,6 +110,7 @@ class CartesianImpedance:
     STEADY_N = 3.0  # N: contact this close to the target force is steady, and teaches the cerebellum
     TOUCH_N = 1.0  # N: below this, the pad is not touching
     ABOVE_M = 0.005  # m: above the predicted surface by more than this, the feedback waits before contact, the feedforward after
+    SLOW_M = 0.01  # m: closer than this above the predicted surface, the feedforward descends at APPROACH only
 
     def __init__(
         self,
@@ -193,9 +198,15 @@ class CartesianImpedance:
                         ff += learned
                     if early:
                         ff = max(ff, self._ff)  # touching above where the model expects the surface: no deeper
-                    self._ff += float(np.clip(ff - self._ff, -self.FF_RATE * dt, self.FF_RATE * dt))
-                    if rest is not None and measured < self.TOUCH_N and float(x[2]) > rest - self.ABOVE_M:
-                        step = max(step, 0.0)  # not touching yet, above the predicted surface: the feedforward goes
+                    near = rest is not None and float(x[2]) < rest + self.SLOW_M  # close to the expected surface: slow down
+                    down = self.APPROACH if near or mode is ContactMode.MAKE else self.FF_RATE  # never a faster approach
+                    self._ff += float(np.clip(ff - self._ff, -down * dt, self.FF_RATE * dt))
+                    if (
+                        rest is not None
+                        and measured < self.TOUCH_N
+                        and float(x[2]) > float(target[2]) + self._ff + self._offset + self.ABOVE_M
+                    ):
+                        step = max(step, 0.0)  # not touching, still on the way to the feedforward's set-point: it goes
                 if measured > upper:  # the reflex: back to the target force's set-point, now
                     self.reflexes += 1
                     step = max(step, -wanted / kn - gap - self._ff - self._offset)

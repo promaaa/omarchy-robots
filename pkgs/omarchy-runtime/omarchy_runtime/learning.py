@@ -28,6 +28,7 @@ clean(surface) that takes Cartesian intents (sim/wipe.py, sim/vla.py).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from collections.abc import Callable, Mapping
@@ -418,6 +419,7 @@ class Arbiter:
         self._args: tuple[Goal, Json, BodySpec, Mapping[str, Any]] | None = None
         self._t0: Ns | None = None
         self._report: Report | None = None
+        self._sent = 0
         self.top = float("nan")
         self.supervisor = Supervisor(self.cfg, float(params["force_max_n"]))
 
@@ -475,7 +477,10 @@ class Arbiter:
         r = self.driver.report()
         if r is not None:
             self._report = r
-        return chunk  # type: ignore[return-value]
+        if not isinstance(chunk, IntentChunk):
+            return None
+        self._sent += 1  # one sequence for both drivers: S0 drops a chunk older than the last it took
+        return dataclasses.replace(chunk, seq=self._sent)
 
     def report(self) -> Report | None:
         return self._report
