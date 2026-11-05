@@ -50,7 +50,7 @@ def cell(scenario: str, seed: int, run_dir: Path, overrides: Json | None = None)
         "attempts": len(r.summaries),
         "outcomes": [s.get("outcome") for s in r.summaries],
         "categories": [s.get("category") for s in r.summaries],
-        "claims": [s.get("claim") and s["claim"].get("kind") for s in r.summaries],
+        "claims": [s.get("claim") and s["claim"].get("claim") for s in r.summaries],
         "verdicts": [s.get("verdict") and s["verdict"].get("kind") for s in r.summaries],
         "reasons": [s.get("verdict") and s["verdict"].get("reason") for s in r.summaries],
         "truths": [None if t is None else bool(t) for t in r.truths],
