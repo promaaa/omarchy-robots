@@ -149,10 +149,12 @@ def build(world: Json) -> mujoco.MjModel:
     top = float(t["center"][2] + t["half"][2])
     board = float(p.get("board_m", 0.0))  # a cutting board under the plate: the plate's height changes with it
     if board > 0:
-        w.add_geom(
+        # With `heave` ([amplitude m, period s]), the board rises and falls (a mocap body), the plate on it.
+        parent = w.add_body(name="board", mocap=True, pos=[*p["center"], top + board / 2]) if "heave" in p else w
+        parent.add_geom(
             name="board",
             type=mujoco.mjtGeom.mjGEOM_BOX,
-            pos=[*p["center"], top + board / 2],
+            pos=[0, 0, 0] if "heave" in p else [*p["center"], top + board / 2],
             size=[side + 0.03, side + 0.03, board / 2],
             rgba=look.get("board", [0.78, 0.66, 0.5, 1]),
             friction=[float(p["friction"]), 0.005, 0.0001],
@@ -290,12 +292,18 @@ class PandaWorld:
         self._stepped1 = False
         self._last: Ns = 0
         self.plate0 = self.plate_pose()
+        heave = world["plate"].get("heave")
+        self.heave = (float(heave[0]), float(heave[1])) if heave else None
+        if self.heave is not None:
+            self.board = int(m.body("board").mocapid[0])
+            self.board_z0 = float(self.data.mocap_pos[self.board][2])
         self.q = list(body.home)  # for the planar-world duck type: the arm's joints
         self.ticks = 0
         self.log_t = np.zeros(capacity, dtype=np.int64)
         self.log_qpos = np.zeros((capacity, m.nq))
         self.log_force = np.zeros(capacity)  # true normal force, N
         self.log_ee = np.zeros((capacity, 3))
+        self.log_plate_z = np.zeros(capacity)  # the plate's centre height: it moves when the board heaves
 
     # Ground truth.
 
@@ -362,6 +370,9 @@ class PandaWorld:
         self.data.ctrl[: self.n] = command * scale
         steps = (now - self._last) // STEP
         for k in range(steps):
+            if self.heave is not None:  # the board's height at the end of this step
+                amplitude, period = self.heave
+                self.data.mocap_pos[self.board][2] = self.board_z0 + amplitude * np.sin(2 * np.pi * seconds(self._last + STEP) / period)
             if k == 0:
                 self._step1()
                 mujoco.mj_step2(self.model, self.data)
@@ -379,6 +390,7 @@ class PandaWorld:
                 self.normal,
                 self.data.site_xpos[self.pad],
             )
+            self.log_plate_z[i] = self.data.qpos[self.plate_qpos + 2]
         self.ticks += 1
 
     def _contact(self, now: Ns) -> None:
@@ -421,6 +433,7 @@ class PandaWorld:
             "qpos": self.log_qpos[:n],
             "force": self.log_force[:n],
             "ee": self.log_ee[:n],
+            "plate_z": self.log_plate_z[:n],
             "clean_at": self.clean_at,
             "cells": self.cells,
         }
