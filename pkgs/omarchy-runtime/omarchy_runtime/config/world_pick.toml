@@ -1,0 +1,90 @@
+# A table, a cup and a drying rack, for in(cup_1, drying_rack) on the lab's
+# arms in MuJoCo (sim/mjarm.py). Metres, the robot's base frame: x forward,
+# y to the left, z up; the table's top is z = 0, level with the robot's base.
+# The runtime's belief gets the geometry of surfaces and regions and the size
+# of objects; the cups' positions here are the simulator's ground truth.
+
+[table]
+center = [0.3, 0.0, -0.375]
+half = [0.55, 0.75, 0.375]
+
+[cups.cup_1]
+at = [0.30, -0.13]
+radius = 0.024
+height = 0.085
+mass_kg = 0.12
+friction = 1.2
+rgba = [0.15, 0.4, 0.62, 1.0]
+
+[rack]  # a dish rack: a base and rails, open at the top
+center = [0.30, 0.16]
+half = [0.075, 0.06, 0.025]
+rgba = [0.93, 0.93, 0.91, 1.0]
+
+[sensor]  # the check's camera: depth and segmentation rendered from the scene (sim/mjarm.py CameraSensor)
+source = "sim.rgbd"
+camera = "lab"
+width = 640
+height = 360
+noise_m = 0.002
+confidence = 0.95
+min_pixels = 60
+
+[cameras.lab]  # as the lab's ZED camera: across the table, looking down at it (fovy of a ZED 2i at HD720)
+pos = [1.05, -0.08, 0.6]
+target = [0.3, 0.02, 0.0]
+fovy = 68.0
+
+[cameras.studio]  # for the videos only: never seen by the runtime
+pos = [1.05, -0.95, 0.66]
+target = [0.32, 0.02, 0.1]
+fovy = 40.0
+
+[cameras.front]  # for the videos only
+pos = [1.25, 0.0, 0.55]
+target = [0.3, 0.0, 0.12]
+fovy = 40.0
+
+[look]  # drawn only
+floor_z = -0.75
+floor = [0.3, 0.3, 0.32, 1.0]
+table = [0.56, 0.47, 0.38, 1.0]
+props = [
+  [[0.0, 0.0, -0.375], [0.14, 0.14, 0.374], [0.18, 0.18, 0.2, 1.0]],
+  [[1.9, 0.0, 0.5], [0.02, 2.5, 1.25], [0.86, 0.84, 0.8, 1.0]],
+  [[0.4, -1.9, 0.5], [2.0, 0.02, 1.25], [0.8, 0.82, 0.84, 1.0]],
+  [[-1.2, 0.0, 0.5], [0.02, 2.5, 1.25], [0.82, 0.82, 0.8, 1.0]],
+  [[0.4, 1.9, 0.5], [2.0, 0.02, 1.25], [0.8, 0.82, 0.84, 1.0]],
+]
+textures = { table = ["wood_table_001.png", [3, 3]], floor = ["concrete_floor_02.png", [4, 4]], walls = ["painted_plaster_wall.png", [1, 1]] }
+
+[objects.cup_1]
+width = 0.048
+height = 0.085
+
+[surfaces.table]
+x0 = -0.25
+x1 = 0.85
+z = 0.0
+
+[regions.drying_rack]  # the rack's inside
+x0 = 0.225
+x1 = 0.375
+y0 = 0.1
+y1 = 0.22
+z0 = 0.0
+z1 = 0.075  # a cup rests there with its middle at about 5 cm: higher is held, or stuck
+
+[s0]
+late_after_periods = 1.5
+
+[rates_hz]  # simulated
+s0 = 1000
+s1 = 20
+supervisor = 20
+observation = 10
+s2 = 10
+
+[wall_rates_hz]
+s0 = 200
+link = 1000

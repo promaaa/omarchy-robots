@@ -42,3 +42,10 @@ implementation = "wipe.panda"
 version = "1"
 bodies = ["panda", "panda_droid"]
 priority = 10
+
+[[bindings]]  # the lab's arms in MuJoCo (sim/mjarm.py): one scripted picker for every arm, Cartesian poses and a gripper
+capability = "place_in"
+implementation = "pick_place.cartesian"
+version = "1"
+bodies = ["panda_lab", "piper_lab"]
+priority = 10

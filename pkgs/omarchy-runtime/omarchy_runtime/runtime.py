@@ -187,7 +187,7 @@ def _unmet(cap: Capability, args: Sequence[str], belief: WorldState, body: BodyS
             unmet.append(f"{entity} not observed with confidence since t={since} ns")
         elif kind == "reachable":
             if region is not None:
-                x0, x1, z0, z1 = body.workspace
+                x0, x1, z0, z1 = body.workspace[:2] + body.workspace[-2:]  # x and z, in 2D and 3D
                 if region.x1 < x0 or region.x0 > x1 or region.z1 < z0 or region.z0 > z1:
                     unmet.append(f"{entity} is outside the workspace of {body.id}")
             elif e is None:

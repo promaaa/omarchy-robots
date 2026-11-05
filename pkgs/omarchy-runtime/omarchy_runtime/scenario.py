@@ -39,7 +39,7 @@ from omarchy_runtime.contracts import (
     S1Policy,
     ns,
 )
-from omarchy_runtime.controllers import CartesianImpedance
+from omarchy_runtime.controllers import CartesianIK, CartesianImpedance
 from omarchy_runtime.extensions import CORRECTORS, DEFAULT_FALLBACKS, FILTERS, INFERENCE_TRIGGERS, LATENCY, RECOVERY, VERIFIERS, describe
 from omarchy_runtime.runtime import Runtime
 from omarchy_runtime.s0 import S0Loop
@@ -250,6 +250,20 @@ def _body_side(
 
             return world, s0, sensor, lambda i: Pi05Wiper(i, params, world)
         return world, s0, sensor, lambda i: ScriptedWiper(i, params)
+    if body.kind == "mujoco_arm":
+        try:
+            from omarchy_runtime.sim import mjarm, picker  # MuJoCo: in omarchy-runtime-tools only
+        except ImportError as e:
+            raise ConfigError(f"body {body.id} is simulated in MuJoCo: run it with omarchy-runtime-tools ({e})") from e
+
+        used = [k for k in PLANAR_ONLY if k != "slips" and getattr(faults, k)]
+        if used or faults.adversary or faults.weak or controller_id != "cartesian_ik":
+            raise ConfigError(f"body {body.id}: faults {used} are planar only, or controller {controller_id} is not cartesian_ik")
+        arm = mjarm.ArmWorld(cfg["world"], body, np.random.default_rng([seed, 7]), capacity, faults.slips)
+        s0 = S0Loop(body, CartesianIK(capability, body.max_velocity), arm, capacity, nominal=period, late_after=late, forward=arm.forward)
+        camera_sensor = mjarm.CameraSensor(arm, np.random.default_rng([seed, 2]), sensor_cfg)
+        params = cfg["scenario"]["s1"]
+        return arm, s0, camera_sensor, lambda i: picker.ScriptedPicker(i, params)
     if controller_id != "motion_tracker" or faults.weak:
         raise ConfigError(f"body {body.id}: the planar simulator runs the motion tracker, not {controller_id}, and has no weak actuators")
     present = {k: config.get(v, "x", float, f"world objects.{k}") for k, v in cfg["world"]["objects"].items() if v.get("present", True)}

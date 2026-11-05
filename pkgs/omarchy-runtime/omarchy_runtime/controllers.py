@@ -157,4 +157,60 @@ class CartesianImpedance:
         return Command(now, "torque", tau)
 
 
-CONTROLLERS: Mapping[str, Callable[[ControllerCapability], object]] = {"motion_tracker": MotionTracker}
+class CartesianIK:
+    """Cartesian pose intents on a position-controlled arm with a gripper:
+    at each tick, one damped least-squares step from the measured joints
+    towards the motion channel's pose (from the end-effector's Jacobian the
+    body reports), and the gripper dimension of the row as it is. An intent
+    without motion holds the pose the end-effector had when the chunk took
+    over, gripper included. Plain numpy, the same for every arm whose
+    RobotIO reports `ee` and `jacobian`: the arm's own kinematics stay in the
+    body. The guard bounds every step."""
+
+    DAMPING = 0.02  # m: the damped least squares' lambda
+    TURN = 0.3  # m per rad: how much an orientation error weighs against a position error
+    STEP = 0.02  # m: the largest task error one tick corrects
+
+    def __init__(self, capability: ControllerCapability, velocity: Sequence[float] | None = None) -> None:
+        self.capability = capability
+        self.velocity = (
+            np.array(velocity, dtype=np.float64) if velocity is not None else None
+        )  # the joints' limits: a step keeps its direction
+        self._intent: IntentChunk | None = None
+        self._hold: Array | None = None
+        self._last: Ns | None = None
+
+    def command(self, intent: IntentChunk, state: RobotState, scene: Mapping[str, Array], now: Ns) -> Command:
+        assert state.ee is not None and state.jacobian is not None
+        q = np.array(state.position, dtype=np.float64)
+        m = intent.motion
+        if m is None and (self._hold is None or intent is not self._intent):
+            self._hold = np.concatenate((state.ee, q[-1:]))
+        self._intent = intent
+        if m is not None and m.frame is None:
+            return Command(now, "position", sample(m.rows, m.timing, now))  # joint targets, such as a fallback's
+        target = sample(m.rows, m.timing, now) if m is not None else self._hold
+        assert target is not None
+        rot, want = quat_matrix(state.ee[3:7]), quat_matrix(target[3:7] / np.linalg.norm(target[3:7]))
+        a, b = rot, want
+        turn = 0.5 * np.array([(a[1] * b[2] - a[2] * b[1]).sum(), (a[2] * b[0] - a[0] * b[2]).sum(), (a[0] * b[1] - a[1] * b[0]).sum()])
+        error = np.concatenate((target[:3] - state.ee[:3], self.TURN * turn))
+        size = float(np.linalg.norm(error))
+        if size > self.STEP:
+            error *= self.STEP / size
+        jac = state.jacobian.copy()
+        jac[3:] *= self.TURN
+        step = jac.T @ np.linalg.solve(jac @ jac.T + self.DAMPING**2 * np.eye(6), error)
+        dt = (now - self._last) / 1e9 if self._last is not None else 0.0
+        self._last = now
+        if self.velocity is not None and dt > 0:
+            over = float(np.max(np.abs(step[:-1]) / (self.velocity[:-1] * dt)))
+            if over > 1.0:
+                step /= over  # every joint slowed alike: the TCP keeps its path
+        out = q + step
+        if len(target) > len(CARTESIAN):
+            out[-1] = target[len(CARTESIAN)]  # the gripper: 0 closed, 1 open
+        return Command(now, "position", out)
+
+
+CONTROLLERS: Mapping[str, Callable[[ControllerCapability], object]] = {"motion_tracker": MotionTracker, "cartesian_ik": CartesianIK}

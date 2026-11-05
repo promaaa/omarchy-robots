@@ -20,19 +20,24 @@ PREDICATES = {"in": 2, "on": 2, "held": 1}
 
 @dataclass(frozen=True)
 class Region:
-    """An axis-aligned box in the x-z plane, such as the drying rack."""
+    """An axis-aligned box in the x-z plane, such as the drying rack; with
+    `y0` and `y1`, a box in 3D (a planar scene leaves them infinite)."""
 
     x0: float
     x1: float
     z0: float
     z1: float
+    y0: float = -math.inf
+    y1: float = math.inf
 
-    def contains(self, x: float, z: float, margin: float = 0.0) -> bool:
+    def contains(self, x: float, z: float, margin: float = 0.0, y: float = 0.0) -> bool:
         """Inside, at least `margin` from every side (a negative margin widens the box)."""
-        return self.x0 + margin <= x <= self.x1 - margin and self.z0 + margin <= z <= self.z1 - margin
+        inside = self.x0 + margin <= x <= self.x1 - margin and self.z0 + margin <= z <= self.z1 - margin
+        return inside and (math.isinf(self.y0) or self.y0 + margin <= y <= self.y1 - margin)
 
     def to_json(self) -> Json:
-        return {"x0": self.x0, "x1": self.x1, "z0": self.z0, "z1": self.z1}
+        out: Json = {"x0": self.x0, "x1": self.x1, "z0": self.z0, "z1": self.z1}
+        return out if math.isinf(self.y0) else out | {"y0": self.y0, "y1": self.y1}
 
 
 @dataclass(frozen=True)
@@ -222,12 +227,14 @@ class WorldState:
             return Evaluation(Truth.UNKNOWN, (e.observation,), "no proprioception: cannot tell whether it is held")
         proprio, obs = p
         closed = proprio.value("gripper") < 0.5
-        distance = math.hypot(e.x - proprio.ee[0], e.z - proprio.ee[1])
+        if len(proprio.ee) == 3:  # a 3D body reports (x, y, z)
+            distance = math.dist((e.x, e.y, e.z), proprio.ee)
+            where = ", ".join(f"{v:.3f}" for v in proprio.ee)
+        else:
+            distance = math.hypot(e.x - proprio.ee[0], e.z - proprio.ee[1])
+            where = f"{proprio.ee[0]:.3f}, {proprio.ee[1]:.3f}"
         held = closed and distance <= self.grasp_radius
-        reason = (
-            f"{entity} at ({e.x:.3f}, {e.z:.3f}), gripper {'closed' if closed else 'open'} "
-            f"at ({proprio.ee[0]:.3f}, {proprio.ee[1]:.3f}), {distance:.3f} m apart"
-        )
+        reason = f"{entity} at ({e.x:.3f}, {e.z:.3f}), gripper {'closed' if closed else 'open'} at ({where}), {distance:.3f} m apart"
         return Evaluation(Truth.TRUE if held else Truth.FALSE, tuple(dict.fromkeys((e.observation, obs))), reason)
 
     def _in(self, entity: str, region: str, since: Ns | None) -> Evaluation:
@@ -241,9 +248,9 @@ class WorldState:
         e = self.estimate(entity, since)
         assert e is not None  # _held found it
         where = f"{entity} at ({e.x:.3f}, {e.z:.3f}) [{e.observation}]"
-        if r.contains(e.x, e.z, self.margin):
+        if r.contains(e.x, e.z, self.margin, y=e.y):
             return Evaluation(Truth.TRUE, held.evidence, f"{where} inside {region}")
-        if not r.contains(e.x, e.z, -self.margin):
+        if not r.contains(e.x, e.z, -self.margin, y=e.y):
             return Evaluation(Truth.FALSE, held.evidence, f"{where} outside {region}")
         return Evaluation(Truth.UNKNOWN, held.evidence, f"{where} within {self.margin} m of the edge of {region}")
 

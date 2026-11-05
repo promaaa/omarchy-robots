@@ -149,7 +149,11 @@ class Rig:
             body=GANTRY,
             capabilities=[c for c in config.capabilities(GANTRY_CFG) if c.id == "place_in"],  # the one bound to the gantry
             bindings=[b for b in config.bindings(GANTRY_CFG) if b.capability == "place_in"],
-            implementations={"pick_place.arm3": FakePolicy, "pick_place.gantry": factory or (lambda: self.policy)},
+            implementations={
+                "pick_place.arm3": FakePolicy,
+                "pick_place.cartesian": FakePolicy,
+                "pick_place.gantry": factory or (lambda: self.policy),
+            },
             params=Params(**{k: ns(v) for k, v in p.items()}),  # type: ignore[arg-type]  # the fidelity limits keep their default
             belief=belief(),
             s0=self.s0,
@@ -310,7 +314,8 @@ class TestVerification(unittest.TestCase):
         rig.run(0.2)
         self.assertEqual(rig.summary(clean)["category"], "NO_CAPABILITY")
         self.assertEqual(rig.summary(unseen)["category"], "PRECONDITION_UNMET")
-        self.assertIn("mug_9 not observed", rig.summary(unseen)["candidates"][1]["reason"])
+        gantry = [c for c in rig.summary(unseen)["candidates"] if c["implementation"] == "pick_place.gantry"]
+        self.assertIn("mug_9 not observed", gantry[0]["reason"])
 
 
 class TestFallbacksAndApi(unittest.TestCase):

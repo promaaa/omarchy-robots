@@ -210,3 +210,84 @@ controller = "motion_tracker"
 command = "position"
 rate_hz = 200
 dt_s = [0.005, 1.0]
+
+# The lab's two arms as simulated bodies for pick and place (sim/mjarm.py,
+# MuJoCo Menagerie models): the same Cartesian action space, frame and TCP
+# convention on both (the TCP between the fingertips, z out of the palm, y
+# along the fingers' closing), so one S1 sends both the same intents. Only
+# these tables differ. Their joints follow S0's command ideally in the
+# simulator; the gripper is simulated.
+
+[panda_lab]  # the 3D Vision Lab's Franka Panda with its Robotiq 2F-85 (Menagerie panda_nohand + 2f85)
+kind = "mujoco_arm"
+action_space = "panda_lab.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7", "gripper"]
+lower = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973, 0.0]
+upper = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973, 1.0]
+max_velocity = [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61, 2.0]
+workspace = [0.1, 0.8, -0.5, 0.5, 0.005, 0.7]  # x0, x1, y0, y1, z0, z1 of the TCP
+features = ["gripper"]
+home = [0.0, -0.6283, 0.0, -2.5133, 0.0, 1.885, -0.7854, 1.0]  # DROID's reset pose, the fingers closing along y, open
+safe_pose = [0.0, -0.6283, 0.0, -2.5133, 0.0, 1.885, -0.7854, 1.0]
+
+[panda_lab.kinematics.model]
+arm = "franka_emika_panda/panda_nohand.xml"
+gripper = "robotiq_2f85/2f85.xml"
+flange_site = "attachment_site"
+flange_body = "link7"  # the arm's last link
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+tcp_body = "g_base"
+tcp_pos = [0.0, 0.0, 0.13]  # between the pads
+gripper_actuator = "g_fingers_actuator"
+gripper_ctrl = [255.0, 0.0]  # closed, open
+finger_bodies = ["g_left_pad", "g_right_pad", "g_left_silicone_pad", "g_right_silicone_pad", "g_left_follower", "g_right_follower"]
+
+[panda_lab.kinematics.cartesian]
+action_space = "arm.tcp_pose.v1"
+frame = "base"
+ee = "tcp"
+orientation = [0.0, 1.0, 0.0, 0.0]  # the TCP pointing down (z), its fingers closing along y
+
+[panda_lab.s0]
+controller = "cartesian_ik"
+command = "position"
+dt_s = [0.001, 1.0]
+motion = ["panda_lab.joint_position.v1", "arm.tcp_pose.v1"]
+frames = ["base"]
+
+[piper_lab]  # the 3D Vision Lab's AgileX PiPER with its own gripper (Menagerie agilex_piper)
+kind = "mujoco_arm"
+action_space = "piper_lab.joint_position.v1"
+dims = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"]
+lower = [-2.618, 0.0, -2.697, -1.832, -1.22, -3.14, 0.0]
+upper = [2.618, 3.14, 0.0, 1.832, 1.22, 3.14, 1.0]
+max_velocity = [1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 2.0]
+workspace = [0.05, 0.6, -0.5, 0.5, 0.005, 0.6]
+features = ["gripper"]
+home = [-0.0057, 1.5179, -0.9915, 0.0, 1.1317, -0.0057, 1.0]  # the TCP at (0.25, 0, 0.12), pointing down (inverse kinematics), open
+safe_pose = [-0.0057, 1.5179, -0.9915, 0.0, 1.1317, -0.0057, 1.0]
+
+[piper_lab.kinematics.model]
+arm = "agilex_piper/piper.xml"
+joints = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+tcp_body = "link6"
+tcp_pos = [0.0, 0.0, 0.11]  # between the fingertips
+tcp_quat = [0.0, 0.0, 0.0, 1.0]  # turned half a turn about z: at home its y axis points as the Panda's
+gripper_actuator = "gripper"
+gripper_ctrl = [0.0, 0.035]  # closed, open
+gripper_kp = 400.0  # N/m: the model's 40 squeezes a 5 cm cup with under 1 N; 400 gives about 8 N, inside its 10 N force range
+finger_bodies = ["link7", "link8"]
+exclude = [["link7", "link8"]]  # the two fingers: closed on nothing, the model's pads lock into each other
+
+[piper_lab.kinematics.cartesian]
+action_space = "arm.tcp_pose.v1"
+frame = "base"
+ee = "tcp"
+orientation = [0.0, 1.0, 0.0, 0.0]  # the same pose as the Panda's
+
+[piper_lab.s0]
+controller = "cartesian_ik"
+command = "position"
+dt_s = [0.001, 1.0]
+motion = ["piper_lab.joint_position.v1", "arm.tcp_pose.v1"]
+frames = ["base"]

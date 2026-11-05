@@ -1,0 +1,39 @@
+description = """The cup slips from the piper's fingers as S1 lifts it; S1 does not
+notice and claims DONE. The check's camera sees the cup on the table (VIOLATED), the recovery
+policy retries once from where the camera sees the cup, and the retry succeeds."""
+seed = 2
+body = "piper_lab"
+world = "pick"
+limit_s = 60.0
+
+[s1]
+latency_s = 0.05
+speed_m_s = 0.2
+slow_m_s = 0.08
+clearance_m = 0.045
+grasp_below_top_m = 0.03
+drop_m = 0.015
+grip_s = 0.8
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[faults]]
+kind = "slip"
+after = "grasp"
+delay_s = 0.5
+duration_s = 0.3
+
+[[expect]]
+outcome = "FAILED"
+category = "VERIFICATION_FAILED"
+claim = "DONE"
+verdict = "VIOLATED"
+truth = false
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

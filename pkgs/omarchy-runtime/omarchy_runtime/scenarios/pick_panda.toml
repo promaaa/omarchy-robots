@@ -1,0 +1,24 @@
+description = "Put cup_1 in the drying rack with the lab's panda in MuJoCo (sim/mjarm.py): the scripted picker sends Cartesian poses and a gripper opening, the body's S0 turns them into joint positions, and the check reads a depth camera."
+seed = 1
+body = "panda_lab"
+world = "pick"
+limit_s = 40.0
+
+[s1]
+latency_s = 0.05
+speed_m_s = 0.2
+slow_m_s = 0.08
+clearance_m = 0.045
+grasp_below_top_m = 0.03
+drop_m = 0.015
+grip_s = 0.8
+
+[s2]
+latency_s = 0.1
+goals = [{ predicate = "in", args = ["cup_1", "drying_rack"] }]
+
+[[expect]]
+outcome = "SUCCEEDED"
+claim = "DONE"
+verdict = "SATISFIED"
+truth = true

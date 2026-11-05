@@ -107,7 +107,10 @@ def strings(table: Any, key: str, where: str) -> tuple[str, ...]:
 
 def scene(cfg: Json) -> Scene:
     w = cfg["world"]
-    regions = {k: Region(*(get(v, a, float, f"regions.{k}") for a in ("x0", "x1", "z0", "z1"))) for k, v in w["regions"].items()}
+    regions = {
+        k: Region(*(get(v, a, float, f"regions.{k}") for a in ("x0", "x1", "z0", "z1") + (("y0", "y1") if "y0" in v else ())))
+        for k, v in w["regions"].items()
+    }
     surfaces = {k: Surface(*(get(v, a, float, f"surfaces.{k}") for a in ("x0", "x1", "z"))) for k, v in w["surfaces"].items()}
     objects = {
         k: ObjectSpec(get(v, "width", float, f"objects.{k}"), get(v, "height", float, f"objects.{k}")) for k, v in w["objects"].items()
