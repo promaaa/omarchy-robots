@@ -203,6 +203,10 @@ class Memory:
         self.rest = int(cfg.get("rest", 2))
         self.habit_on = bool(cfg.get("habit", True))
         self.goal_check = bool(cfg.get("goal_check", True))  # off: the habit runs whatever the goal (a habit slip)
+        self.rule = str(cfg.get("rule", "count"))  # "count", or "vpi" (Keramati et al. 2011)
+        self.cost = float(cfg.get("cost", 0.03))  # with "vpi": what one task of S1 costs, in share of the plate
+        self.prior_sd = float(cfg.get("prior_sd", 0.15))  # with "vpi": the habit's uncertainty after one teacher episode
+        self.obs_sd = float(cfg.get("obs_sd", 0.05))  # with "vpi": the spread of one task's outcome
         self.data: Json = json.loads(path.read_text()) if path.exists() else {"episodes": [], "programs": [], "model": None, "demoted": 0}
 
     def save(self) -> None:
@@ -231,18 +235,42 @@ class Memory:
         if not self.habit_on:
             return "teacher", "habit disabled"
         taught = [e for e in self.teacher_runs() if e["goal"] == goal or not self.goal_check]
-        if len(taught) < self.n_min:
+        if self.rule == "vpi":
+            if not taught:
+                return "teacher", f"no teacher episode for this goal {goal}"
+        elif len(taught) < self.n_min:
             return "teacher", f"{len(taught)} teacher episodes for this goal {goal}, {self.n_min} needed"
-        if self.data["demoted"] > 0:
+        elif self.data["demoted"] > 0:
             return "teacher", f"habit demoted for {self.data['demoted']} more tasks"
         tops = [e["top"] for e in taught]
         if min(abs(top - t) for t in tops) > self.top_m:
             return "teacher", f"surface top {top:.3f} m, learned on {min(tops):.3f} to {max(tops):.3f} m"
         mean = float(np.mean([e["kr_coverage"] for e in taught]))
         covered = program.predicted(cells)
+        if self.rule == "vpi":
+            return self._vpi(goal, taught, covered)
         if covered < mean:
             return "teacher", f"habit covers {covered:.2f}, the teacher cleans {mean:.2f}"
         return "habit", f"habit covers {covered:.2f} (version {program.version}), the teacher cleans {mean:.2f} over {len(taught)} episodes"
+
+    def _vpi(self, goal: Json, taught: list[Json], covered: float) -> tuple[str, str]:
+        """Keramati et al. 2011 (eq. 18): ask S1 only if the value of perfect information beats S1's cost.
+        Both outcomes (share of the plate seen clean) are Gaussian beliefs. S1's: the mean of its episodes and its
+        standard error. The habit's: its predicted coverage, with an uncertainty that shrinks with the teacher
+        episodes it learned from, updated by its own outcomes. The VPI is the expected gain of S1 over the habit,
+        E[max(S1 - habit, 0)]."""
+        k1 = np.array([e["kr_coverage"] for e in taught])
+        mu1 = float(k1.mean())
+        se1 = max(float(k1.std(ddof=1)) / math.sqrt(len(k1)), 0.01) if len(k1) > 1 else self.prior_sd
+        own = [e["kr_coverage"] for e in self.data["episodes"] if e["driver"] == "habit" and (e["goal"] == goal or not self.goal_check)]
+        prior = self.prior_sd / math.sqrt(len(k1))
+        precision = 1 / prior**2 + len(own) / self.obs_sd**2
+        mu0 = (covered / prior**2 + sum(own) / self.obs_sd**2) / precision
+        sd = math.sqrt(1 / precision + se1**2)
+        d = mu1 - mu0
+        vpi = d * 0.5 * (1 + math.erf(d / sd / math.sqrt(2))) + sd * math.exp(-0.5 * (d / sd) ** 2) / math.sqrt(2 * math.pi)
+        words = f"VPI {vpi:.3f} vs cost {self.cost:.3f}: S1 cleans {mu1:.2f}, the habit {mu0:.2f} (+- {math.sqrt(1 / precision):.2f})"
+        return ("teacher" if vpi > self.cost else "habit"), words
 
     def consolidate(self, episode: Json, program: Program, model: ContactModel, cells: np.ndarray, limit: float) -> Program:
         """After a task ("sleep"): store the episode, and build the habit's next

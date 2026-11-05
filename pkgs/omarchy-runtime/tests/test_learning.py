@@ -90,3 +90,21 @@ class SupervisorTest(unittest.TestCase):
         self.assertIsNone(s.check(100_000_000, (0.6, 0.0, 0.03), 10.0, m))
         self.assertIn("from where the habit expects it", s.check(200_000_000, (0.6, 0.0, 0.03), 10.0, m) or "")
         self.assertIn("over the bound", Supervisor({"hold_s": 0.0}, 20.0).check(0, (0.6, 0.0, 0.0125), 25.0, m) or "")
+
+
+class VpiRuleTest(unittest.TestCase):
+    def test_a_dearer_s1_hands_over_sooner(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cells = np.array([[x, y] for y in (-0.07, 0.07) for x in (-0.05, 0.05)])
+            first = {}
+            for cost in (0.01, 0.03, 0.1):
+                mem = Memory(Path(d) / f"m{cost}.json", {"rule": "vpi", "cost": cost})
+                program = Program.empty(0.12, 0.05, 0.035)
+                for n in range(1, 13):
+                    run = {"driver": "teacher", "goal": GOAL, "top": 0.035, "kr_clean": [1, 1, 1, 1], "kr_coverage": 0.9 + 0.02 * (n % 3)}
+                    program = mem.consolidate(run, program, ContactModel(0.12), cells, 0.09)
+                    if mem.decide(GOAL, 0.035, program, cells)[0] == "habit":
+                        first[cost] = n
+                        break
+            self.assertLess(first[0.1], first[0.03])
+            self.assertLess(first[0.03], first.get(0.01, 99))
