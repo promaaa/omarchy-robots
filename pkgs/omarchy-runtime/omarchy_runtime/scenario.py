@@ -241,15 +241,31 @@ def _body_side(
         world = panda.PandaWorld(cfg["world"], body, np.random.default_rng([seed, 7]), capacity, faults.weak)
         stiffness = config.floats(body.kinematics.get("impedance", {}), "stiffness", f"bodies.{body.id}.kinematics.impedance", 6)
         limit = cfg["world"]["s0"].get("force_limit", True)  # S0 keeps the force under the upper bound (controllers.py)
-        controller = CartesianImpedance(capability, stiffness, body.home, limit=bool(limit))
+        params = cfg["scenario"]["s1"]
+        learner = params.get("policy", "script") == "learner"  # S0 keeps learning (learning.py): a habit beside the teacher
+        if learner:
+            from omarchy_runtime import learning
+
+            lcfg = params.get("learning", {})
+            if "memory" not in lcfg:
+                raise ConfigError("scenario s1: the learner needs learning.memory, the path of its memory file")
+            memory = learning.Memory(Path(lcfg["memory"]), lcfg)
+            half = float(cfg["world"]["plate"]["half"])
+            model = memory.model(half) if lcfg.get("cerebellum", True) else None
+        controller = CartesianImpedance(capability, stiffness, body.home, limit=bool(limit), cerebellum=model if learner else None)
         s0 = S0Loop(body, controller, world, capacity, nominal=period, late_after=late)
         sensor = panda.PandaSensor(world, np.random.default_rng([seed, 2]), sensor_cfg, faults.occlusions)
-        params = cfg["scenario"]["s1"]
-        if params.get("policy", "script") == "pi05_droid":
+        teacher = str(params.get("learning", {}).get("teacher", "script")) if learner else str(params.get("policy", "script"))
+        if teacher == "pi05_droid":
             from omarchy_runtime.sim.vla import Pi05Wiper  # openpi-client: development tools only
 
-            return world, s0, sensor, lambda i: Pi05Wiper(i, params, world)
-        return world, s0, sensor, lambda i: ScriptedWiper(i, params)
+            make: Callable[[str, Json], S1Policy] = lambda i, p: Pi05Wiper(i, p, world)  # noqa: E731
+        else:
+            make = ScriptedWiper
+        if learner:
+            watched = model if model is not None else learning.ContactModel(half)  # without a cerebellum, it learns nothing
+            return world, s0, sensor, lambda i: learning.Arbiter(i, params, world, lambda p: make(i, p), memory, watched)
+        return world, s0, sensor, lambda i: make(i, params)
     if body.kind == "mujoco_arm":
         try:
             from omarchy_runtime.sim import mjarm, picker  # MuJoCo: in omarchy-runtime-tools only

@@ -9,6 +9,7 @@ needs, a simulator or a real arm's library.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -24,6 +25,9 @@ from omarchy_runtime.contracts import (
     quat_matrix,
     sample,
 )
+
+if TYPE_CHECKING:
+    from omarchy_runtime.learning import ContactModel
 
 
 class MotionTracker:
@@ -72,7 +76,23 @@ class CartesianImpedance:
     the force error faster (`FOLLOW`, `DEEPER`: it backs off faster than it
     presses deeper), so a surface that moves stays pressed.
     Without `limit`, the force is regulated at `approach` speed only, as
-    before 5 November 2026."""
+    before 5 November 2026.
+
+    With a `cerebellum` (learning.py's ContactModel: where the pad rests in
+    contact, per cell of the surface), on a vertical contact normal, the
+    set-point along the normal is the motion's, plus a feedforward from the
+    model's prediction (the height that gives the target force there,
+    reached at `FF_RATE` at most), plus the feedback offset above. While the
+    contact is steady in MAINTAIN, the model learns where the pad rests,
+    and what it learns moves from the feedback offset into the feedforward,
+    with no jump in the set-point: feedback-error learning, so the
+    correction the feedback must hold shrinks as the model learns. Before
+    contact, the feedback offset goes no deeper while the pad is still above
+    the predicted surface: the feedforward brings it there. Touching while
+    still above the predicted surface, the feedforward goes no deeper: the
+    feedback regulates the force, and the model learns the new height. `teaching` sums
+    the feedback offset's size over steady contact (m s, and s), with or
+    without a cerebellum, so the two can be compared."""
 
     APPROACH = 0.03  # m/s: the most the force offset moves
     GAIN = 0.004  # m per N s: how fast it follows the force error
@@ -82,17 +102,31 @@ class CartesianImpedance:
     INERTIA = (2.0, 2.0, 2.0, 0.05, 0.05, 0.05)  # kg, kg m^2: for critical damping
     NULL = (10.0, 2.0)  # Nm/rad, Nm s/rad: the null-space posture spring and damper
     DRIFT = (0.003, 0.01)  # m: object drift where it starts pressing less, and over which it reaches a quarter
+    FF_RATE = 0.1  # m/s: the most the feedforward set-point moves
+    STEADY_N = 3.0  # N: contact this close to the target force is steady, and teaches the cerebellum
+    TOUCH_N = 1.0  # N: below this, the pad is not touching
+    ABOVE_M = 0.005  # m: above the predicted surface by more than this, the feedback waits before contact, the feedforward after
 
-    def __init__(self, capability: ControllerCapability, stiffness: Sequence[float], posture: Sequence[float], limit: bool = True) -> None:
+    def __init__(
+        self,
+        capability: ControllerCapability,
+        stiffness: Sequence[float],
+        posture: Sequence[float],
+        limit: bool = True,
+        cerebellum: ContactModel | None = None,
+    ) -> None:
         self.capability = capability
         self.stiffness = np.array(stiffness, dtype=np.float64)
         self.posture = np.array(posture, dtype=np.float64)
         self.inertia = np.array(self.INERTIA)
         self.limit = limit
         self.reflexes = 0  # ticks on which the measured force passed the upper bound and S0 backed off at once
+        self.cerebellum = cerebellum
+        self.teaching = np.zeros(2)  # over steady contact in MAINTAIN: the integral of |feedback offset| (m s), its time (s)
         self._intent: IntentChunk | None = None
         self._hold: Array | None = None
         self._offset = 0.0
+        self._ff = 0.0
         self._last: Ns | None = None
 
     def _press(self, intent: IntentChunk, scene: Mapping[str, Array], now: Ns) -> float:
@@ -127,27 +161,48 @@ class CartesianImpedance:
         force = k * error - damping * twist
         mode = c.mode(now) if c is not None else ContactMode.FREE
         if c is None or mode is ContactMode.FREE:
-            self._offset = 0.0
+            self._offset = self._ff = 0.0
         else:
             n = np.array(c.normal)
             measured = float(state.wrench[:3] @ n) if state.wrench is not None else 0.0
             kn = float(k[:3] @ np.abs(n))
             gap = float((target[:3] - x) @ n)  # the motion's set-point along the normal, from the end-effector
             upper = float(c.upper[0]) if self.limit and c.kind == "normal_force" else np.inf
+            cb = self.cerebellum if tuple(c.normal) == (0.0, 0.0, 1.0) else None
             if mode is ContactMode.BREAK:
                 step = float(np.clip(-self._offset, -self.APPROACH * dt, self.APPROACH * dt))
+                self._ff -= float(np.clip(self._ff, -self.FF_RATE * dt, self.FF_RATE * dt))
             else:
                 wanted = float(sample(c.target, c.timing, now)[0]) * self._press(intent, scene, now)
                 rate, gain = self.FOLLOW if self.limit and mode is ContactMode.MAINTAIN else (self.APPROACH, self.GAIN)
                 deeper = self.DEEPER if self.limit and mode is ContactMode.MAINTAIN else rate
                 step = float(np.clip(gain * (measured - wanted), -deeper, rate)) * dt
+                steady = mode is ContactMode.MAINTAIN and measured >= self.TOUCH_N and abs(measured - wanted) <= self.STEADY_N
+                if steady:
+                    self.teaching += (abs(self._offset) * dt, dt)
+                if cb is not None:
+                    rest = cb.predict(float(x[0]), float(x[1]))
+                    ff = self._feedforward(rest, wanted, kn, float(target[2]))
+                    early = rest is not None and measured >= self.TOUCH_N and float(x[2]) > rest + self.ABOVE_M
+                    if steady:  # feedback-error learning: what the model learns leaves the feedback offset
+                        cb.learn(float(x[0]), float(x[1]), float(x[2]), dt)
+                        rest = cb.predict(float(x[0]), float(x[1]))
+                        learned = self._feedforward(rest, wanted, kn, float(target[2])) - ff
+                        self._ff += learned
+                        self._offset -= learned
+                        ff += learned
+                    if early:
+                        ff = max(ff, self._ff)  # touching above where the model expects the surface: no deeper
+                    self._ff += float(np.clip(ff - self._ff, -self.FF_RATE * dt, self.FF_RATE * dt))
+                    if rest is not None and measured < self.TOUCH_N and float(x[2]) > rest - self.ABOVE_M:
+                        step = max(step, 0.0)  # not touching yet, above the predicted surface: the feedforward goes
                 if measured > upper:  # the reflex: back to the target force's set-point, now
                     self.reflexes += 1
-                    step = max(step, -wanted / kn - gap - self._offset)
-                elif kn * (gap + self._offset) < -upper:
+                    step = max(step, -wanted / kn - gap - self._ff - self._offset)
+                elif kn * (gap + self._ff + self._offset) < -upper:
                     step = max(step, 0.0)  # pressing as hard as allowed: go no deeper
             self._offset = float(np.clip(self._offset + step, -self.REACH, self.REACH))
-            along = kn * (gap + self._offset) - 2.0 * np.sqrt(kn * self.inertia[0]) * float(twist[:3] @ n)
+            along = kn * (gap + self._ff + self._offset) - 2.0 * np.sqrt(kn * self.inertia[0]) * float(twist[:3] @ n)
             along = max(along, -upper)  # never command more than the upper bound into the surface
             force[:3] += (along - float(force[:3] @ n)) * n
         jac = state.jacobian
@@ -158,6 +213,10 @@ class CartesianImpedance:
         if state.coriolis is not None:
             tau = tau + state.coriolis
         return Command(now, "torque", tau)
+
+    def _feedforward(self, rest: float | None, wanted: float, kn: float, z: float) -> float:
+        """The set-point offset from the motion's height z that gives the target force where the pad rests at `rest`."""
+        return 0.0 if rest is None else float(np.clip(rest - wanted / kn - z, -self.REACH, self.REACH))
 
 
 class CartesianIK:

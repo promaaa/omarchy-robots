@@ -60,6 +60,7 @@ class ScriptedWiper:
         except (KeyError, TypeError, ValueError) as e:
             raise ConfigError(f"scenario s1: the wiper needs {e}") from e
         self._report: Report | None = None
+        self.horizon = HORIZON  # rows per chunk
         self._plan: list[tuple[float, np.ndarray, np.ndarray, ContactMode]] = []  # start (s, from t0), from, to, mode
         self._end = 0.0
         self._t0: Ns | None = None
@@ -118,18 +119,20 @@ class ScriptedWiper:
             self._report = Report(Claim.DONE, f"raster of {len(self._plan) - 4} segments ended, the pad up again")
             return None
         rows, modes = [], []
-        for k in range(HORIZON):
+        for k in range(self.horizon):
             p, mode = self._at(s + k * DT / 1e9)
             rows.append([*p, *self._orientation])
             modes.append(mode)
         self._seq += 1
-        timing = Timing(now, DT, now + (HORIZON - 1) * DT, self.source, observation.t)
+        timing = Timing(now, DT, now + (self.horizon - 1) * DT, self.source, observation.t)
         motion = MotionIntent.make(timing, self._space, CARTESIAN, rows, self._frame)
         contact = []
         if self.contact:
             lo, hi = self.bounds
             contact.append(
-                ContactIntent.make(timing, self._ee, self._frame, (0, 0, 1), modes, [[self.force]] * HORIZON, [lo], [hi], self.stiffness)
+                ContactIntent.make(
+                    timing, self._ee, self._frame, (0, 0, 1), modes, [[self.force]] * self.horizon, [lo], [hi], self.stiffness
+                )
             )
         return IntentChunk.make(self._seq, self.source, motion, contact=contact)
 

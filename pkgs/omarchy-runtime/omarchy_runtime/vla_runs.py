@@ -70,6 +70,11 @@ def cell(
         over["body"] = {"kinematics": {"impedance": {"stiffness": config.effective(SCENARIO)["scenario"]["s1"]["stiffness"]}}}
     over = config.merge(over, extra or {})  # e.g. a recovery policy that retries, and a longer time limit
     r = run(SCENARIO, run_dir, overrides=over, record_s0=True)
+    return {"condition": condition, "seed": seed, "plate": plate_at(seed)} | measure(r, run_dir)
+
+
+def measure(r: Any, run_dir: Path) -> Json:
+    """What one wiping run did, from ground truth (the harness's) and the execution's summary."""
     w: Any = r.world
     log, cfg = w.log(), r.cfg
     lo, hi = cfg["scenario"]["s1"]["force_min_n"], cfg["scenario"]["s1"]["force_max_n"]
@@ -88,10 +93,7 @@ def cell(
     fid = s.get("fidelity") or {}
     vla = json.loads((run_dir / "vla.json").read_text()) if (run_dir / "vla.json").exists() else None
     out = {
-        "condition": condition,
-        "seed": seed,
         "board_m": plate.get("board_m", 0.0),
-        "plate": plate_at(seed),
         "run_dir": str(run_dir),
         "outcome": s.get("outcome"),
         "category": s.get("category"),
