@@ -12,7 +12,18 @@ from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
 
-from omarchy_runtime.contracts import Array, Command, ContactMode, ControllerCapability, IntentChunk, Ns, RobotState, quat_matrix, sample
+from omarchy_runtime.contracts import (
+    CARTESIAN,
+    Array,
+    Command,
+    ContactMode,
+    ControllerCapability,
+    IntentChunk,
+    Ns,
+    RobotState,
+    quat_matrix,
+    sample,
+)
 
 
 class MotionTracker:
@@ -50,20 +61,33 @@ class CartesianImpedance:
     leaves. An object intent it honours by pressing less while the object
     drifts from its intended pose (scene input `pose:<entity>`). The torque is
     J^T F, a null-space spring towards `posture`, and Coriolis compensation.
-    The guard checks every one."""
+    The guard checks every one.
+
+    With `limit` (the default), S0 keeps the force under the contact
+    channel's upper bound on its own, without waiting for S1: it never
+    commands more than that bound into the surface, its offset goes no
+    deeper while it presses that hard, and a measured force above the bound
+    brings the set-point back at once to where the spring gives the target
+    force (a reflex, without the `approach` rate limit); in MAINTAIN it follows
+    the force error faster (`FOLLOW`), so a surface that moves stays pressed.
+    Without `limit`, the force is regulated at `approach` speed only, as
+    before 5 November 2026."""
 
     APPROACH = 0.03  # m/s: the most the force offset moves
     GAIN = 0.004  # m per N s: how fast it follows the force error
+    FOLLOW = (0.2, 0.02)  # with `limit`, in MAINTAIN: m/s and m per N s: a surface that moves is followed
     REACH = 0.04  # m: the most it may move from the motion's set-point
     INERTIA = (2.0, 2.0, 2.0, 0.05, 0.05, 0.05)  # kg, kg m^2: for critical damping
     NULL = (10.0, 2.0)  # Nm/rad, Nm s/rad: the null-space posture spring and damper
     DRIFT = (0.003, 0.01)  # m: object drift where it starts pressing less, and over which it reaches a quarter
 
-    def __init__(self, capability: ControllerCapability, stiffness: Sequence[float], posture: Sequence[float]) -> None:
+    def __init__(self, capability: ControllerCapability, stiffness: Sequence[float], posture: Sequence[float], limit: bool = True) -> None:
         self.capability = capability
         self.stiffness = np.array(stiffness, dtype=np.float64)
         self.posture = np.array(posture, dtype=np.float64)
         self.inertia = np.array(self.INERTIA)
+        self.limit = limit
+        self.reflexes = 0  # ticks on which the measured force passed the upper bound and S0 backed off at once
         self._intent: IntentChunk | None = None
         self._hold: Array | None = None
         self._offset = 0.0
@@ -105,14 +129,23 @@ class CartesianImpedance:
         else:
             n = np.array(c.normal)
             measured = float(state.wrench[:3] @ n) if state.wrench is not None else 0.0
+            kn = float(k[:3] @ np.abs(n))
+            gap = float((target[:3] - x) @ n)  # the motion's set-point along the normal, from the end-effector
+            upper = float(c.upper[0]) if self.limit and c.kind == "normal_force" else np.inf
             if mode is ContactMode.BREAK:
                 step = float(np.clip(-self._offset, -self.APPROACH * dt, self.APPROACH * dt))
             else:
                 wanted = float(sample(c.target, c.timing, now)[0]) * self._press(intent, scene, now)
-                step = float(np.clip(self.GAIN * (measured - wanted), -self.APPROACH, self.APPROACH)) * dt
+                rate, gain = self.FOLLOW if self.limit and mode is ContactMode.MAINTAIN else (self.APPROACH, self.GAIN)
+                step = float(np.clip(gain * (measured - wanted), -rate, rate)) * dt
+                if measured > upper:  # the reflex: back to the target force's set-point, now
+                    self.reflexes += 1
+                    step = max(step, -wanted / kn - gap - self._offset)
+                elif kn * (gap + self._offset) < -upper:
+                    step = max(step, 0.0)  # pressing as hard as allowed: go no deeper
             self._offset = float(np.clip(self._offset + step, -self.REACH, self.REACH))
-            kn = float(k[:3] @ np.abs(n))
-            along = kn * (float((target[:3] - x) @ n) + self._offset) - 2.0 * np.sqrt(kn * self.inertia[0]) * float(twist[:3] @ n)
+            along = kn * (gap + self._offset) - 2.0 * np.sqrt(kn * self.inertia[0]) * float(twist[:3] @ n)
+            along = max(along, -upper)  # never command more than the upper bound into the surface
             force[:3] += (along - float(force[:3] @ n)) * n
         jac = state.jacobian
         # The null space of J: I - J^T (J J^T)^-1 J, lightly damped near singularities.

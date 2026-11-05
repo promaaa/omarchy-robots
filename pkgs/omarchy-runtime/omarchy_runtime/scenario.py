@@ -240,7 +240,8 @@ def _body_side(
             raise ConfigError(f"body {body.id}: planar-only faults {used}, or controller {controller_id}")
         world = panda.PandaWorld(cfg["world"], body, np.random.default_rng([seed, 7]), capacity, faults.weak)
         stiffness = config.floats(body.kinematics.get("impedance", {}), "stiffness", f"bodies.{body.id}.kinematics.impedance", 6)
-        controller = CartesianImpedance(capability, stiffness, body.home)
+        limit = cfg["world"]["s0"].get("force_limit", True)  # S0 keeps the force under the upper bound (controllers.py)
+        controller = CartesianImpedance(capability, stiffness, body.home, limit=bool(limit))
         s0 = S0Loop(body, controller, world, capacity, nominal=period, late_after=late)
         sensor = panda.PandaSensor(world, np.random.default_rng([seed, 2]), sensor_cfg, faults.occlusions)
         params = cfg["scenario"]["s1"]
