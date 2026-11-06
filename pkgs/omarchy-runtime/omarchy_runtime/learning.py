@@ -99,6 +99,7 @@ class ContactModel:
         self.P = self.PRIOR_M**2 * np.ones((k, k)) + self.SHAPE_M**2 * np.eye(k)  # the weights' covariance
         self.frame: tuple[float, float, float] | None = None
         self.learned_s = 0.0  # seconds of steady contact learned in this task
+        self.offset_drift = 0.0  # m per square root of a second: the common offset may drift too (a plastic model)
 
     def _basis(self, x: float, y: float) -> np.ndarray | None:
         if self.frame is None:
@@ -132,6 +133,8 @@ class ContactModel:
         self.w += gain * (z - self.frame[2] - float(phi @ self.w))
         self.P -= np.outer(gain, p_phi)
         self.P[np.diag_indices_from(self.P)] += self.DRIFT_M**2 * dt
+        if self.offset_drift:
+            self.P += self.offset_drift**2 * dt
         self.learned_s += dt
 
     def to_json(self) -> Json:
@@ -373,6 +376,7 @@ class Memory:
         # `shared_model`, every context writes the same model (the ablation: interference between contexts). With
         # `contexts = "infer"`, no name: one ModelBank chooses and creates its modules by prediction error.
         self.infer = str(cfg.get("contexts", "named")) == "infer"
+        self.cfg_offset_drift = float(cfg.get("offset_drift_m", 0.0))
         self.context = "bank" if self.infer else "shared" if cfg.get("shared_model") else str(cfg.get("context", "default"))
 
     def save(self) -> None:
@@ -385,7 +389,11 @@ class Memory:
         m = self.data.setdefault("models", {}).get(self.context)
         if self.infer:
             return ModelBank.from_json(m) if m else ModelBank(half)
-        return ContactModel.from_json(m) if m else ContactModel(half)
+        model = ContactModel.from_json(m) if m else ContactModel(half)
+        # The stability-plasticity control: with `offset_drift_m`, one model keeps relearning the surface's offset fast,
+        # so it follows a change of dish within a fraction of a second, but forgets the previous dish as fast.
+        model.offset_drift = float(self.cfg_offset_drift)
+        return model
 
     def program(self, half: float, margin: float, spacing: float) -> Program:
         p = self.data["programs"]
