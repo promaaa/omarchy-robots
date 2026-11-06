@@ -27,7 +27,7 @@ from omarchy_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
-    from omarchy_runtime.learning import ContactModel
+    from omarchy_runtime.learning import Cerebellum
 
 
 class MotionTracker:
@@ -118,7 +118,7 @@ class CartesianImpedance:
         stiffness: Sequence[float],
         posture: Sequence[float],
         limit: bool = True,
-        cerebellum: ContactModel | None = None,
+        cerebellum: Cerebellum | None = None,
     ) -> None:
         self.capability = capability
         self.stiffness = np.array(stiffness, dtype=np.float64)

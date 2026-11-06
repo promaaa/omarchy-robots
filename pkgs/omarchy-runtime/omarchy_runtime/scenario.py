@@ -260,6 +260,8 @@ def _body_side(
             from omarchy_runtime.sim.vla import Pi05Wiper  # openpi-client: development tools only
 
             make: Callable[[str, Json], S1Policy] = lambda i, p: Pi05Wiper(i, p, world)  # noqa: E731
+        elif teacher == "none" and learner:  # S1 lesioned: only what S0 learned is left
+            make = lambda i, p: learning.NullTeacher()  # noqa: E731
         else:
             make = ScriptedWiper
         if learner:

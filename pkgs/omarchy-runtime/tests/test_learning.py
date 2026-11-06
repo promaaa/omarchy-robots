@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from omarchy_runtime.learning import ContactModel, Memory, Program, Supervisor
+from omarchy_runtime.learning import ContactModel, Memory, ModelBank, Program, Supervisor, train_student
 
 GOAL = {"force_n": 10.0, "force_min_n": 5.0, "force_max_n": 20.0}
 
@@ -33,6 +33,66 @@ class ContactModelTest(unittest.TestCase):
         back = ContactModel.from_json(m.to_json())
         back.frame = m.frame
         self.assertAlmostEqual(back.predict(0.63, 0.02) or 0.0, moved, delta=1e-5)  # stored to the micrometre
+
+
+def wipe(bank: ModelBank, rest: float, seconds: float) -> None:
+    """Steady contact along a raster over the plate (frame at 0.6, 0.0), the pad resting at height `rest`."""
+    ticks = int(seconds * 1000)
+    for i in range(ticks):
+        u = -0.08 + 0.16 * ((i // 50) % 40) / 39  # 40 positions along x, 50 ms each
+        v = -0.08 + 0.16 * (i // 2000 % 5) / 4  # 5 lines in y, 2 s each
+        bank.learn(0.6 + u, v, rest, 0.001)
+
+
+class ModelBankTest(unittest.TestCase):
+    def test_a_new_context_gets_a_module_and_a_known_one_is_recognized(self) -> None:
+        bank = ModelBank(0.12)
+        bank.frame = (0.6, 0.0, 0.035)  # task 1, dish A: the pad rests 3 mm under the believed top
+        wipe(bank, 0.032, 10.0)
+        self.assertEqual((bank.births, len(bank.modules), bank.map_module()), (1, 1, 0))
+        bank.close_task()
+        bank.frame = (0.6, 0.0, 0.035)  # task 2, dish B: its surface 1.5 cm lower, the belief the same
+        wipe(bank, 0.017, 10.0)
+        self.assertEqual((bank.births, len(bank.modules), bank.map_module()), (1, 2, 1))  # one birth, not one per spot
+        bank.close_task()
+        bank = ModelBank.from_json(bank.to_json())  # stored between tasks
+        bank.frame = (0.6, 0.0, 0.035)  # task 3, dish A again: recognized, no birth
+        wipe(bank, 0.032, 1.0)
+        self.assertEqual((bank.births, len(bank.modules), bank.map_module()), (0, 2, 0))
+        here = bank.predict(0.6, 0.0) or 0.0  # one pass of the broad basis overshoots a little: closer to A than to B
+        self.assertLess(abs(here - 0.032), abs(here - 0.017) / 3)
+        bank.close_task()
+        bank.frame = (0.6, 0.0, 0.035)  # task 4, dish B again: the prior favours A, the contact says B
+        wipe(bank, 0.017, 1.0)
+        self.assertEqual((bank.births, bank.map_module()), (0, 1))
+        here = bank.predict(0.6, 0.0) or 0.0
+        self.assertLess(abs(here - 0.017), abs(here - 0.032))
+
+    def test_supervisor_sees_novelty_not_a_known_context(self) -> None:
+        bank = ModelBank(0.12)
+        bank.frame = (0.6, 0.0, 0.035)
+        wipe(bank, 0.032, 10.0)
+        bank.close_task()
+        bank.frame = (0.6, 0.0, 0.035)
+        s = Supervisor({}, upper=20.0)
+        self.assertIsNone(s.check(0, (0.6, 0.0, 0.032), 10.0, bank))
+        wipe(bank, 0.017, 0.2)  # a dish no module explains
+        self.assertIsNone(s.check(int(0.1e9), (0.6, 0.0, 0.017), 10.0, bank))  # the surprise must last 0.2 s
+        self.assertIn("new context", s.check(int(0.35e9), (0.6, 0.0, 0.017), 10.0, bank) or "")
+
+
+class StudentTest(unittest.TestCase):
+    def test_the_distilled_network_follows_a_taught_stroke_from_a_disturbed_start(self) -> None:
+        stroke = [[0.05 * k, -0.08 + 0.004 * k, 0.02, -0.003, int(k >= 5)] for k in range(41)]  # down, then 16 cm along x
+        net, span = train_student([stroke, stroke], seed=1)
+        self.assertAlmostEqual(span, 2.0)
+        u, c, phase = np.array([-0.07, 0.025, -0.003]), 1.0, 0.25  # 1 cm off the stroke, a quarter of the way
+        for _ in range(30):
+            out = net(np.array([*u, phase, c]))
+            u, c, phase = u + out[:3], float(out[3]), phase + 0.025
+        self.assertAlmostEqual(float(u[0]), 0.08, delta=0.01)  # it went along and back onto the stroke
+        self.assertAlmostEqual(float(u[1]), 0.02, delta=0.005)
+        self.assertGreater(c, 0.5)  # still pressing
 
 
 class ProgramTest(unittest.TestCase):

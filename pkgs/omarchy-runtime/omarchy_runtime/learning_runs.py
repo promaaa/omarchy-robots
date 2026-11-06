@@ -60,6 +60,9 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
     controller: Any = r.s0.controller
     model = controller.cerebellum if controller.cerebellum is not None else memory.model(half)
     teaching = controller.teaching
+    bank: Json = {}
+    if isinstance(model, learning.ModelBank):  # which stored module explained this task, how many exist, how many were born
+        bank = {"module": model.map_module(), "modules": len(model.modules), "births": model.births}
     record = {
         "k": k,
         "driver": learned["driver"],
@@ -70,7 +73,11 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
         "coverage": m["coverage"],
         "s1_calls": learned["s1_calls"],
         "context": memory.context,
-    }
+        "context_true": str(lcfg.get("context", "default")),
+    } | bank
+    if learned["driver"] == "teacher" and memory.form != "program" and learned.get("frame"):
+        log = w.log()  # the movement S0 executed under the teacher, for the replay and the student
+        record["path"] = learning.path_of(log["t"], log["ee"], log["force"], tuple(learned["frame"]))
     after = memory.consolidate(record, program, model, learning.cells_of(cfg["world"]), limit=half - 0.03)
     return (
         {"k": k, "seed": seed, "plate": where}
@@ -88,7 +95,11 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
             "steady_s": float(teaching[1]),
             "model_learned_s": learned["model_learned_s"],
             "context": memory.context,
+            "context_true": record["context_true"],
+            "world_now": {"tilt_deg": cfg["world"]["plate"].get("tilt_deg"), "board_m": cfg["world"]["plate"].get("board_m", 0.0)}
+            | {"plate_bias_z_m": cfg["world"]["sensor"].get("plate_bias_z_m", 0.0)},
         }
+        | bank
     )
 
 
@@ -97,7 +108,7 @@ def sequence(
 ) -> Json:
     """Tasks 1..`episodes` on one memory (out/memory.json, made fresh); `schedule` maps a task number (as a
     string) to changes that hold from that task on: {"world": overrides, "s1": S1's parameters, such as a goal's
-    force and bounds}. Writes results.json as it goes."""
+    force and bounds, "lesion": parts of the memory removed before that task}. Writes results.json as it goes."""
     out.mkdir(parents=True, exist_ok=True)
     memory = out / "memory.json"
     memory.unlink(missing_ok=True)
@@ -108,6 +119,11 @@ def sequence(
         change = (schedule or {}).get(str(k), {})
         now = config.merge(now, change.get("world", {}))
         s1 = config.merge(s1, change.get("s1", {}))
+        if change.get("lesion"):  # remove a learned part before this task: "cerebellum" (the contact models), "habit"
+            data = json.loads(memory.read_text())  # (the program's versions); S1 is lesioned with s1.learning.teacher "none"
+            for part in change["lesion"]:
+                data[{"cerebellum": "models", "habit": "programs"}[part]] = {} if part == "cerebellum" else []
+            memory.write_text(json.dumps(data, indent=1) + "\n")
         c = episode(out, seed, k, s1, now, extra)
         print(
             json.dumps({x: c[x] for x in ("k", "driver", "coverage", "s1_calls", "teaching_mm", "force_peak_n", "program_after")}),
