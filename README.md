@@ -250,6 +250,20 @@ soft real-time (`omarchy-runtime s2`, `run ... --clock wall --s2 HOST:PORT`).
 The OS secures that link: `omarchy.robot.s2Link` carries it over WireGuard, and
 the runtime then reaches S2 through the tunnel only (manual, Security).
 
+### pi0.5 as S1, and an S0 that keeps learning (simulation)
+
+pi0.5-DROID (openpi), fine-tuned on the scripted wiper's demonstrations, can
+drive the simulated Panda from two rendered cameras, its policy server on a
+lab GPU (`vla_wipe`, `vla_runs.py`). Beside it, S0 can keep learning
+(`learning.py`): a contact model in its impedance controller learns where the
+plate is from its own force loop, a habit learns the strokes from what S1
+cleaned, an arbiter hands the task to the habit once it is learned, and a
+supervisor hands it back to S1 when something is new or the force goes too
+high. In simulation (runtime 95444c2, 5 seeds), after three tasks taught by
+pi0.5 the habit does the task alone: no inference instead of 62 per task, a
+peak force of 13.1 N instead of 21.8 N. The manual's chapter Runtime has the
+parts, the commands and what it does not show.
+
 ### S2 placement experiment
 
 > **Emulated network, VMs, soft real-time.** Two QEMU VMs, the network

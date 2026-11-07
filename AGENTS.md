@@ -61,6 +61,9 @@ In `pkgs/omarchy-runtime`, inside `nix develop`:
 | `.../scrub.py` | the scrubbing experiment, its tables and its videos (tools only) |
 | `.../arms.py` | S0 backends for the lab's arms: the Franka Panda (libfranka-like interface), the AgileX PiPER (its SDK over CAN) |
 | `.../sim/fake_franka.py`, `.../sim/fake_piper.py` | the fake arms the backends are tested against (the PiPER's under the real SDK, on a fake CAN bus: tools only) |
+| `.../sim/vla.py`, `vla_runs.py`, `vla_demos.py` | pi0.5-DROID as S1 on the simulated Panda (an openpi policy server, rendered cameras), its experiment, the scripted wiper's demonstrations for fine-tuning (tools only) |
+| `.../sim/mjarm.py`, `sim/picker.py`, `pick_runs.py` | the lab's Panda and PiPER picking a cup in MuJoCo, checked by a depth camera (tools only) |
+| `.../learning.py`, `learning_runs.py` | the S0 that keeps learning: contact models in S0's controller, a habit, an arbiter and a supervisor beside the teacher (numpy only); its sequence runner (tools only; manual, Runtime) |
 | `pkgs/libfranka/`, `pkgs/piper-sdk/` | libfranka 0.9.2 (C++, with its examples) and piper_sdk 0.6.2 (Python), not in nixpkgs |
 | `pkgs/mujoco-menagerie/` | the Menagerie's Panda model, pinned, fetched by Nix (Apache-2.0) |
 | `.../scenario.py`, `evaluate.py`, `placement.py`, `cli.py` | composition (the robot process, the S2 process), evaluation harness, the S2 placement experiment's table, command |

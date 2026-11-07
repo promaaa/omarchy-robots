@@ -5,6 +5,35 @@ Every release of Omarchy Robots, newest first. The same text is on each
 
 ## Unreleased
 
+Everything below runs in simulation only: MuJoCo on the CPU, and pi0.5 on a lab GPU behind its server. No real arm has run it.
+
+### Highlights
+
+#### Drive the simulated Panda with pi0.5
+
+pi0.5-DROID from Physical Intelligence's openpi can now be S1 on the simulated Franka Panda. It sees only two rendered cameras, the joint angles and an instruction, and its joint targets become the motion of an intent. Fine-tuned on the scripted wiper's demonstrations, it also says when to press, and S0 holds the force.
+
+#### Let S0 keep learning from S1
+
+S0 can now learn a task while S1 does it, then do it alone. A contact model in its controller learns where the surface is from its own force loop, a habit learns the strokes from what S1 cleaned, and an arbiter hands the task to the habit once it is learned. A supervisor and a goal check hand it back to S1 when something is new, when the force goes too high, or when the goal changed. After three tasks taught by pi0.5, the simulated Panda wipes the plate with no inference at all.
+
+### Improvements
+
+- Keep the force under the contact's upper bound, and follow a surface that moves.
+- Raise and lower the plate on a moving board (`plate.heave`).
+- Retry a goal up to three times with the `retry_twice` recovery policy.
+- Pick a cup with the lab's Panda and PiPER in MuJoCo, checked by a depth camera.
+- Record demonstrations from the scripted wiper, with a press flag, to fine-tune a VLA.
+- Recognize a surface by touch: a bank of contact models, chosen by prediction error, with no name given.
+- Compare what S0 keeps of S1: a program built from the results, a replay of S1's best run, or a small distilled network.
+
+### Fixes
+
+- Back off at up to 0.2 m/s and press deeper at up to 0.1 m/s while in contact.
+- Hide a clean cell of dirt from every camera.
+- Retry the policy server's handshake when it times out.
+- Read S1's claim from the summary's claim field in the pick experiment.
+
 ## v0.1.0
 
 This release runs Omarchy Robots on a real robot computer for the first time. A Jetson AGX Orin developer kit was flashed, installed from a USB stick and checked with `omarchy-robot validate`: every check passed, the GPU, CUDA and TensorRT included, and only the camera check was skipped, as no camera was connected. Updates and rollbacks worked across reboots. The other Jetson boards and the PC build but have not run on hardware yet, and the runtime still runs in simulation only.
