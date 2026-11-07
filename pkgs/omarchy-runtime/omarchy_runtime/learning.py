@@ -277,7 +277,82 @@ class ModelBank:
         return ModelBank(float(j["half"]), [ContactModel.from_json(m) for m in j["modules"]], [float(c) for c in j["counts"]], j["last"])
 
 
-Cerebellum = ContactModel | ModelBank  # what S0's controller learns into: one model, or a bank of them
+class PhaseILC:
+    """A baseline for the contact model: iterative learning control indexed by the task's time, the engineering
+    counterpart of a cerebellar feedforward (Gams et al. 2014, eq. 37, p.6, after Bristow et al. 2006; note 234). The
+    feedforward height at time t of the next task is Q (F(t) + L e(t)), e(t) the pad's rest height at the same time of
+    this task minus F(t), with Q = 0.99 and L = 1 as Gams et al. use (p.5); bins of `BIN_S` seconds from the start of
+    the task. It knows when, not where: it has no map of the surface, so it helps only if the next movement repeats this
+    one in time."""
+
+    BIN_S = 0.02
+    Q = 0.99
+    L = 1.0
+    SPAN_S = 60.0
+
+    def __init__(self, half: float, f: list[float | None] | None = None) -> None:
+        self.half = float(half)
+        n = int(self.SPAN_S / self.BIN_S)
+        self.F = np.array([np.nan if v is None else v for v in f], dtype=np.float64) if f else np.full(n, np.nan)
+        self._sum, self._n = np.zeros(n), np.zeros(n)
+        self._frame: tuple[float, float, float] | None = None
+        self._t0: Ns | None = None
+        self._now: Ns | None = None
+        self.learned_s = 0.0
+
+    @property
+    def frame(self) -> tuple[float, float, float] | None:
+        return self._frame
+
+    @frame.setter
+    def frame(self, value: tuple[float, float, float] | None) -> None:
+        """A new task: its clock starts at S0's next tick."""
+        self._frame, self._t0, self._now, self.learned_s = value, None, None, 0.0
+        self._sum[:], self._n[:] = 0.0, 0.0
+
+    def tick(self, now: Ns) -> None:
+        """S0's time, at every tick (CartesianImpedance.command)."""
+        if self._t0 is None:
+            self._t0 = now
+        self._now = now
+
+    def _bin(self, x: float, y: float) -> int | None:
+        if self._frame is None or self._t0 is None or self._now is None:
+            return None
+        if abs(x - self._frame[0]) > self.half or abs(y - self._frame[1]) > self.half:
+            return None
+        b = int((self._now - self._t0) / 1e9 / self.BIN_S)
+        return b if b < len(self.F) else None
+
+    def predict(self, x: float, y: float) -> float | None:
+        b = self._bin(x, y)
+        if b is None or self._frame is None or np.isnan(self.F[b]):
+            return None
+        return self._frame[2] + float(self.F[b])
+
+    def learn(self, x: float, y: float, z: float, dt: float) -> None:
+        b = self._bin(x, y)
+        if b is None or self._frame is None or dt <= 0:
+            return
+        self._sum[b] += (z - self._frame[2]) * dt
+        self._n[b] += dt
+        self.learned_s += dt
+
+    def close_task(self) -> None:
+        """The iteration's update, after the task: F <- Q (F + L e) where this task measured, Q F elsewhere."""
+        seen = self._n > 0
+        e = np.where(seen, self._sum / np.maximum(self._n, 1e-12) - np.nan_to_num(self.F), 0.0)
+        self.F = np.where(seen, self.Q * (np.nan_to_num(self.F) + self.L * e), self.Q * self.F)
+
+    def to_json(self) -> Json:
+        return {"ilc": True, "half": self.half, "F": [None if np.isnan(v) else round(float(v), 7) for v in self.F]}
+
+    @staticmethod
+    def from_json(j: Json) -> PhaseILC:
+        return PhaseILC(float(j["half"]), list(j["F"]))
+
+
+Cerebellum = ContactModel | ModelBank | PhaseILC  # what S0's controller learns into: a model, a bank, or the time-indexed baseline
 
 
 class Program:
@@ -377,6 +452,7 @@ class Memory:
         # `contexts = "infer"`, no name: one ModelBank chooses and creates its modules by prediction error.
         self.infer = str(cfg.get("contexts", "named")) == "infer"
         self.cfg_offset_drift = float(cfg.get("offset_drift_m", 0.0))
+        self.kind = str(cfg.get("contact_model", "kalman"))  # "kalman" (the map), or "ilc" (the time-indexed baseline)
         self.context = "bank" if self.infer else "shared" if cfg.get("shared_model") else str(cfg.get("context", "default"))
 
     def save(self) -> None:
@@ -389,6 +465,8 @@ class Memory:
         m = self.data.setdefault("models", {}).get(self.context)
         if self.infer:
             return ModelBank.from_json(m) if m else ModelBank(half)
+        if self.kind == "ilc":
+            return PhaseILC.from_json(m) if m else PhaseILC(half)
         model = ContactModel.from_json(m) if m else ContactModel(half)
         # The stability-plasticity control: with `offset_drift_m`, one model keeps relearning the surface's offset fast,
         # so it follows a change of dish within a fraction of a second, but forgets the previous dish as fast.
@@ -454,8 +532,9 @@ class Memory:
         version from what it saw: the cells it observed clean after the
         teacher's run, the cells it observed dirty after its own run."""
         self.data["episodes"].append(episode)
-        if isinstance(model, ModelBank):
-            model.close_task()
+        close = getattr(model, "close_task", None)
+        if close is not None:  # the bank counts its modules' use, the ILC baseline updates its iteration
+            close()
         self.data.setdefault("models", {})[self.context] = model.to_json()
         kr = np.array(episode["kr_clean"], dtype=bool)
         changed = False

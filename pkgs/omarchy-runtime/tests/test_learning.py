@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from omarchy_runtime.learning import ContactModel, Memory, ModelBank, Program, Supervisor, train_student
+from omarchy_runtime.learning import ContactModel, Memory, ModelBank, PhaseILC, Program, Supervisor, train_student
 
 GOAL = {"force_n": 10.0, "force_min_n": 5.0, "force_max_n": 20.0}
 
@@ -79,6 +79,26 @@ class ModelBankTest(unittest.TestCase):
         wipe(bank, 0.017, 0.2)  # a dish no module explains
         self.assertIsNone(s.check(int(0.1e9), (0.6, 0.0, 0.017), 10.0, bank))  # the surprise must last 0.2 s
         self.assertIn("new context", s.check(int(0.35e9), (0.6, 0.0, 0.017), 10.0, bank) or "")
+
+
+class PhaseILCTest(unittest.TestCase):
+    def test_remembers_when_not_where(self) -> None:
+        ilc = PhaseILC(0.12)
+        ilc.frame = (0.6, 0.0, 0.035)
+        for i in range(2000):  # a task: in contact from 0.5 s to 1.5 s, the pad resting 3 mm under the believed top
+            ilc.tick(i * 1_000_000)
+            if 500 <= i < 1500:
+                ilc.learn(0.6, 0.0, 0.032, 0.001)
+        ilc.close_task()
+        ilc = PhaseILC.from_json(ilc.to_json())
+        ilc.frame = (0.62, 0.01, 0.035)  # the next task, the plate moved: the same time, anywhere on it
+        for i in range(1001):
+            ilc.tick(i * 1_000_000)
+        self.assertAlmostEqual(ilc.predict(0.5, -0.1) or 0.0, 0.035 + 0.99 * -0.003, delta=1e-6)
+        ilc.frame = (0.6, 0.0, 0.035)
+        ilc.tick(0)
+        ilc.tick(200_000_000)
+        self.assertIsNone(ilc.predict(0.6, 0.0))  # at 0.2 s it has nothing: the last task touched only from 0.5 s
 
 
 class StudentTest(unittest.TestCase):

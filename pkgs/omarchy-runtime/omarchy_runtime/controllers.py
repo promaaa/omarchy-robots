@@ -148,6 +148,9 @@ class CartesianImpedance:
         assert state.ee is not None and state.jacobian is not None and state.velocity is not None
         dt = (now - self._last) / 1e9 if self._last is not None else 0.0
         self._last = now
+        tick = getattr(self.cerebellum, "tick", None)
+        if tick is not None:  # a learner indexed by time (learning.PhaseILC) reads S0's clock
+            tick(now)
         if intent is not self._intent:
             self._intent, self._hold = intent, np.array(state.ee)
         m = intent.motion
