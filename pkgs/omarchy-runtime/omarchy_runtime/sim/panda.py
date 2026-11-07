@@ -171,14 +171,15 @@ def build(world: Json) -> mujoco.MjModel:
         friction=[float(p["friction"]), 0.005, 0.0001],
         priority=1,
     )
-    for n, (cx, cy) in enumerate(cells(world)):  # the dirt: drawn only, never touched
+    hard = stubborn(world)
+    for n, (cx, cy) in enumerate(cells(world)):  # the dirt: drawn only, never touched; a stubborn stain darker
         size = (2 * (side - float(d["margin_m"]))) / int(d["cells"]) / 2
         plate.add_geom(
             name=f"dirt{n}",
             type=mujoco.mjtGeom.mjGEOM_BOX,
             pos=[cx, cy, thick / 2 + 0.0005],
             size=[size * 0.92, size * 0.92, 0.0005],
-            rgba=d.get("rgba", [0.45, 0.3, 0.12, 1]),
+            rgba=[0.25, 0.15, 0.05, 1] if n in hard else d.get("rgba", [0.45, 0.3, 0.12, 1]),
             contype=0,
             conaffinity=0,
         )
@@ -241,6 +242,16 @@ def _camera(parent: mujoco.MjsBody, name: str, pos: Array, target: Array, up: Ar
     parent.add_camera(name=name, pos=pos, xyaxes=[*x, *np.cross(x, f)], fovy=fovy)
 
 
+def stubborn(world: Json) -> set[int]:
+    """The cells of a stubborn stain (`dirt.stubborn = {patch = [column, row, size], factor = ...}`): a square patch of
+    the grid whose cells need `factor` times the dwell to come clean."""
+    st = world["dirt"].get("stubborn")
+    if not st:
+        return set()
+    n, (c0, r0, size) = int(world["dirt"]["cells"]), (int(v) for v in st["patch"])
+    return {r * n + c for r in range(r0, r0 + size) for c in range(c0, c0 + size)}
+
+
 def cells(world: Json) -> Array:
     """The dirt cells' centres in the plate's frame (x, y), row by row."""
     d, side = world["dirt"], float(world["plate"]["half"])
@@ -277,6 +288,9 @@ class PandaWorld:
         self.half = _get(world["sponge"], "half")
         d = world["dirt"]
         self.f_min, self.t_min = float(d["f_min_n"]), float(d["t_min_s"])
+        self.need = np.full(len(self.cells), self.t_min)  # the dwell each cell needs: more for a stubborn stain
+        for n in stubborn(world):
+            self.need[n] *= float(d["stubborn"]["factor"])
         self.dwell = np.zeros(len(self.cells))
         self.clean_at = np.full(len(self.cells), -1, dtype=np.int64)
         self.rng = rng
@@ -417,7 +431,7 @@ class PandaWorld:
         if normal >= self.f_min:
             under = self.under_sponge()
             self.dwell[under] += seconds(STEP)
-            done = (self.dwell >= self.t_min) & (self.clean_at < 0)
+            done = (self.dwell >= self.need) & (self.clean_at < 0)
             self.clean_at[done] = now
             if done.any():  # every camera now sees the cell clean (the demonstrations' frames were drawn so)
                 self.model.geom_rgba[self.dirt[done], 3] = 0.0

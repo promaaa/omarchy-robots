@@ -116,6 +116,20 @@ class StudentTest(unittest.TestCase):
 
 
 class ProgramTest(unittest.TestCase):
+    def test_insists_on_a_covered_cell_and_merges(self) -> None:
+        p = Program.empty(0.12, 0.05, 0.035)
+        for x in (-0.06, 0.06):
+            p.include(x, 0.0, 0.09)
+        self.assertTrue(p.insist(0.0, 0.0, 0.09))  # a covered cell stayed dirty: scrub around it
+        self.assertFalse(p.insist(0.0, 0.01, 0.09))  # the same line, already inside that scrub
+        self.assertTrue(p.insist(0.05, 0.0, 0.09))  # overlapping: the scrub grows
+        self.assertEqual(len(p.scrubs), 1)
+        y, a, b = p.scrubs[0]
+        self.assertAlmostEqual(a, -0.045)
+        self.assertAlmostEqual(b, 0.09)
+        self.assertEqual(p.strokes()[-2:], [(y, a, b), (y, b, a)])  # there and back, after the raster
+        self.assertEqual(Program.from_json(p.to_json()).scrubs, p.scrubs)
+
     def test_includes_cells_and_strokes_alternate(self) -> None:
         p = Program.empty(0.12, 0.05, 0.035)
         self.assertEqual(p.strokes(), [])

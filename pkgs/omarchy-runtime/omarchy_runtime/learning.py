@@ -364,10 +364,13 @@ class Program:
 
     REACH = 0.045
 
-    def __init__(self, lines: list[float], extents: list[list[float] | None], version: int = 0) -> None:
+    def __init__(
+        self, lines: list[float], extents: list[list[float] | None], version: int = 0, scrubs: list[list[float]] | None = None
+    ) -> None:
         self.lines = lines
         self.extents = extents
         self.version = version
+        self.scrubs = scrubs or []  # [y, x0, x1]: where to go back and forth once more, after the raster
 
     @staticmethod
     def empty(half: float, margin: float, spacing: float) -> Program:
@@ -395,24 +398,50 @@ class Program:
         return True
 
     def strokes(self) -> list[tuple[float, float, float]]:
-        """(y, x_from, x_to) in order, alternating direction: a raster over the lines in use."""
+        """(y, x_from, x_to) in order, alternating direction: a raster over the lines in use, then each scrub, there
+        and back."""
         out = []
         for n, (y, e) in enumerate((v, e) for v, e in zip(self.lines, self.extents, strict=True) if e is not None):
             a, b = (e[0], e[1]) if n % 2 == 0 else (e[1], e[0])
             out.append((y, a, b))
+        for y, x0, x1 in self.scrubs:
+            out += [(y, x0, x1), (y, x1, x0)]
         return out
+
+    SCRUBS = 6  # the most scrub segments the habit keeps
+
+    def insist(self, x: float, y: float, limit: float) -> bool:
+        """A cell the strokes cover stayed dirty: scrub once more over it, on its nearest line (merged with a scrub
+        already there). True if the program changed."""
+        if self.extents[self.nearest(y)] is None:
+            return False
+        v = self.lines[self.nearest(y)]
+        a, b = float(np.clip(x - self.REACH, -limit, limit)), float(np.clip(x + self.REACH, -limit, limit))
+        for s in self.scrubs:
+            if s[0] == v and a <= s[2] and b >= s[1]:
+                if a >= s[1] and b <= s[2]:
+                    return False
+                s[1], s[2] = min(s[1], a), max(s[2], b)
+                return True
+        if len(self.scrubs) >= self.SCRUBS:
+            return False
+        self.scrubs.append([v, a, b])
+        return True
 
     def predicted(self, cells: np.ndarray) -> float:
         """The share of cells (n x 2, the surface's frame) the strokes cover."""
         return float(np.mean([self.covers(float(x), float(y)) for x, y in cells])) if len(cells) else 0.0
 
     def to_json(self) -> Json:
-        return {"version": self.version, "lines": self.lines, "extents": self.extents}
+        return {"version": self.version, "lines": self.lines, "extents": self.extents, "scrubs": self.scrubs}
 
     @staticmethod
     def from_json(j: Json) -> Program:
         return Program(
-            [float(v) for v in j["lines"]], [None if e is None else [float(e[0]), float(e[1])] for e in j["extents"]], int(j["version"])
+            [float(v) for v in j["lines"]],
+            [None if e is None else [float(e[0]), float(e[1])] for e in j["extents"]],
+            int(j["version"]),
+            [[float(v) for v in s] for s in j.get("scrubs", [])],
         )
 
 
@@ -545,16 +574,24 @@ class Memory:
             if self.data["demoted"] > 0:
                 self.data["demoted"] -= 1
         elif episode["driver"] == "habit":
-            for (x, y), clean in zip(cells, kr, strict=True):
-                if not clean:
+            # Knowledge of results. A dirty cell the strokes miss: extend them. A dirty cell they cover, seen dirty after
+            # two habit runs in a row (not the camera's noise): scrub it once more. The habit can then do better than the
+            # teacher, whose one pass leaves a stubborn stain.
+            counts = self.data.setdefault("dirty_counts", [0] * len(cells))
+            for i, ((x, y), clean) in enumerate(zip(cells, kr, strict=True)):
+                covered = program.covers(float(x), float(y))
+                counts[i] = 0 if clean or not covered else counts[i] + 1
+                if not clean and not covered:
                     changed |= program.include(float(x), float(y), limit)
+                elif counts[i] >= 2:
+                    changed |= program.insist(float(x), float(y), limit)
             taught = self.teacher_runs()
             mean = float(np.mean([e["kr_coverage"] for e in taught])) if taught else 0.0
             recent = [e for e in self.data["episodes"] if e["driver"] != "teacher"][-2:]
             if len(recent) == 2 and all(e["driver"] == "habit" and e["kr_coverage"] < mean - self.delta for e in recent):
                 self.data["demoted"] = self.rest
         if changed or not self.data["programs"]:
-            program = Program(program.lines, program.extents, program.version + 1)
+            program = Program(program.lines, program.extents, program.version + 1, program.scrubs)
             self.data["programs"].append(program.to_json() | {"after_episode": len(self.data["episodes"])})
         self.save()
         return program
