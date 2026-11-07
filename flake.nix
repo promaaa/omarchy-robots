@@ -23,7 +23,7 @@
     }:
     let
       inherit (nixpkgs) lib;
-      version = "0.0.3";
+      version = "0.1.0";
       boards = import ./modules/boards.nix;
       jetsonBoards = lib.filterAttrs (_: board: board ? som) boards;
       pkgs = nixpkgs.legacyPackages.x86_64-linux.extend self.overlays.default;
@@ -48,16 +48,41 @@
           };
         }
       ];
-      robot = target: extraModules: lib.nixosSystem { modules = robotModules target ++ extraModules; };
+      robotSystem =
+        target: extraModules: lib.nixosSystem { modules = robotModules target ++ extraModules; };
       onBoard = board: { omarchy.robot.board = lib.mkForce board; };
       # NVIDIA's flashing tools are x86_64 binaries: like jetpack-nixos, build
       # the flash scripts from an x86_64 build platform.
       crossFromX86 = {
         nixpkgs.buildPlatform = "x86_64-linux";
       };
-      flash =
+      flashSystem = target: extraModules: robotSystem target (extraModules ++ [ crossFromX86 ]);
+      flash = target: extraModules: (flashSystem target extraModules).config.system.build.flashScript;
+      # jetpack-nixos stamps the firmware with a hash of its build, and
+      # ota-check-firmware (jetson.l4t) expects the robot's own build: a native
+      # one, while the flash script writes a cross one. The robot takes the
+      # firmware of its flash script, so both name the same build.
+      robot =
         target: extraModules:
-        (robot target (extraModules ++ [ crossFromX86 ])).config.system.build.flashScript;
+        robotSystem target (
+          extraModules
+          ++ [
+            (
+              { config, ... }:
+              {
+                config = lib.mkIf config.hardware.nvidia-jetpack.enable {
+                  nixpkgs.overlays = lib.mkAfter [
+                    (_: prev: {
+                      nvidia-jetpack = prev.nvidia-jetpack.overrideScope (
+                        _: _: { inherit ((flashSystem target extraModules).pkgs.nvidia-jetpack) uefi-firmware; }
+                      );
+                    })
+                  ];
+                };
+              }
+            )
+          ]
+        );
       installerModules = target: [
         (import ./modules/installer.nix target)
         jetpack.nixosModules.default

@@ -5,6 +5,30 @@ Every release of Omarchy Robots, newest first. The same text is on each
 
 ## Unreleased
 
+## v0.1.0
+
+This release runs Omarchy Robots on a real robot computer for the first time. A Jetson AGX Orin developer kit was flashed, installed from a USB stick and checked with `omarchy-robot validate`: every check passed, the GPU, CUDA and TensorRT included, and only the camera check was skipped, as no camera was connected. Updates and rollbacks worked across reboots. The other Jetson boards and the PC build but have not run on hardware yet, and the runtime still runs in simulation only.
+
+### Highlights
+
+#### Run on a Jetson AGX Orin developer kit
+
+The firmware is flashed from a Linux computer over USB, the system is installed from a USB stick onto the kit's NVMe drive, and the kit then boots from the drive in about 35 seconds. On a kit with a 64 GB module and a 1 TB drive, `omarchy-robot validate` checked the board, its firmware, the GPU, CUDA 12.6 and a TensorRT sample.
+
+#### Update and roll back on the robot
+
+A change to `robot.nix` reaches the kit over the network in about two minutes. It is built on the computer, and nothing is compiled on the robot. The new system stays after a reboot, and `omarchy-robot rollback` brings back the previous one, also across a reboot.
+
+### Improvements
+
+- Add the way into recovery mode without the buttons to the bring-up guide
+- Mark the Jetson AGX Orin developer kit as hardware-tested in the support matrix and the manual
+
+### Fixes
+
+- Fix the firmware check that failed right after a flash on a Jetson: the robot now expects the firmware its flash script writes
+- Fix the Jetson build with the GPU checks, which failed because NVIDIA replaced the TensorRT sample data it downloads
+
 ## v0.0.3
 
 This release lets the robot ask its arm for more than a path. The motion policy (S1) can now tell the arm's controller (S0) to press at about 10 N, to keep contact, or to move an object, and a guard checks every command before it reaches the motors. It adds a simulated Franka Panda that scrubs a plate, and the first drivers for a real Franka Panda and an AgileX PiPER. Everything runs in simulation, in virtual machines, or against fake arms; no real arm has run it yet.

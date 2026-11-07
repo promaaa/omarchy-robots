@@ -23,13 +23,14 @@ An Orin Nano Super kit is the same hardware as an Orin Nano kit. "Super" is a fi
 
 Each target climbs four levels: **evaluates** (the system, its flash script and its installer image evaluate and pass the per-board assertions), **builds**, **VM-tested**, and **hardware-tested**.
 
-| Target | Level, as of v0.0.2 (2026-10-08) |
+| Target | Level, as of v0.1.0 (2026-10-29) |
 |---|---|
 | `vm` | VM-tested: boot, SSH, firewall, identity, `validate`, update and rollback across a reboot, installation onto a blank disk |
 | `pc` | Builds; install path VM-tested (installer image onto an emulated NVMe drive, boot, `validate`). Not hardware-tested |
-| `orin-agx-devkit`, `orin-nx-devkit`, `orin-nx-super-devkit`, `orin-nano-devkit`, `orin-nano-super-devkit`, `thor-agx-devkit` | Builds: system, installer image and flash script |
+| `orin-agx-devkit` | Hardware-tested on one developer kit, with `gpu.enable`: flashed, installed from a USB stick, `validate` passes (`camera` skipped, none connected), update and rollback across reboots |
+| `orin-nx-devkit`, `orin-nx-super-devkit`, `orin-nano-devkit`, `orin-nano-super-devkit`, `thor-agx-devkit` | Builds: system, installer image and flash script |
 
-**No target is hardware-tested yet.** The README's [support matrix](https://github.com/promaaa/omarchy-robots#support-matrix) carries the dated measurements behind each row: closure sizes, build times and which host built what.
+**Only `orin-agx-devkit` is hardware-tested.** The README's [support matrix](https://github.com/promaaa/omarchy-robots#support-matrix) carries the dated measurements behind each row: closure sizes, build times and which host built what.
 
 ## The `pc` board
 
