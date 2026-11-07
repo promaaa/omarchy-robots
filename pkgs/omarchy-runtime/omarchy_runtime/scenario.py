@@ -266,7 +266,14 @@ def _body_side(
             make = ScriptedWiper
         if learner:
             watched = model if model is not None else learning.ContactModel(half)  # without a cerebellum, it learns nothing
-            return world, s0, sensor, lambda i: learning.Arbiter(i, params, world, lambda p: make(i, p), memory, watched)
+            cells = learning.cells_of(cfg["world"])
+            reads = lambda: float(world.wrench[2])  # noqa: E731  # the force estimate S0 reads: filtered, noisy
+            return (
+                world,
+                s0,
+                sensor,
+                lambda i: learning.Arbiter(i, params, lambda p: make(i, p), memory, watched, half=half, cells=cells, force=reads),
+            )
         return world, s0, sensor, lambda i: make(i, params)
     if body.kind == "mujoco_arm":
         try:

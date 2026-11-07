@@ -794,22 +794,29 @@ class Arbiter:
         self,
         implementation: str,
         params: Json,
-        world: Any,
         teacher: Callable[[Json], S1Policy],
         memory: Memory,
         model: Cerebellum,
+        *,
+        half: float,
+        cells: np.ndarray,
+        force: Callable[[], float],
     ) -> None:
+        """`half`: the surface's half side (m). `cells`: the dirt cells' centres in its frame, as the camera reports
+        them. `force`: the normal force estimate S0 reads (N), for the supervisor. The composition gives all three
+        (the simulated Panda's, or a real robot's): the arbiter never reads a simulator."""
         self.source = implementation
         self.params = params
         self.cfg: Json = params.get("learning", {})
-        self.world = world
         self.make_teacher = teacher
+        self.cells = cells
+        self.force = force
         self.memory = memory
         self.model = model
         self.supervise = bool(self.cfg.get("supervisor", True))
         busy = self.cfg.get("busy")  # [from s, for s]: S1 busy elsewhere for that window of the task (a dual task)
         self.busy = (float(busy[0]), float(busy[1])) if busy else None
-        self.half = float(world.cfg["plate"]["half"])
+        self.half = float(half)
         self.margin = float(params["margin_m"])
         self.spacing = float(params["line_spacing_m"])
         self.program = memory.program(self.half, self.margin, self.spacing)
@@ -838,8 +845,7 @@ class Arbiter:
         self.top = float(e["z"] + g["height"] / 2)
         self.model.frame = (float(e["x"]), float(e["y"]), self.top)
         self._args = (goal, belief, body, conditioning)
-        cells = cells_of(self.world.cfg)
-        self.driving, self.reason = self.memory.decide(self.goal_params(), self.top, self.program, cells)
+        self.driving, self.reason = self.memory.decide(self.goal_params(), self.top, self.program, self.cells)
         if self.driving == "habit":
             params = self.params | self.memory.learned_goal()
             habit: ScriptedWiper
@@ -878,8 +884,7 @@ class Arbiter:
         if self.driving != "habit" and self.busy is not None and self.busy[0] <= (now - self._t0) / 1e9 < sum(self.busy):
             return None  # S1 is busy elsewhere (a dual task): it computes nothing, S0 runs what it holds
         if self.driving == "habit" and self.supervise and observation is not None and observation.proprio is not None:
-            force = float(self.world.wrench[2])  # the force estimate S0 reads: filtered, noisy
-            what = self.supervisor.check(now, observation.proprio.ee, force, self.model)
+            what = self.supervisor.check(now, observation.proprio.ee, self.force(), self.model)
             if what is not None:
                 self.events.append({"t": now, "event": "handback", "why": what})
                 self.driving = "habit+teacher"
