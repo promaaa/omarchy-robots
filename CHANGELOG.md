@@ -26,6 +26,8 @@ S0 can now learn a task while S1 does it, then do it alone. A contact model in i
 - Record demonstrations from the scripted wiper, with a press flag, to fine-tune a VLA.
 - Recognize a surface by touch: a bank of contact models, chosen by prediction error, with no name given.
 - Compare what S0 keeps of S1: a program built from the results, a replay of S1's best run, or a small distilled network.
+- Compare the contact model with iterative learning control indexed by the task's time.
+- Put a stubborn stain on the simulated plate, and let the habit scrub where the plate stays dirty.
 
 ### Fixes
 
