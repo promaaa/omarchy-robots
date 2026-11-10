@@ -100,6 +100,16 @@ class PhaseILCTest(unittest.TestCase):
         ilc.tick(200_000_000)
         self.assertIsNone(ilc.predict(0.6, 0.0))  # at 0.2 s it has nothing: the last task touched only from 0.5 s
 
+    def test_a_gain_below_one_moves_by_a_part_of_the_error(self) -> None:
+        ilc = PhaseILC(0.12, gain=0.5)
+        for want in (0.5, 0.75):  # two periods: half the error, then half of what is left (times Q)
+            ilc.frame = (0.6, 0.0, 0.035)
+            ilc.tick(0)
+            ilc.learn(0.6, 0.0, 0.031, 0.001)
+            ilc.close_task()
+            ilc = PhaseILC.from_json(ilc.to_json())
+            self.assertAlmostEqual(float(ilc.F[0]), -0.004 * want, delta=1e-4)
+
 
 class StudentTest(unittest.TestCase):
     def test_the_distilled_network_follows_a_taught_stroke_from_a_disturbed_start(self) -> None:

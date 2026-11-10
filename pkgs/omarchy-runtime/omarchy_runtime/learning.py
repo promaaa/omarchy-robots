@@ -283,15 +283,17 @@ class PhaseILC:
     feedforward height at time t of the next task is Q (F(t) + L e(t)), e(t) the pad's rest height at the same time of
     this task minus F(t), with Q = 0.99 and L = 1 as Gams et al. use (p.5); bins of `BIN_S` seconds from the start of
     the task. It knows when, not where: it has no map of the surface, so it helps only if the next movement repeats this
-    one in time."""
+    one in time. With `gain` below 1 (`learning.ilc_gain`), the reference moves by a part of the error each period, as
+    the trajectory adaptation of Li et al. 2018 does once a force sensor closes the force loop (eq. 26, p.4, and
+    p.4 "Implicit and explicit force sensing"; note 213); Q is then their decay, 1 - beta with beta = 0.01 (p.8)."""
 
     BIN_S = 0.02
     Q = 0.99
     L = 1.0
     SPAN_S = 60.0
 
-    def __init__(self, half: float, f: list[float | None] | None = None) -> None:
-        self.half = float(half)
+    def __init__(self, half: float, f: list[float | None] | None = None, gain: float = L) -> None:
+        self.half, self.L = float(half), float(gain)
         n = int(self.SPAN_S / self.BIN_S)
         self.F = np.array([np.nan if v is None else v for v in f], dtype=np.float64) if f else np.full(n, np.nan)
         self._sum, self._n = np.zeros(n), np.zeros(n)
@@ -345,11 +347,11 @@ class PhaseILC:
         self.F = np.where(seen, self.Q * (np.nan_to_num(self.F) + self.L * e), self.Q * self.F)
 
     def to_json(self) -> Json:
-        return {"ilc": True, "half": self.half, "F": [None if np.isnan(v) else round(float(v), 7) for v in self.F]}
+        return {"ilc": True, "half": self.half, "L": self.L, "F": [None if np.isnan(v) else round(float(v), 7) for v in self.F]}
 
     @staticmethod
     def from_json(j: Json) -> PhaseILC:
-        return PhaseILC(float(j["half"]), list(j["F"]))
+        return PhaseILC(float(j["half"]), list(j["F"]), float(j.get("L", PhaseILC.L)))
 
 
 Cerebellum = ContactModel | ModelBank | PhaseILC  # what S0's controller learns into: a model, a bank, or the time-indexed baseline
@@ -482,6 +484,7 @@ class Memory:
         self.infer = str(cfg.get("contexts", "named")) == "infer"
         self.cfg_offset_drift = float(cfg.get("offset_drift_m", 0.0))
         self.kind = str(cfg.get("contact_model", "kalman"))  # "kalman" (the map), or "ilc" (the time-indexed baseline)
+        self.ilc_gain = float(cfg.get("ilc_gain", PhaseILC.L))  # below 1: the gradual law of Li et al. 2018
         self.context = "bank" if self.infer else "shared" if cfg.get("shared_model") else str(cfg.get("context", "default"))
 
     def save(self) -> None:
@@ -495,7 +498,7 @@ class Memory:
         if self.infer:
             return ModelBank.from_json(m) if m else ModelBank(half)
         if self.kind == "ilc":
-            return PhaseILC.from_json(m) if m else PhaseILC(half)
+            return PhaseILC.from_json(m) if m else PhaseILC(half, gain=self.ilc_gain)
         model = ContactModel.from_json(m) if m else ContactModel(half)
         # The stability-plasticity control: with `offset_drift_m`, one model keeps relearning the surface's offset fast,
         # so it follows a change of dish within a fraction of a second, but forgets the previous dish as fast.
