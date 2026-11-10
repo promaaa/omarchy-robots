@@ -23,6 +23,11 @@ held_m = 0.13  # the sponge's top this far from the flange, between the fingerti
 mass_kg = 0.05
 friction = 0.3
 solref_s = 0.05  # a soft contact
+# With `columns = [across, along]`, the foam is a bed of sprung columns, each tied to its neighbours (a Pasternak
+# foundation), so the underside follows a slope or a curve; without it, the sponge is one rigid block.
+foam_n_m = 1000.0  # the whole pad: 1 cm at 10 N
+foam_stroke_m = 0.03  # the most a column gives
+foam_shear = 2.0  # a spring to each neighbour, in column stiffnesses: an unsupported column stays level with the others
 scrub_layer = [0.16, 0.5, 0.22, 1.0]  # drawn only: the green scouring side, down
 
 [gripper]

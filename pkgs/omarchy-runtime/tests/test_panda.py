@@ -91,6 +91,16 @@ class TestScrubbing(unittest.TestCase):
         self.assertEqual(w.coverage(), 1.0)
         self.assertLess(float(np.linalg.norm(w.plate_pose()[:2] - w.plate0[:2])), 0.001)  # the plate stays
 
+    def test_a_foam_of_columns_wipes_the_flat_plate_within_bounds(self) -> None:
+        r = run("scrub_contact", tmpdir() / "scrub_foam", overrides={"world": {"sponge": {"columns": [3, 6]}}})
+        (s,) = r.summaries
+        w: Any = r.world
+        self.assertEqual((s["outcome"], len(w.pads)), ("SUCCEEDED", 18))  # the columns touch, not the block
+        self.assertGreaterEqual(w.coverage(), 0.95)
+        self.assertLess(s["fidelity"]["force_peak"], 20.0)
+        none = w.pressed(np.full(18, w.f_min / 18 - 0.01))  # every column under its share of the cleaning force
+        self.assertFalse(none.any())
+
     def test_the_same_seed_gives_the_same_trace(self) -> None:
         again = run("scrub_weak", tmpdir() / "scrub_weak_again", record_s0=True)
         self.assertEqual(trace(scenario("scrub_weak").dir), trace(again.dir))

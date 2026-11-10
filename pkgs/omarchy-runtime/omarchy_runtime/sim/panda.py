@@ -78,27 +78,75 @@ def build(world: Json) -> mujoco.MjModel:
     half = _get(s, "half")
     held = float(s.get("held_m", 0.0))  # how far from the flange a gripper holds the sponge's top
     sponge = spec.body("attachment").add_body(name="sponge", pos=[0, 0, held + half[2]], gravcomp=1)
+    foam = columns(world)
+    mass, friction = float(s["mass_kg"]), [float(s["friction"]), 0.005, 0.0001]
     sponge.add_geom(
         name="sponge",
         type=mujoco.mjtGeom.mjGEOM_BOX,
         size=half,
         rgba=[1.0, 0.85, 0.2, 1.0],
-        mass=float(s["mass_kg"]),
-        friction=[float(s["friction"]), 0.005, 0.0001],
+        mass=mass / 2 if len(foam) else mass,
+        friction=friction,
         priority=2,
         solref=s.get("solref", [float(s["solref_s"]), 1.0]),  # soft: a sponge; [-stiffness N/m, -damping N s/m] gives the spring directly
+        contype=0 if len(foam) else 1,  # with a foam of columns, the block is drawn only: it sinks into the surface as the foam gives
+        conaffinity=0 if len(foam) else 1,
     )
     sponge.add_site(name="pad", pos=[0, 0, half[2]])
-    if "scrub_layer" in s:  # drawn only: the green scouring side
+    layer = s.get("scrub_layer")  # drawn only: the green scouring side
+    if layer is not None and not len(foam):
         sponge.add_geom(
             type=mujoco.mjtGeom.mjGEOM_BOX,
             pos=[0, 0, half[2] - 0.002],
             size=[half[0] + 0.0005, half[1] + 0.0005, 0.0025],
-            rgba=s["scrub_layer"],
+            rgba=layer,
             contype=0,
             conaffinity=0,
             density=0,
         )
+    if len(foam):
+        # The foam as a bed of sprung columns: each gives way on its own spring (a Winkler foundation), so the
+        # underside follows a slope or a curve, and a spring to each neighbour holds it level with them (the foam's
+        # shear, a Pasternak foundation): a column past the plate's edge does not drop and catch the edge. A sphere
+        # per column touches; the whole pad compresses by 1 m per `foam_n_m` N.
+        nx, ny = (int(v) for v in s["columns"])
+        pitch = 2 * half[:2] / np.array([nx, ny])
+        radius, k, m1 = float(pitch.min()) / 2, float(s["foam_n_m"]) / len(foam), mass / 2 / len(foam)
+        shear = float(s["foam_shear"]) * k
+        for n, (cx, cy) in enumerate(foam):
+            column = sponge.add_body(name=f"column{n}", pos=[cx, cy, half[2] - radius], gravcomp=1)
+            column.add_joint(
+                name=f"column{n}",
+                type=mujoco.mjtJoint.mjJNT_SLIDE,
+                axis=[0, 0, -1],  # into the block
+                stiffness=k,
+                damping=2 * float(np.sqrt((k + 4 * shear) * m1)),
+                range=[0, float(s["foam_stroke_m"])],
+            )
+            for other in ([n + ny] if n + ny < len(foam) else []) + ([n + 1] if (n + 1) % ny else []):
+                tie = spec.add_tendon(name=f"shear{n}_{other}", stiffness=shear)
+                tie.wrap_joint(f"column{n}", 1.0)
+                tie.wrap_joint(f"column{other}", -1.0)
+            column.add_geom(
+                name=f"column{n}",
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=[radius, 0, 0],
+                mass=m1,
+                friction=friction,
+                priority=2,
+                conaffinity=0,  # the columns do not touch each other
+                group=3,  # not drawn
+            )
+            if layer is not None:
+                column.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_BOX,
+                    pos=[0, 0, radius - 0.002],
+                    size=[pitch[0] / 2, pitch[1] / 2, 0.0025],
+                    rgba=layer,
+                    contype=0,
+                    conaffinity=0,
+                    density=0,
+                )
     if "gripper" in world:
         _gripper(spec, world["gripper"])
     w = spec.worldbody
@@ -252,6 +300,17 @@ def stubborn(world: Json) -> set[int]:
     return {r * n + c for r in range(r0, r0 + size) for c in range(c0, c0 + size)}
 
 
+def columns(world: Json) -> Array:
+    """The foam's columns (`sponge.columns = [across, along]`): their centres in the sponge's frame (x, y).
+    Empty without it: the sponge is one rigid block."""
+    s = world["sponge"]
+    if "columns" not in s:
+        return np.zeros((0, 2))
+    half, (nx, ny) = _get(s, "half"), (int(v) for v in s["columns"])
+    xs, ys = (-half[i] + (np.arange(n) + 0.5) * (2 * half[i] / n) for i, n in ((0, nx), (1, ny)))
+    return np.array([(x, y) for x in xs for y in ys])
+
+
 def cells(world: Json) -> Array:
     """The dirt cells' centres in the plate's frame (x, y), row by row."""
     d, side = world["dirt"], float(world["plate"]["half"])
@@ -276,7 +335,10 @@ class PandaWorld:
         m = self.model
         self.pad = m.site("pad").id
         self.sponge = m.geom("sponge").id
-        self.plate_geom = m.geom("plate").id
+        self.foam = columns(world)  # the columns' centres in the sponge's frame; none: one rigid block
+        self.pitch = 2 * _get(world["sponge"], "half")[:2] / np.array(world["sponge"].get("columns", [1, 1]))
+        # What touches, and which column it is: the block itself, or each column's sphere.
+        self.pads = {m.geom(f"column{n}").id: n for n in range(len(self.foam))} or {self.sponge: 0}
         self.plate_body = m.body("plate").id
         self.plate_qpos = int(m.jnt_qposadr[m.joint("plate").id])
         self.n = len(body.dims)
@@ -350,6 +412,19 @@ class PandaWorld:
         out: NDArray[np.bool_] = inside & (np.abs(local[:, 2]) <= self.half[2] + near)
         return out
 
+    def pressed(self, press: Array) -> NDArray[np.bool_]:
+        """Which cells the sponge presses hard enough to clean, from each pad's normal force on the plate (`press`).
+        One rigid block: the cells under it, with at least `f_min_n`. A foam of columns: the cells under each column
+        that carries at least its share of `f_min_n` (the same pressure), wherever the others are."""
+        if not len(self.foam):
+            return self.under_sponge() if press[0] >= self.f_min else np.zeros(len(self.cells), dtype=np.bool_)
+        g = self.sponge
+        local = (self.cells_world() - self.data.geom_xpos[g]) @ self.data.geom_xmat[g].reshape(3, 3)
+        firm = self.foam[press >= self.f_min / len(self.foam)]
+        near = np.abs(local[:, None, :2] - firm[None, :, :]) <= self.pitch / 2
+        out: NDArray[np.bool_] = near.all(axis=2).any(axis=1)
+        return out
+
     # S0's RobotIO.
 
     def _step1(self) -> None:
@@ -411,16 +486,18 @@ class PandaWorld:
     def _contact(self, now: Ns) -> None:
         """The true forces of the step just taken, the force estimate S0 reads next, the dirt, and violations."""
         d, m, c6 = self.data, self.model, np.zeros(6)
-        force, normal = np.zeros(3), 0.0
+        force, press = np.zeros(3), np.zeros(len(self.pads))  # on the sponge; each pad's normal force on the plate
         for i in range(d.ncon):
             c = d.contact[i]
-            if self.sponge not in (c.geom1, c.geom2):
+            first = c.geom1 in self.pads
+            if not first and c.geom2 not in self.pads:
                 continue
             mujoco.mj_contactForce(m, d, i, c6)
             f = c.frame.reshape(3, 3).T @ c6[:3]  # on geom2, in the world
-            force += f if c.geom2 == self.sponge else -f
-            if self.plate_geom in (c.geom1, c.geom2):
-                normal += c6[0]
+            force += -f if first else f
+            if m.geom_bodyid[c.geom2 if first else c.geom1] == self.plate_body:
+                press[self.pads[c.geom1 if first else c.geom2]] += c6[0]
+        normal = float(press.sum())
         self.force, self.normal = force, normal
         self.wrench[:3] += self.alpha * (force + self.rng.normal(0.0, self.noise, 3) - self.wrench[:3])  # no torque estimate: zeros
         if normal >= CONTACT_N and "contact" not in self.first:
@@ -429,7 +506,7 @@ class PandaWorld:
         if "moving" not in self.first and np.abs(d.qvel[: self.n]).max() > 0.01:
             self.first["moving"] = now
         if normal >= self.f_min:
-            under = self.under_sponge()
+            under = self.pressed(press)
             self.dwell[under] += seconds(STEP)
             done = (self.dwell >= self.need) & (self.clean_at < 0)
             self.clean_at[done] = now
