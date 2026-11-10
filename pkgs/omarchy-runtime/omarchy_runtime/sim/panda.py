@@ -89,8 +89,8 @@ def build(world: Json) -> mujoco.MjModel:
         friction=friction,
         priority=2,
         solref=s.get("solref", [float(s["solref_s"]), 1.0]),  # soft: a sponge; [-stiffness N/m, -damping N s/m] gives the spring directly
-        contype=0 if len(foam) else 1,  # with a foam of columns, the block is drawn only: it sinks into the surface as the foam gives
-        conaffinity=0 if len(foam) else 1,
+        contype=0 if len(foam) else 3,  # with a foam of columns, the block is drawn only: it sinks into the surface as the foam gives
+        conaffinity=0 if len(foam) else 1,  # (bit 2 of contype: a bowl's facets)
     )
     sponge.add_site(name="pad", pos=[0, 0, half[2]])
     layer = s.get("scrub_layer")  # drawn only: the green scouring side
@@ -134,6 +134,7 @@ def build(world: Json) -> mujoco.MjModel:
                 mass=m1,
                 friction=friction,
                 priority=2,
+                contype=3,
                 conaffinity=0,  # the columns do not touch each other
                 group=3,  # not drawn
             )
@@ -219,13 +220,30 @@ def build(world: Json) -> mujoco.MjModel:
         friction=[float(p["friction"]), 0.005, 0.0001],
         priority=1,
     )
+    if p.get("bowl_m"):  # a bowl: its top as flat facets on the paraboloid, 4 cm deep, which only the sponge touches
+        w = side / FACETS
+        for c in np.array([(i, j) for i in range(FACETS) for j in range(FACETS)]) * 2 * w + w - side:
+            up = normal(world, c)
+            plate.add_geom(
+                type=mujoco.mjtGeom.mjGEOM_BOX,
+                pos=np.array([*c, thick / 2 + rise(world, c)]) - 0.02 * up,
+                zaxis=up,
+                size=[1.08 * w, 1.08 * w, 0.02],
+                rgba=[0.93, 0.94, 0.95, 1],
+                density=0,
+                friction=[float(p["friction"]), 0.005, 0.0001],
+                priority=1,
+                contype=0,
+                conaffinity=2,
+            )
     hard = stubborn(world)
-    for n, (cx, cy) in enumerate(cells(world)):  # the dirt: drawn only, never touched; a stubborn stain darker
+    for n, c in enumerate(cells(world)):  # the dirt: drawn only, never touched; a stubborn stain darker
         size = (2 * (side - float(d["margin_m"]))) / int(d["cells"]) / 2
         plate.add_geom(
             name=f"dirt{n}",
             type=mujoco.mjtGeom.mjGEOM_BOX,
-            pos=[cx, cy, thick / 2 + 0.0005],
+            pos=[*c, thick / 2 + rise(world, c) + 0.0005],
+            zaxis=normal(world, c),
             size=[size * 0.92, size * 0.92, 0.0005],
             rgba=[0.25, 0.15, 0.05, 1] if n in hard else d.get("rgba", [0.45, 0.3, 0.12, 1]),
             contype=0,
@@ -311,6 +329,25 @@ def columns(world: Json) -> Array:
     return np.array([(x, y) for x in xs for y in ys])
 
 
+FACETS = 12  # per side: the flat facets of a bowl's top
+
+
+def rise(world: Json, xy: Array) -> Array:
+    """How far the plate's top is above its centre at (x, y) in the plate's frame: nothing on a flat plate; with
+    `plate.bowl_m`, a bowl, its top a paraboloid with that radius of curvature (m), lowest at the centre."""
+    r = world["plate"].get("bowl_m")
+    out: Array = (xy**2).sum(axis=-1) / (2 * float(r)) if r else np.zeros(xy.shape[:-1])
+    return out
+
+
+def normal(world: Json, xy: Array) -> Array:
+    """The unit normal of the plate's top at (x, y), in the plate's frame."""
+    r = world["plate"].get("bowl_m")
+    up = np.array([-xy[0] / float(r), -xy[1] / float(r), 1.0]) if r else np.array([0.0, 0.0, 1.0])
+    out: Array = up / np.linalg.norm(up)
+    return out
+
+
 def cells(world: Json) -> Array:
     """The dirt cells' centres in the plate's frame (x, y), row by row."""
     d, side = world["dirt"], float(world["plate"]["half"])
@@ -347,6 +384,7 @@ class PandaWorld:
         self.cells = cells(world)
         self.dirt = np.array([m.geom(f"dirt{n}").id for n in range(len(self.cells))])  # drawn: hidden once clean
         self.thick = float(world["plate"]["thickness"])
+        self.rise = rise(world, self.cells)  # the top's height at each cell, above the top's centre: a bowl
         self.half = _get(world["sponge"], "half")
         d = world["dirt"]
         self.f_min, self.t_min = float(d["f_min_n"]), float(d["t_min_s"])
@@ -400,7 +438,7 @@ class PandaWorld:
         pose = self.plate_pose()
         rot = np.zeros(9)
         mujoco.mju_quat2Mat(rot, pose[3:7])
-        local = np.c_[self.cells, np.full(len(self.cells), self.thick / 2)]
+        local = np.c_[self.cells, self.thick / 2 + self.rise]
         out: Array = local @ rot.reshape(3, 3).T + pose[:3]
         return out
 

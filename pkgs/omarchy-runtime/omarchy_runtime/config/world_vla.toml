@@ -16,6 +16,8 @@ half = 0.12  # a 24 cm square
 thickness = 0.015
 mass_kg = 0.4
 friction = 1.0
+# bowl_m = 0.4  # a bowl instead of a flat plate: its top a paraboloid with this radius of curvature, lowest at the
+# centre (1.8 cm deep at 12 cm from it); the belief still gives the centre's height only
 
 [sponge]
 half = [0.022, 0.045, 0.02]  # across the fingers, along them, and its depth

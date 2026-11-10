@@ -101,6 +101,16 @@ class TestScrubbing(unittest.TestCase):
         none = w.pressed(np.full(18, w.f_min / 18 - 0.01))  # every column under its share of the cleaning force
         self.assertFalse(none.any())
 
+    def test_the_foam_wipes_a_bowl_the_block_cannot(self) -> None:
+        bowl = {"world": {"plate": {"bowl_m": 0.4}}}
+        foam = run("scrub_contact", tmpdir() / "bowl_foam", overrides=config.merge(bowl, {"world": {"sponge": {"columns": [3, 6]}}}))
+        block = run("scrub_contact", tmpdir() / "bowl_block", overrides=bowl)
+        w: Any = foam.world
+        self.assertAlmostEqual(float(w.rise.max()), 2 * 0.09**2 / (2 * 0.4), places=4)  # a corner cell, 9 cm out in x and in y
+        self.assertEqual(foam.summaries[0]["outcome"], "SUCCEEDED")
+        self.assertGreaterEqual(w.coverage(), 0.9)
+        self.assertLess(block.world.coverage(), 0.5)  # type: ignore[attr-defined]
+
     def test_the_same_seed_gives_the_same_trace(self) -> None:
         again = run("scrub_weak", tmpdir() / "scrub_weak_again", record_s0=True)
         self.assertEqual(trace(scenario("scrub_weak").dir), trace(again.dir))
