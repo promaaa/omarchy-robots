@@ -63,6 +63,16 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
     bank: Json = {}
     if isinstance(model, learning.ModelBank):  # which stored module explained this task, how many exist, how many were born
         bank = {"module": model.map_module(), "modules": len(model.modules), "births": model.births}
+    # How well the contact model knows the surface's shape, from ground truth: over the dirt cells where it predicts, the
+    # spread of its error once the mean is removed (the foam's compression and the belief's height error are common
+    # to the whole surface). The time-indexed baseline has no map.
+    shape: Json = {"shape_rms_mm": None, "shape_known": 0.0}
+    if model.frame is not None and not isinstance(model, learning.PhaseILC):
+        fx, fy, top = model.frame
+        guess = [model.predict(fx + cx, fy + cy) for cx, cy in w.cells]
+        err = np.array([g - top - h for g, h in zip(guess, w.rise, strict=True) if g is not None])
+        if len(err):
+            shape = {"shape_rms_mm": 1000 * float(np.std(err)), "shape_known": len(err) / len(guess)}
     record = {
         "k": k,
         "driver": learned["driver"],
@@ -96,10 +106,11 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
             "model_learned_s": learned["model_learned_s"],
             "context": memory.context,
             "context_true": record["context_true"],
-            "world_now": {"tilt_deg": cfg["world"]["plate"].get("tilt_deg"), "board_m": cfg["world"]["plate"].get("board_m", 0.0)}
-            | {"plate_bias_z_m": cfg["world"]["sensor"].get("plate_bias_z_m", 0.0)},
+            "world_now": {"bowl_m": cfg["world"]["plate"].get("bowl_m"), "board_m": cfg["world"]["plate"].get("board_m", 0.0)}
+            | {"plate_bias_z_m": cfg["world"]["sensor"].get("plate_bias_z_m", 0.0), "foam": cfg["world"]["sponge"].get("columns")},
         }
         | bank
+        | shape
     )
 
 
