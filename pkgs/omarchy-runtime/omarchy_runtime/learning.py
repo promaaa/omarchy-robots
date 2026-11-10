@@ -57,6 +57,7 @@ from omarchy_runtime.contracts import (
 from omarchy_runtime.sim.wipe import ScriptedWiper
 
 CONTACT_N = 1.0  # N: below this, the pad is not touching
+STEADY_N = 3.0  # N: contact this close to the target force is steady (CartesianImpedance.STEADY_N): the contact model learns there
 
 
 class ContactModel:
@@ -869,16 +870,20 @@ class NullTeacher:
 class Supervisor:
     """Watches the habit at S1's rate from what the robot measures (the force
     estimate S0 reads, the pad's position) against the contact model's
-    prediction. Surprise, any of: the pad in contact more than `surprise_m`
-    from where the model says it rests, for `hold_s`; the pad more than
-    `surprise_m` below that height without contact, for `hold_s` (the
-    surface is not there); the force over the contact's upper bound."""
+    prediction. Surprise, any of: the pad in steady contact (the force
+    within `STEADY_N` of the habit's target `wanted`, where the model learned:
+    before that a soft sponge is still giving way, and the pad is above where
+    it will rest) more than `surprise_m` from where the model says it rests,
+    for `hold_s`; the pad more than `surprise_m` below that height without
+    contact, for `hold_s` (the surface is not there); the force over the
+    contact's upper bound."""
 
-    def __init__(self, cfg: Json, upper: float) -> None:
+    def __init__(self, cfg: Json, upper: float, wanted: float) -> None:
         self.novelty = bool(cfg.get("novelty", True))  # with a ModelBank: a module born while the habit drives is a surprise
         self.surprise_m = float(cfg.get("surprise_m", 0.01))
         self.hold_s = float(cfg.get("hold_s", 0.2))
         self.upper = upper
+        self.wanted = wanted
         self._since: Ns | None = None
         self.last: str | None = None
 
@@ -893,7 +898,7 @@ class Supervisor:
                 what = "a new context: no stored contact model explains the contact"
             elif low is not None and force < CONTACT_N and ee[2] < low - self.surprise_m:
                 what = f"no contact {100 * (low - ee[2]):.1f} cm below every known surface"
-        elif rest is not None and force >= CONTACT_N and abs(ee[2] - rest) > self.surprise_m:
+        elif rest is not None and force >= CONTACT_N and abs(force - self.wanted) <= STEADY_N and abs(ee[2] - rest) > self.surprise_m:
             what = f"contact {100 * (ee[2] - rest):+.1f} cm from where the habit expects it"
         elif rest is not None and force < CONTACT_N and ee[2] < rest - self.surprise_m:
             what = f"no contact {100 * (rest - ee[2]):.1f} cm below where the habit expects the surface"
@@ -949,7 +954,7 @@ class Arbiter:
         self._report: Report | None = None
         self._sent = 0
         self.top = float("nan")
-        self.supervisor = Supervisor(self.cfg, float(params["force_max_n"]))
+        self.supervisor = Supervisor(self.cfg, float(params["force_max_n"]), float(params["force_n"]))
 
     def goal_params(self) -> Json:
         p = self.params
@@ -967,6 +972,7 @@ class Arbiter:
         self.driving, self.reason = self.memory.decide(self.goal_params(), self.top, self.program, self.cells)
         if self.driving == "habit":
             params = self.params | self.memory.learned_goal()
+            self.supervisor.wanted = float(params["force_n"])  # the force the habit presses with: the one it learned
             habit: ScriptedWiper
             if self.memory.form == "replay":
                 best = max((e for e in self.memory.teacher_runs() if e.get("path")), key=lambda e: e["kr_coverage"])

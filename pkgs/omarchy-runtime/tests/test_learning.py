@@ -74,7 +74,7 @@ class ModelBankTest(unittest.TestCase):
         wipe(bank, 0.032, 10.0)
         bank.close_task()
         bank.frame = (0.6, 0.0, 0.035)
-        s = Supervisor({}, upper=20.0)
+        s = Supervisor({}, upper=20.0, wanted=10.0)
         self.assertIsNone(s.check(0, (0.6, 0.0, 0.032), 10.0, bank))
         wipe(bank, 0.017, 0.2)  # a dish no module explains
         self.assertIsNone(s.check(int(0.1e9), (0.6, 0.0, 0.017), 10.0, bank))  # the surprise must last 0.2 s
@@ -188,12 +188,14 @@ class SupervisorTest(unittest.TestCase):
         m.frame = (0.6, 0.0, 0.015)
         for _ in range(1000):
             m.learn(0.6, 0.0, 0.012, 0.001)
-        s = Supervisor({"hold_s": 0.2}, 20.0)
+        s = Supervisor({"hold_s": 0.2}, 20.0, 10.0)
         self.assertIsNone(s.check(0, (0.6, 0.0, 0.0125), 10.0, m))  # where it expects the surface
         self.assertIsNone(s.check(0, (0.6, 0.0, 0.03), 10.0, m))  # contact 1.8 cm high: not yet
         self.assertIsNone(s.check(100_000_000, (0.6, 0.0, 0.03), 10.0, m))
         self.assertIn("from where the habit expects it", s.check(200_000_000, (0.6, 0.0, 0.03), 10.0, m) or "")
-        self.assertIn("over the bound", Supervisor({"hold_s": 0.0}, 20.0).check(0, (0.6, 0.0, 0.0125), 25.0, m) or "")
+        self.assertIn("over the bound", Supervisor({"hold_s": 0.0}, 20.0, 10.0).check(0, (0.6, 0.0, 0.0125), 25.0, m) or "")
+        soft = Supervisor({"hold_s": 0.0}, 20.0, 10.0)  # a foam sponge at first touch: 2 N, the pad still above where it will rest
+        self.assertIsNone(soft.check(0, (0.6, 0.0, 0.03), 2.0, m))
 
 
 class VpiRuleTest(unittest.TestCase):
