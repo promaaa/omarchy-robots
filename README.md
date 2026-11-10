@@ -261,8 +261,11 @@ cleaned, an arbiter hands the task to the habit once it is learned, and a
 supervisor hands it back to S1 when something is new or the force goes too
 high. In simulation (runtime 95444c2, 5 seeds), after three tasks taught by
 pi0.5 the habit does the task alone: no inference instead of 62 per task, a
-peak force of 13.1 N instead of 21.8 N. The manual's chapter Runtime has the
-parts, the commands and what it does not show.
+peak force of 13.1 N instead of 21.8 N. On a curved bowl wiped with a foam
+sponge (`plate.bowl_m`, `sponge.columns`; runtime e94855c, 5 seeds), pi0.5
+alone cleans 89.6 % of the bowl and the learning S0 98.2 %, with no
+inference. The manual's chapter Runtime has the parts, the commands and what
+it does not show.
 
 ### S2 placement experiment
 

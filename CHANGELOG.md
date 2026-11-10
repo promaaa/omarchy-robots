@@ -28,6 +28,8 @@ S0 can now learn a task while S1 does it, then do it alone. A contact model in i
 - Compare what S0 keeps of S1: a program built from the results, a replay of S1's best run, or a small distilled network.
 - Compare the contact model with iterative learning control indexed by the task's time.
 - Put a stubborn stain on the simulated plate, and let the habit scrub where the plate stays dirty.
+- Wipe with a foam sponge that follows a slope or a curve (`sponge.columns`).
+- Put a curved bowl on the simulated table (`plate.bowl_m`), and record how well the contact model knows its shape.
 
 ### Fixes
 
@@ -35,6 +37,7 @@ S0 can now learn a task while S1 does it, then do it alone. A contact model in i
 - Hide a clean cell of dirt from every camera.
 - Retry the policy server's handshake when it times out.
 - Read S1's claim from the summary's claim field in the pick experiment.
+- Judge where contact comes once the contact is steady, so a soft sponge at first touch is not read as a surprise.
 
 ## v0.1.0
 
