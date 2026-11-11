@@ -390,9 +390,10 @@ class Program:
                 return True
         return False
 
-    def _limit(self, k: int, limit: float, round: bool) -> float:
-        """How far along x the pad's centre goes on line k: `limit`, or on a `round` dish that circle's chord."""
-        return chord(limit, self.lines[k]) if round else limit
+    @staticmethod
+    def _limit(y: float, limit: float, round: bool) -> float:
+        """How far along x the pad's centre goes on a stroke at y: `limit`, or on a `round` dish that circle's chord."""
+        return chord(limit, y) if round else limit
 
     def include(self, x: float, y: float, limit: float, round: bool = False) -> bool:
         """Extend a line to reach (x, y): the nearest one whose stroke can cover it (on a `round` dish the outer
@@ -400,9 +401,9 @@ class Program:
         if self.covers(x, y):
             return False
         near = sorted(range(len(self.lines)), key=lambda k: abs(y - self.lines[k]))
-        can = (k for k in near if abs(y - self.lines[k]) <= self.REACH and abs(x) <= self._limit(k, limit, round) + self.ALONG)
+        can = (k for k in near if abs(y - self.lines[k]) <= self.REACH and abs(x) <= self._limit(self.lines[k], limit, round) + self.ALONG)
         k = next(can, near[0])
-        reach = self._limit(k, limit, round)
+        reach = self._limit(self.lines[k], limit, round)
         target = float(np.clip(x, -reach, reach))
         e = self.extents[k]
         self.extents[k] = [target, target] if e is None else [min(e[0], target), max(e[1], target)]
@@ -421,29 +422,31 @@ class Program:
 
     SCRUBS = 6  # the most scrub segments the habit keeps
 
-    def insist(self, x: float, y: float, limit: float, round: bool = False) -> bool:
+    def insist(self, x: float, y: float, limit: float, round: bool = False, closer: bool = False) -> bool:
         """A cell the strokes cover stayed dirty: scrub once more over it, on the nearest line that covers it (merged
-        with a scrub already there). True if the program changed."""
+        with a scrub already there). `closer`: the cell stayed dirty after a run with that scrub, so scrub right over
+        the cell, where the pad's centre passes on it. True if the program changed."""
         cover = [
-            k
-            for k, (v, e) in enumerate(zip(self.lines, self.extents, strict=True))
+            v
+            for v, e in zip(self.lines, self.extents, strict=True)
             if e is not None and abs(y - v) <= self.REACH and e[0] - self.ALONG <= x <= e[1] + self.ALONG
         ]
         if not cover:
             return False
-        k = min(cover, key=lambda k: abs(y - self.lines[k]))
-        v, reach = self.lines[k], self._limit(k, limit, round)
-        a, b = float(np.clip(x - self.REACH, -reach, reach)), float(np.clip(x + self.REACH, -reach, reach))
-        for s in self.scrubs:
-            if s[0] == v and a <= s[2] and b >= s[1]:
-                if a >= s[1] and b <= s[2]:
-                    return False
-                s[1], s[2] = min(s[1], a), max(s[2], b)
+        for v in (min(cover, key=lambda v: abs(y - v)), y)[: 2 if closer else 1]:
+            reach = self._limit(v, limit, round)
+            a, b = float(np.clip(x - self.REACH, -reach, reach)), float(np.clip(x + self.REACH, -reach, reach))
+            mine = [s for s in self.scrubs if s[0] == v and a <= s[2] and b >= s[1]]
+            if mine and a >= mine[0][1] and b <= mine[0][2]:
+                continue  # this scrub is there already
+            if mine:
+                mine[0][1], mine[0][2] = min(mine[0][1], a), max(mine[0][2], b)
                 return True
-        if len(self.scrubs) >= self.SCRUBS:
-            return False
-        self.scrubs.append([v, a, b])
-        return True
+            if len(self.scrubs) >= self.SCRUBS:
+                return False
+            self.scrubs.append([v, a, b])
+            return True
+        return False
 
     def predicted(self, cells: np.ndarray) -> float:
         """The share of cells (n x 2, the surface's frame) the strokes cover."""
@@ -598,8 +601,9 @@ class Memory:
                 self.data["demoted"] -= 1
         elif episode["driver"] == "habit":
             # Knowledge of results. A dirty cell the strokes miss: extend them. A dirty cell they cover, seen dirty after
-            # two habit runs in a row (not the camera's noise): scrub it once more. The habit can then do better than the
-            # teacher, whose one pass leaves a stubborn stain.
+            # two habit runs in a row (not the camera's noise): scrub it once more, on its line. Still dirty after a run
+            # with that scrub: scrub right over it. The habit can then do better than the teacher, whose one pass
+            # leaves a stubborn stain.
             counts = self.data.setdefault("dirty_counts", [0] * len(cells))
             for i, ((x, y), clean) in enumerate(zip(cells, kr, strict=True)):
                 covered = program.covers(float(x), float(y))
@@ -607,7 +611,7 @@ class Memory:
                 if not clean and not covered:
                     changed |= program.include(float(x), float(y), limit, round)
                 elif counts[i] >= 2:
-                    changed |= program.insist(float(x), float(y), limit, round)
+                    changed |= program.insist(float(x), float(y), limit, round, closer=counts[i] >= 3)
             taught = self.teacher_runs()
             mean = float(np.mean([e["kr_coverage"] for e in taught])) if taught else 0.0
             recent = [e for e in self.data["episodes"] if e["driver"] != "teacher"][-2:]
