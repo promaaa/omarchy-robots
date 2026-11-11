@@ -11,7 +11,8 @@ the gripper's dimension, 1 where the teacher's contact mode is MAKE or
 MAINTAIN. Plates move by up to 3 cm per seed; the board under them keeps
 one height. Development tools only (MuJoCo).
 
-  python -m omarchy_runtime.vla_demos OUT_DIR FIRST LAST [BOARD_M]
+  python -m omarchy_runtime.vla_demos OUT_DIR FIRST LAST [BOARD_M] [WORLD_JSON]
+WORLD_JSON: changes to the world, such as a round plate and the foam sponge.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Any
 import mujoco
 import numpy as np
 
+from omarchy_runtime import config
 from omarchy_runtime import scenario as composition
 from omarchy_runtime.contracts import ContactMode
 from omarchy_runtime.sim.vla import DT, Cameras, resize_with_pad
@@ -65,11 +67,12 @@ def ik(model: mujoco.MjModel, data: mujoco.MjData, site: int, n: int, q0: np.nda
     return q
 
 
-def episode(seed: int, out: Path, board_m: float) -> dict[str, Any]:
+def episode(seed: int, out: Path, board_m: float, world: dict[str, Any] | None = None) -> dict[str, Any]:
     Teacher.made.clear()
+    where = plate_at(seed)
     over = {
         "scenario": {"seed": seed, "s1": {"policy": "script", "contact": True}},
-        "world": {"plate": {"center": plate_at(seed), "board_m": board_m}},
+        "world": config.merge({"plate": {"center": where, "board_m": board_m}, "objects": {"plate": {"x": where[0]}}}, world or {}),
     }
     run_dir = out / f"run-{seed:04d}"
     r = composition.run(SCENARIO, run_dir, overrides=over, record_s0=True)
@@ -83,7 +86,7 @@ def episode(seed: int, out: Path, board_m: float) -> dict[str, Any]:
     assert t0 is not None
     end = min(int(log["t"][-1]), t0 + int((teacher._end + TAIL_S) * 1e9))
     dirt = [model.geom(f"dirt{k}").id for k in range(len(log["cells"]))]
-    stain = model.geom_rgba[dirt[0]].copy()
+    stain = model.geom_rgba[dirt].copy()  # each cell keeps its own colour
     fk = mujoco.MjData(model)
     frames: dict[str, list[Any]] = {"exterior": [], "wrist": [], "joint_position": [], "actions": []}
     t = t0
@@ -92,8 +95,8 @@ def episode(seed: int, out: Path, board_m: float) -> dict[str, Any]:
         data.qpos[:] = log["qpos"][i]
         mujoco.mj_forward(model, data)
         clean = (log["clean_at"] >= 0) & (log["clean_at"] <= t)
-        for g, c in zip(dirt, clean, strict=True):
-            model.geom_rgba[g] = (0, 0, 0, 0) if c else stain
+        for k, (g, c) in enumerate(zip(dirt, clean, strict=True)):
+            model.geom_rgba[g] = (0, 0, 0, 0) if c else stain[k]
         views = cams.views()
         q = np.array(log["qpos"][i][:n])
         pos, mode = teacher._at((t + DT - t0) / 1e9)
@@ -124,10 +127,11 @@ def main() -> None:
     out = Path(sys.argv[1])
     first, last = int(sys.argv[2]), int(sys.argv[3])
     board = float(sys.argv[4]) if len(sys.argv) > 4 else 0.02
+    world = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
     out.mkdir(parents=True, exist_ok=True)
     composition.ScriptedWiper = Teacher  # type: ignore[attr-defined]  # the composition root builds the teacher: keep its plan
     for seed in range(first, last + 1):
-        info = episode(seed, out, board)
+        info = episode(seed, out, board, world)
         print(json.dumps(info), flush=True)
         with (out / "demos.jsonl").open("a") as f:
             f.write(json.dumps(info) + "\n")
