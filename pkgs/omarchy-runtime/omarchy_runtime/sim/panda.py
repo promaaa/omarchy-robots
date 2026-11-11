@@ -18,6 +18,7 @@ tools only (`omarchy-runtime-tools`): the robot's package has no MuJoCo.
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -202,9 +203,9 @@ def build(world: Json) -> mujoco.MjModel:
         parent = w.add_body(name="board", mocap=True, pos=[*p["center"], top + board / 2]) if "heave" in p else w
         parent.add_geom(
             name="board",
-            type=mujoco.mjtGeom.mjGEOM_BOX,
+            type=mujoco.mjtGeom.mjGEOM_CYLINDER if p.get("round") else mujoco.mjtGeom.mjGEOM_BOX,
             pos=[0, 0, 0] if "heave" in p else [*p["center"], top + board / 2],
-            size=[side + 0.03, side + 0.03, board / 2],
+            size=[side + 0.03, board / 2, 0] if p.get("round") else [side + 0.03, side + 0.03, board / 2],
             rgba=look.get("board", [0.78, 0.66, 0.5, 1]),
             friction=[float(p["friction"]), 0.005, 0.0001],
         )
@@ -213,14 +214,17 @@ def build(world: Json) -> mujoco.MjModel:
     plate.add_freejoint(name="plate")
     plate.add_geom(
         name="plate",
-        type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[side, side, thick / 2],
+        type=mujoco.mjtGeom.mjGEOM_CYLINDER if p.get("round") else mujoco.mjtGeom.mjGEOM_BOX,
+        size=[side, thick / 2, 0] if p.get("round") else [side, side, thick / 2],
         rgba=[0.93, 0.94, 0.95, 1],
         mass=float(p["mass_kg"]),
         friction=[float(p["friction"]), 0.005, 0.0001],
         priority=1,
+        group=3 if p.get("round") else 0,  # a round dish is drawn as one smooth mesh (below)
     )
-    if p.get("bowl_m"):  # a bowl: its top as flat facets on the paraboloid, 4 cm deep, which only the sponge touches
+    if p.get("round"):
+        _dish(spec, plate, world)
+    elif p.get("bowl_m"):  # a bowl: its top as flat facets on the paraboloid, 4 cm deep, which only the sponge touches
         w = side / FACETS
         for c in np.array([(i, j) for i in range(FACETS) for j in range(FACETS)]) * 2 * w + w - side:
             up = normal(world, c)
@@ -239,13 +243,15 @@ def build(world: Json) -> mujoco.MjModel:
     hard = stubborn(world)
     for n, c in enumerate(cells(world)):  # the dirt: drawn only, never touched; a stubborn stain darker
         size = (2 * (side - float(d["margin_m"]))) / int(d["cells"]) / 2
+        film = 1.0 if p.get("round") else 0.92  # on a round dish the cells touch: a film of sauce, not tiles
+        shade = 0.94 + 0.03 * ((n * 7) % 3) if p.get("round") else 1.0
         plate.add_geom(
             name=f"dirt{n}",
             type=mujoco.mjtGeom.mjGEOM_BOX,
             pos=[*c, thick / 2 + rise(world, c) + 0.0005],
             zaxis=normal(world, c),
-            size=[size * 0.92, size * 0.92, 0.0005],
-            rgba=[0.25, 0.15, 0.05, 1] if n in hard else d.get("rgba", [0.45, 0.3, 0.12, 1]),
+            size=[size * film, size * film, 0.0005],
+            rgba=[0.25, 0.15, 0.05, 1] if n in hard else [*(shade * np.array(d.get("rgba", [0.45, 0.3, 0.12, 1]))[:3]), 1.0],
             contype=0,
             conaffinity=0,
         )
@@ -315,7 +321,8 @@ def stubborn(world: Json) -> set[int]:
     if not st:
         return set()
     n, (c0, r0, size) = int(world["dirt"]["cells"]), (int(v) for v in st["patch"])
-    return {r * n + c for r in range(r0, r0 + size) for c in range(c0, c0 + size)}
+    index = np.cumsum(_grid(world)[1]) - 1  # a round dish keeps only the grid's cells within its circle
+    return {int(index[r * n + c]) for r in range(r0, r0 + size) for c in range(c0, c0 + size) if _grid(world)[1][r * n + c]}
 
 
 def columns(world: Json) -> Array:
@@ -333,27 +340,103 @@ FACETS = 12  # per side: the flat facets of a bowl's top
 
 
 def rise(world: Json, xy: Array) -> Array:
-    """How far the plate's top is above its centre at (x, y) in the plate's frame: nothing on a flat plate; with
-    `plate.bowl_m`, a bowl, its top a paraboloid with that radius of curvature (m), lowest at the centre."""
-    r = world["plate"].get("bowl_m")
-    out: Array = (xy**2).sum(axis=-1) / (2 * float(r)) if r else np.zeros(xy.shape[:-1])
+    """How far the dish's top is above its centre at (x, y) in the plate's frame: nothing on a flat plate. With
+    `plate.bowl_m`, a bowl: its top a paraboloid with that radius of curvature (m), lowest at the centre. With
+    `plate.rim_m`, a plate with a rim: flat within `plate.well_m` of the centre, then rising to `rim_m` at its edge."""
+    p = world["plate"]
+    r2 = (xy**2).sum(axis=-1)
+    out: Array = r2 / (2 * float(p["bowl_m"])) if p.get("bowl_m") else np.zeros(xy.shape[:-1])
+    if p.get("rim_m"):
+        well = float(p["well_m"])
+        out = out + float(p["rim_m"]) * (np.clip(np.sqrt(r2) - well, 0.0, None) / (float(p["half"]) - well)) ** 2
     return out
 
 
 def normal(world: Json, xy: Array) -> Array:
-    """The unit normal of the plate's top at (x, y), in the plate's frame."""
-    r = world["plate"].get("bowl_m")
-    up = np.array([-xy[0] / float(r), -xy[1] / float(r), 1.0]) if r else np.array([0.0, 0.0, 1.0])
+    """The unit normal of the dish's top at (x, y), in the plate's frame."""
+    p = world["plate"]
+    r = float(np.hypot(xy[0], xy[1]))
+    slope = r / float(p["bowl_m"]) if p.get("bowl_m") else 0.0
+    if p.get("rim_m") and r > float(p["well_m"]):
+        slope += 2 * float(p["rim_m"]) * (r - float(p["well_m"])) / (float(p["half"]) - float(p["well_m"])) ** 2
+    up = np.array([-slope * xy[0] / r, -slope * xy[1] / r, 1.0]) if r > 0 else np.array([0.0, 0.0, 1.0])
     out: Array = up / np.linalg.norm(up)
     return out
 
 
-def cells(world: Json) -> Array:
-    """The dirt cells' centres in the plate's frame (x, y), row by row."""
+def _grid(world: Json) -> tuple[Array, NDArray[np.bool_]]:
+    """The square grid of dirt cells (their centres, row by row), and which of them the dish carries: all of them on
+    a square plate, those within `dirt.margin_m` of the edge of a round one (`plate.round`: `plate.half` is its radius)."""
     d, side = world["dirt"], float(world["plate"]["half"])
     n, inner = int(d["cells"]), side - float(d["margin_m"])
     centres = -inner + (np.arange(n) + 0.5) * (2 * inner / n)
-    return np.array([(x, y) for y in centres for x in centres])
+    grid = np.array([(x, y) for y in centres for x in centres])
+    round = bool(world["plate"].get("round"))
+    keep: NDArray[np.bool_] = np.hypot(grid[:, 0], grid[:, 1]) <= inner if round else np.ones(len(grid), dtype=np.bool_)
+    return grid, keep
+
+
+def cells(world: Json) -> Array:
+    """The dirt cells' centres in the plate's frame (x, y), row by row."""
+    grid, keep = _grid(world)
+    out: Array = grid[keep]
+    return out
+
+
+def _dish(spec: mujoco.MjSpec, plate: mujoco.MjsBody, world: Json) -> None:
+    """A round dish (`plate.round`), a surface of revolution of radius `plate.half`: a plate with a rim (`rim_m`,
+    `well_m`) or a bowl (`bowl_m`). Its top, for the sponge: flat facets in rings on the surface, 4 cm deep, never
+    drawn. For the cameras: one smooth mesh, the same top, with a foot under it, that nothing touches."""
+    p = world["plate"]
+    side, thick, friction = float(p["half"]), float(p["thickness"]), [float(p["friction"]), 0.005, 0.0001]
+    flat = float(p.get("well_m", side)) if not p.get("bowl_m") else 0.012  # the plate's own flat top carries this disc
+    edges = np.linspace(flat, side, max(1, math.ceil((side - flat) / 0.012)) + 1)
+    for a, b in zip(edges, edges[1:], strict=False):
+        n = max(8, math.ceil(2 * math.pi * b / 0.022))
+        for phi in 2 * math.pi * (np.arange(n) + 0.5) / n:
+            c = (a + b) / 2 * np.array([math.cos(phi), math.sin(phi)])
+            up = normal(world, c)
+            along = np.array([math.cos(phi), math.sin(phi), 0.0])
+            along = along - (along @ up) * up  # the radial direction, on the slope
+            flatness = float(np.linalg.norm(along))
+            along /= flatness
+            plate.add_geom(
+                type=mujoco.mjtGeom.mjGEOM_BOX,
+                pos=np.array([*c, thick / 2 + float(rise(world, c))]) - 0.02 * up,
+                xyaxes=[*along, *np.cross(up, along)],
+                size=[1.08 * (b - a) / 2 / flatness, 1.08 * math.pi * b / n, 0.02],
+                density=0,
+                friction=friction,
+                priority=1,
+                contype=0,
+                conaffinity=2,
+                group=3,
+            )
+    radii = np.linspace(0.0, side, 49)
+    top = thick / 2 + rise(world, np.stack([radii, np.zeros_like(radii)], axis=1))
+    foot = min(float(p.get("well_m", 0.6 * side)), 0.6 * side) if not p.get("bowl_m") else 0.35 * side
+    under = np.where(radii <= foot, -thick / 2, top - 0.007)  # a shell 7 mm thick on a foot
+    top[-1] -= 0.002  # a rounded lip
+    seg = 96
+    angles = 2 * math.pi * np.arange(seg) / seg
+    verts = [(r * math.cos(t), r * math.sin(t), z) for z_of in (top, under) for r, z in zip(radii, z_of, strict=True) for t in angles]
+    faces = []
+    rings = len(radii)
+    for layer, flip in ((0, False), (1, True)):
+        for i in range(rings - 1):
+            for j in range(seg):
+                a, b = layer * rings * seg + i * seg + j, layer * rings * seg + i * seg + (j + 1) % seg
+                c, d = b + seg, a + seg
+                faces += [(a, c, b), (a, d, c)] if flip else [(a, b, c), (a, c, d)]
+    last = (rings - 1) * seg
+    for j in range(seg):  # the lip: the top's edge to the underside's
+        a, b = last + j, last + (j + 1) % seg
+        c, d = b + rings * seg, a + rings * seg
+        faces += [(a, d, c), (a, c, b)]
+    mesh = spec.add_mesh(name="dish", uservert=np.array(verts, dtype=np.float32).ravel(), userface=np.array(faces, dtype=np.int32).ravel())
+    mesh.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
+    white = [0.96, 0.96, 0.94, 1]
+    plate.add_geom(name="dish", type=mujoco.mjtGeom.mjGEOM_MESH, meshname="dish", rgba=white, mass=0, contype=0, conaffinity=0)
 
 
 class PandaWorld:

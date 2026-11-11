@@ -56,6 +56,7 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
     p = cfg["scenario"]["s1"]
     half = float(cfg["world"]["plate"]["half"])
     memory = learning.Memory(memory_path, lcfg)
+    round = bool(cfg["world"]["plate"].get("round"))
     program = memory.program(half, float(p["margin_m"]), float(p["line_spacing_m"]))
     controller: Any = r.s0.controller
     model = controller.cerebellum if controller.cerebellum is not None else memory.model(half)
@@ -88,7 +89,10 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
     if learned["driver"] == "teacher" and memory.form != "program" and learned.get("frame"):
         log = w.log()  # the movement S0 executed under the teacher, for the replay and the student
         record["path"] = learning.path_of(log["t"], log["ee"], log["force"], tuple(learned["frame"]))
-    after = memory.consolidate(record, program, model, learning.cells_of(cfg["world"]), limit=half - 0.03)
+    # How far the pad's centre goes: 3 cm from a square plate's edge; on a round dish, the scripted wiper's circle, so
+    # that no foam column passes the rim.
+    limit = half - (float(p["margin_m"]) if round else 0.03)
+    after = memory.consolidate(record, program, model, learning.cells_of(cfg["world"]), limit=limit, round=round)
     return (
         {"k": k, "seed": seed, "plate": where}
         | m
@@ -107,6 +111,7 @@ def episode(out: Path, seed: int, k: int, s1: Json, world: Json | None = None, e
             "context": memory.context,
             "context_true": record["context_true"],
             "world_now": {"bowl_m": cfg["world"]["plate"].get("bowl_m"), "board_m": cfg["world"]["plate"].get("board_m", 0.0)}
+            | {"round": round, "rim_m": cfg["world"]["plate"].get("rim_m")}
             | {"plate_bias_z_m": cfg["world"]["sensor"].get("plate_bias_z_m", 0.0), "foam": cfg["world"]["sponge"].get("columns")},
         }
         | bank

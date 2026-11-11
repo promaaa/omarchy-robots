@@ -111,6 +111,24 @@ class TestScrubbing(unittest.TestCase):
         self.assertGreaterEqual(w.coverage(), 0.9)
         self.assertLess(block.world.coverage(), 0.5)  # type: ignore[attr-defined]
 
+    def test_the_foam_wipes_a_round_plate_and_a_round_bowl(self) -> None:
+        # The scripted wiper (sim/wipe.py), whose lines follow the circle; a bowl 3.6 cm deep at its rim.
+        dish: Any = {"plate": {"half": 0.135, "round": True}, "dirt": {"margin_m": 0.035}, "sponge": {"columns": [3, 6]}}
+        dish["objects"] = {"plate": {"width": 0.27, "round": True}}
+        rim = {"world": config.merge(dish, {"plate": {"well_m": 0.09, "rim_m": 0.015}})}
+        plate = run("vla_wipe", tmpdir() / "round_plate", overrides=rim)
+        bowl = run("vla_wipe", tmpdir() / "round_bowl", overrides={"world": config.merge(dish, {"plate": {"bowl_m": 0.25}})})
+        w: Any = plate.world
+        self.assertEqual(len(w.cells), 80)  # the cells of the 10 x 10 grid within 10 cm of the centre
+        self.assertLessEqual(float(np.hypot(*w.cells.T).max()), 0.1)
+        self.assertEqual(float(panda.rise(rim["world"], np.array([0.09, 0.0]))), 0.0)  # flat within the well
+        self.assertAlmostEqual(float(panda.rise(rim["world"], np.array([0.135, 0.0]))), 0.015)  # the rim, at the edge
+        self.assertAlmostEqual(float(bowl.world.rise.max()), 2 * 0.07**2 / (2 * 0.25), places=4)  # type: ignore[attr-defined]  # 7 cm out in x and y
+        for r in (plate, bowl):
+            self.assertEqual(r.summaries[0]["outcome"], "SUCCEEDED")
+            self.assertGreaterEqual(r.world.coverage(), 0.95)  # type: ignore[attr-defined]
+            self.assertLess(r.summaries[0]["fidelity"]["force_peak"], 25.0)
+
     def test_the_same_seed_gives_the_same_trace(self) -> None:
         again = run("scrub_weak", tmpdir() / "scrub_weak_again", record_s0=True)
         self.assertEqual(trace(scenario("scrub_weak").dir), trace(again.dir))

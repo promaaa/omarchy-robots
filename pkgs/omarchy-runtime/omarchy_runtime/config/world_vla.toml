@@ -16,6 +16,9 @@ half = 0.12  # a 24 cm square
 thickness = 0.015
 mass_kg = 0.4
 friction = 1.0
+# round = true  # a round dish: `half` is its radius, and the dirt cells lie within `dirt.margin_m` of its edge
+# well_m = 0.09  # with `round`, a plate with a rim: flat within this radius,
+# rim_m = 0.015  # then rising to this height at its edge
 # bowl_m = 0.4  # a bowl instead of a flat plate: its top a paraboloid with this radius of curvature, lowest at the
 # centre (1.8 cm deep at 12 cm from it); the belief still gives the centre's height only
 

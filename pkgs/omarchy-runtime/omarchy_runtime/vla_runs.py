@@ -83,7 +83,8 @@ def measure(r: Any, run_dir: Path) -> Json:
     inner = cfg["world"]["plate"]["half"]
     centre = np.array(cfg["world"]["plate"]["center"])
     ee, force = log["ee"], log["force"]
-    over_plate = np.all(np.abs(ee[:, :2] - centre) <= inner, axis=1)
+    off = ee[:, :2] - centre  # the pad's centre from the dish's: within its circle if it is round, else its square
+    over_plate = np.hypot(off[:, 0], off[:, 1]) <= inner if plate.get("round") else np.all(np.abs(off) <= inner, axis=1)
     if "plate_z" in log and plate.get("heave"):  # a moving plate: its top at each tick
         top = log["plate_z"] + plate["thickness"] / 2
     window = over_plate & (ee[:, 2] <= top + WINDOW_M)

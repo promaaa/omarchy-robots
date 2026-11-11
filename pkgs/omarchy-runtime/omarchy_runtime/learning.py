@@ -54,7 +54,7 @@ from omarchy_runtime.contracts import (
     S1Policy,
     Timing,
 )
-from omarchy_runtime.sim.wipe import ScriptedWiper
+from omarchy_runtime.sim.wipe import ScriptedWiper, chord
 
 CONTACT_N = 1.0  # N: below this, the pad is not touching
 STEADY_N = 3.0  # N: contact this close to the target force is steady (CartesianImpedance.STEADY_N): the contact model learns there
@@ -361,11 +361,14 @@ Cerebellum = ContactModel | ModelBank | PhaseILC  # what S0's controller learns 
 class Program:
     """The habit: strokes along x at fixed lines across the surface (y, in its
     frame), each with the extent [x0, x1] it wipes, or nothing. A cell counts
-    as covered when it lies within `REACH` of a line in y and within `REACH`
-    of its extent in x: the pad's footprint, turned 45 degrees, reaches about
-    that far (sim/panda.py: a 4.4 x 9 cm sponge)."""
+    as covered when it lies within `REACH` of a line in y and within `ALONG`
+    of its extent in x. The pad (sim/panda.py: a 4.4 x 9 cm sponge, turned 45
+    degrees) sweeps a band about `REACH` wide on each side of a stroke. Past a
+    stroke's end it reaches further on one side of the line only, so a cell
+    counts there no further than its own half width (1 cm)."""
 
     REACH = 0.045
+    ALONG = 0.01
 
     def __init__(
         self, lines: list[float], extents: list[list[float] | None], version: int = 0, scrubs: list[list[float]] | None = None
@@ -381,21 +384,26 @@ class Program:
         n = max(2, math.ceil(2 * reach / spacing) + 1)
         return Program([float(v) for v in np.linspace(-reach, reach, n)], [None] * n)
 
-    def nearest(self, y: float) -> int:
-        return int(np.argmin([abs(y - v) for v in self.lines]))
-
     def covers(self, x: float, y: float) -> bool:
         for v, e in zip(self.lines, self.extents, strict=True):
-            if e is not None and abs(y - v) <= self.REACH and e[0] - self.REACH <= x <= e[1] + self.REACH:
+            if e is not None and abs(y - v) <= self.REACH and e[0] - self.ALONG <= x <= e[1] + self.ALONG:
                 return True
         return False
 
-    def include(self, x: float, y: float, limit: float) -> bool:
-        """Extend the nearest line to reach (x, y), its extent within [-limit, limit]: True if it changed."""
+    def _limit(self, k: int, limit: float, round: bool) -> float:
+        """How far along x the pad's centre goes on line k: `limit`, or on a `round` dish that circle's chord."""
+        return chord(limit, self.lines[k]) if round else limit
+
+    def include(self, x: float, y: float, limit: float, round: bool = False) -> bool:
+        """Extend a line to reach (x, y): the nearest one whose stroke can cover it (on a `round` dish the outer
+        lines are short), else the nearest. True if the program changed."""
         if self.covers(x, y):
             return False
-        k = self.nearest(y)
-        target = float(np.clip(x, -limit, limit))
+        near = sorted(range(len(self.lines)), key=lambda k: abs(y - self.lines[k]))
+        can = (k for k in near if abs(y - self.lines[k]) <= self.REACH and abs(x) <= self._limit(k, limit, round) + self.ALONG)
+        k = next(can, near[0])
+        reach = self._limit(k, limit, round)
+        target = float(np.clip(x, -reach, reach))
         e = self.extents[k]
         self.extents[k] = [target, target] if e is None else [min(e[0], target), max(e[1], target)]
         return True
@@ -413,13 +421,19 @@ class Program:
 
     SCRUBS = 6  # the most scrub segments the habit keeps
 
-    def insist(self, x: float, y: float, limit: float) -> bool:
-        """A cell the strokes cover stayed dirty: scrub once more over it, on its nearest line (merged with a scrub
-        already there). True if the program changed."""
-        if self.extents[self.nearest(y)] is None:
+    def insist(self, x: float, y: float, limit: float, round: bool = False) -> bool:
+        """A cell the strokes cover stayed dirty: scrub once more over it, on the nearest line that covers it (merged
+        with a scrub already there). True if the program changed."""
+        cover = [
+            k
+            for k, (v, e) in enumerate(zip(self.lines, self.extents, strict=True))
+            if e is not None and abs(y - v) <= self.REACH and e[0] - self.ALONG <= x <= e[1] + self.ALONG
+        ]
+        if not cover:
             return False
-        v = self.lines[self.nearest(y)]
-        a, b = float(np.clip(x - self.REACH, -limit, limit)), float(np.clip(x + self.REACH, -limit, limit))
+        k = min(cover, key=lambda k: abs(y - self.lines[k]))
+        v, reach = self.lines[k], self._limit(k, limit, round)
+        a, b = float(np.clip(x - self.REACH, -reach, reach)), float(np.clip(x + self.REACH, -reach, reach))
         for s in self.scrubs:
             if s[0] == v and a <= s[2] and b >= s[1]:
                 if a >= s[1] and b <= s[2]:
@@ -560,10 +574,15 @@ class Memory:
         words = f"VPI {vpi:.3f} vs cost {self.cost:.3f}: S1 cleans {mu1:.2f}, the habit {mu0:.2f} (+- {math.sqrt(1 / precision):.2f})"
         return ("teacher" if vpi > self.cost else "habit"), words
 
-    def consolidate(self, episode: Json, program: Program, model: Cerebellum, cells: np.ndarray, limit: float) -> Program:
+    def consolidate(
+        self, episode: Json, program: Program, model: Cerebellum, cells: np.ndarray, limit: float, round: bool = False
+    ) -> Program:
         """After a task ("sleep"): store the episode, and build the habit's next
         version from what it saw: the cells it observed clean after the
-        teacher's run, the cells it observed dirty after its own run."""
+        teacher's run, the cells it observed dirty after its own run. The pad's
+        centre stays within `limit` of the surface's centre: along x, or, on a
+        `round` dish, within that radius."""
+
         self.data["episodes"].append(episode)
         close = getattr(model, "close_task", None)
         if close is not None:  # the bank counts its modules' use, the ILC baseline updates its iteration
@@ -574,7 +593,7 @@ class Memory:
         if episode["driver"] == "teacher":
             for (x, y), clean in zip(cells, kr, strict=True):
                 if clean:
-                    changed |= program.include(float(x), float(y), limit)
+                    changed |= program.include(float(x), float(y), limit, round)
             if self.data["demoted"] > 0:
                 self.data["demoted"] -= 1
         elif episode["driver"] == "habit":
@@ -586,9 +605,9 @@ class Memory:
                 covered = program.covers(float(x), float(y))
                 counts[i] = 0 if clean or not covered else counts[i] + 1
                 if not clean and not covered:
-                    changed |= program.include(float(x), float(y), limit)
+                    changed |= program.include(float(x), float(y), limit, round)
                 elif counts[i] >= 2:
-                    changed |= program.insist(float(x), float(y), limit)
+                    changed |= program.insist(float(x), float(y), limit, round)
             taught = self.teacher_runs()
             mean = float(np.mean([e["kr_coverage"] for e in taught])) if taught else 0.0
             recent = [e for e in self.data["episodes"] if e["driver"] != "teacher"][-2:]
@@ -1044,4 +1063,6 @@ def cells_of(world: Json) -> np.ndarray:
     d, side = world["dirt"], float(world["plate"]["half"])
     n, inner = int(d["cells"]), side - float(d["margin_m"])
     centres = -inner + (np.arange(n) + 0.5) * (2 * inner / n)
-    return np.array([(x, y) for y in centres for x in centres])
+    grid = np.array([(x, y) for y in centres for x in centres])
+    out: np.ndarray = grid[np.hypot(grid[:, 0], grid[:, 1]) <= inner] if world["plate"].get("round") else grid
+    return out

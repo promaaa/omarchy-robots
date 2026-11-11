@@ -54,13 +54,14 @@ class Surface:
 
 @dataclass(frozen=True)
 class ObjectSpec:
-    """A movable object's size, in metres."""
+    """A movable object's size, in metres: `width` across, its diameter when it is `round`."""
 
     width: float
     height: float
+    round: bool = False
 
     def to_json(self) -> Json:
-        return {"width": self.width, "height": self.height}
+        return {"width": self.width, "height": self.height} | ({"round": True} if self.round else {})
 
 
 @dataclass(frozen=True)

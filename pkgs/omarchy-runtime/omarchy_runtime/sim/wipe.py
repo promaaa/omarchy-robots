@@ -45,6 +45,13 @@ LIFT = 0.08  # m above it at the end
 REACHED = 0.02  # m from the last waypoint: up again
 
 
+def chord(reach: float, y: float) -> float:
+    """On a round surface, how far along x the pad's centre goes on the line at y from the centre: the chord of the
+    circle of radius `reach`, and at least 0.3 of that radius, so that the outermost lines still wipe the cells next
+    to the rim (the pad's centre then passes the circle by a few millimetres)."""
+    return max(math.sqrt(max(reach**2 - y**2, 0.0)), 0.3 * reach)
+
+
 class ScriptedWiper:
     def __init__(self, implementation: str, params: Json) -> None:
         self.source = implementation
@@ -80,16 +87,20 @@ class ScriptedWiper:
         top = e["z"] + g["height"] / 2
         reach = g["width"] / 2 - self.margin  # the pad's centre stays this far from the centre
         lines = max(2, math.ceil(2 * reach / self.spacing) + 1)
-        ys = np.linspace(e["y"] - reach, e["y"] + reach, lines)
-        x0, x1 = e["x"] - reach, e["x"] + reach
+        # Each line with how far the pad's centre goes along x: the same on a square surface, the chord on a round one
+        # (`round` in its geometry).
+        rows = [
+            (float(y), chord(reach, float(y) - e["y"]) if g.get("round") else reach)
+            for y in np.linspace(e["y"] - reach, e["y"] + reach, lines)
+        ]
         here = np.array(belief["robot"]["ee"], dtype=np.float64)
         low = top - self.press
         points: list[tuple[np.ndarray, ContactMode, float]] = [
-            (np.array([x0, ys[0], top + ABOVE]), ContactMode.FREE, self.speeds["transfer"])
+            (np.array([e["x"] - rows[0][1], rows[0][0], top + ABOVE]), ContactMode.FREE, self.speeds["transfer"])
         ]
-        points.append((np.array([x0, ys[0], low]), ContactMode.MAKE, self.speeds["descend"]))
-        for n, y in enumerate(ys):
-            a, b = (x0, x1) if n % 2 == 0 else (x1, x0)
+        points.append((np.array([e["x"] - rows[0][1], rows[0][0], low]), ContactMode.MAKE, self.speeds["descend"]))
+        for n, (y, h) in enumerate(rows):
+            a, b = (e["x"] - h, e["x"] + h) if n % 2 == 0 else (e["x"] + h, e["x"] - h)
             if n:
                 points.append((np.array([a, y, low]), ContactMode.MAINTAIN, self.speeds["wipe"]))
             points.append((np.array([b, y, low]), ContactMode.MAINTAIN, self.speeds["wipe"]))

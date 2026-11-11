@@ -113,7 +113,8 @@ def scene(cfg: Json) -> Scene:
     }
     surfaces = {k: Surface(*(get(v, a, float, f"surfaces.{k}") for a in ("x0", "x1", "z"))) for k, v in w["surfaces"].items()}
     objects = {
-        k: ObjectSpec(get(v, "width", float, f"objects.{k}"), get(v, "height", float, f"objects.{k}")) for k, v in w["objects"].items()
+        k: ObjectSpec(get(v, "width", float, f"objects.{k}"), get(v, "height", float, f"objects.{k}"), bool(v.get("round", False)))
+        for k, v in w["objects"].items()
     }
     return Scene(regions, surfaces, objects)
 

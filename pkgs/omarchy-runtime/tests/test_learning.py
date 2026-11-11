@@ -198,6 +198,21 @@ class SupervisorTest(unittest.TestCase):
         self.assertIsNone(soft.check(0, (0.6, 0.0, 0.03), 2.0, m))
 
 
+class RoundDishTest(unittest.TestCase):
+    def test_on_a_round_dish_the_strokes_stay_within_its_circle(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            cells = np.array([[x, y] for y in (-0.09, -0.03, 0.03, 0.09) for x in (-0.09, -0.03, 0.03, 0.09)])
+            run = {"driver": "teacher", "goal": GOAL, "top": 0.035, "kr_clean": [1] * len(cells), "kr_coverage": 1.0}
+            program = Memory(Path(d) / "m.json", {}).consolidate(
+                run, Program.empty(0.135, 0.05, 0.035), ContactModel(0.135), cells, 0.085, round=True
+            )
+            ends = [(x, y) for y, e in zip(program.lines, program.extents, strict=True) if e is not None for x in e]
+            self.assertTrue(ends)
+            self.assertLessEqual(max(float(np.hypot(x, y)) for x, y in ends), 0.09)  # the scripted wiper's circle, and 5 mm
+            square = Memory(Path(d) / "s.json", {}).consolidate(run, Program.empty(0.135, 0.05, 0.035), ContactModel(0.135), cells, 0.085)
+            self.assertGreater(max(float(np.hypot(x, y)) for y, e in zip(square.lines, square.extents, strict=True) if e for x in e), 0.085)
+
+
 class VpiRuleTest(unittest.TestCase):
     def test_a_dearer_s1_hands_over_sooner(self) -> None:
         with tempfile.TemporaryDirectory() as d:
