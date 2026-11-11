@@ -30,6 +30,8 @@ S0 can now learn a task while S1 does it, then do it alone. A contact model in i
 - Put a stubborn stain on the simulated plate, and let the habit scrub where the plate stays dirty.
 - Wipe with a foam sponge that follows a slope or a curve (`sponge.columns`).
 - Put a curved bowl on the simulated table (`plate.bowl_m`), and record how well the contact model knows its shape.
+- Put a round plate with a rim or a round bowl on the simulated table (`plate.round`, `well_m`, `rim_m`), drawn as one smooth dish, and wipe inside its circle.
+- Record the fine-tuning demonstrations on a chosen world, such as the round plate or the round bowl.
 
 ### Fixes
 
@@ -38,6 +40,8 @@ S0 can now learn a task while S1 does it, then do it alone. A contact model in i
 - Retry the policy server's handshake when it times out.
 - Read S1's claim from the summary's claim field in the pick experiment.
 - Judge where contact comes once the contact is steady, so a soft sponge at first touch is not read as a surprise.
+- Keep a round dish's shape in the belief, so the wipers stay inside its rim.
+- Let the habit scrub right over a cell that stays dirty after a scrub on its line.
 
 ## v0.1.0
 

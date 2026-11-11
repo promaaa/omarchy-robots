@@ -264,8 +264,12 @@ pi0.5 the habit does the task alone: no inference instead of 62 per task, a
 peak force of 13.1 N instead of 21.8 N. On a curved bowl wiped with a foam
 sponge (`plate.bowl_m`, `sponge.columns`; runtime e94855c, 5 seeds), pi0.5
 alone cleans 89.6 % of the bowl and the learning S0 98.2 %, with no
-inference. The manual's chapter Runtime has the parts, the commands and what
-it does not show.
+inference. On a round plate with a rim and a round bowl 3.6 cm deep
+(`plate.round`; runtime d26c303, pi0.5 fine-tuned again on both dishes, 5
+seeds), the learning S0 cleans 99.9 % of the plate and 99.1 % of the bowl
+with no inference, against 91.9 % and 87.8 % when pi0.5 drives every task.
+The manual's chapter Runtime has the parts, the commands and what it does
+not show.
 
 ### S2 placement experiment
 
