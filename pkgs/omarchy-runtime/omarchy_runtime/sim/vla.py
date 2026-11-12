@@ -15,6 +15,11 @@ path runs over the plate and less than `band_m` above its top, as the belief
 has them (the simulated detector, as the scripted wiper's), BREAK elsewhere; the rule is the scripted part, the path is the VLA's. As
 DROID's own client, it executes `open_loop` rows of each chunk, then asks
 again. It claims DONE when `duration_s` is spent: it has no other way to tell.
+With `wait_s` (and `wait_spread`, the sigma of a lognormal), the arm waits for
+each answer, as DROID's own client blocks on it: the chunk's rows start that
+long after the observation, S0 holds the chunk's first row meanwhile, and the
+time spent waiting does not count in `duration_s` (a policy server shared by
+several robots, or far away).
 
 Development tools only: it needs MuJoCo (the cameras) and openpi-client.
 """
@@ -78,7 +83,9 @@ class Cameras:
 class Pi05Wiper:
     """clean(surface) by a VLA: see the module's docstring."""
 
-    def __init__(self, implementation: str, params: Json, world: Any, record: Path | None = None) -> None:
+    def __init__(
+        self, implementation: str, params: Json, world: Any, record: Path | None = None, rng: np.random.Generator | None = None
+    ) -> None:
         self.source = implementation
         try:
             host, port = str(params["server"]).rsplit(":", 1)
@@ -91,6 +98,7 @@ class Pi05Wiper:
             self.stiffness = tuple(float(v) for v in params["stiffness"])
             self.band = float(params["band_m"])
             self.flag = str(params.get("contact_from", "rule")) == "flag"  # a fine-tuned VLA says where to press
+            self.wait = (float(params.get("wait_s", 0.0)), float(params.get("wait_spread", 0.0)))
         except (KeyError, TypeError, ValueError) as e:
             raise ConfigError(f"scenario s1: the VLA wiper needs {e}") from e
         from openpi_client import websocket_client_policy
@@ -114,6 +122,8 @@ class Pi05Wiper:
         self._next: Ns = 0
         self._seq = 0
         self._pressing = False
+        self.rng = rng or np.random.default_rng(0)
+        self._waited: Ns = 0  # the time spent waiting for answers (wait_s)
 
     def start(self, goal: Goal, belief: Json, body: BodySpec, conditioning: Mapping[str, Any]) -> None:
         (surface,) = goal.args
@@ -143,7 +153,7 @@ class Pi05Wiper:
             return None
         if self._t0 is None:
             self._t0 = now
-        if (now - self._t0) / 1e9 >= self.duration:
+        if (now - self._t0 - self._waited) / 1e9 >= self.duration:
             self._report = Report(Claim.DONE, f"{self.duration:.0f} s of wiping spent ({self._seq} chunks from the VLA)")
             return None
         if now < self._next:
@@ -165,7 +175,10 @@ class Pi05Wiper:
         actions = np.asarray(answer["actions"], dtype=np.float64)
         rows = [self._pose(a[: self._n]) for a in actions]
         horizon = len(rows)
-        t0 = now + DT  # DROID: row k is the target one period after row k - 1, the first one period from now
+        median, spread = self.wait
+        wait = ns(median * float(np.exp(spread * self.rng.standard_normal()))) if median > 0 else 0
+        self._waited += wait
+        t0 = now + wait + DT  # DROID: row k is the target one period after row k - 1, the first one period from now
         timing = Timing(t0, DT, t0 + (horizon - 1) * DT, self.source, now)
         motion = MotionIntent.make(timing, self._space, CARTESIAN, rows, self._frame)
         contact = []
@@ -184,7 +197,7 @@ class Pi05Wiper:
             )
             self._pressing = modes[min(self.open_loop, horizon) - 1] is not ContactMode.BREAK
         self._seq += 1
-        self._next = now + self.open_loop * DT
+        self._next = now + wait + self.open_loop * DT
         self.frames["exterior"].append(exterior)
         self.frames["wrist"].append(wrist)
         self.log.append(
@@ -192,6 +205,7 @@ class Pi05Wiper:
                 "seq": self._seq,
                 "t": now,
                 "wall_s": wall,
+                "wait_s": wait / 1e9,
                 "server_timing": answer.get("server_timing"),
                 "policy_timing": answer.get("policy_timing"),
                 "joints": joints.tolist(),
